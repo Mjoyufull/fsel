@@ -6,10 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-09-07
+
+### Added
+
+* Multiple launch backends: `--systemd-run`, `--uwsm`, and `--no-exec` options
+* Cached entries system with 36% performance improvement
+* Extensive UI customization options (15+ configuration settings)
+* Nix flake for universal installation across distributions
+* Enhanced configuration system with validation
+
 ### Changed
 
 * Forked from original sourcehut repository (git.sr.ht/~nkeor/gyr) to GitHub
 * Updated repository URLs and documentation for GitHub hosting
+* Improved lock file management with automatic cleanup
+* Enhanced error handling and graceful fallbacks
 * Unpinned serde and serde_derive
 
 ## [v0.1.4] - 2023-08-20

@@ -54,9 +54,6 @@
     ```
 * Copy `target/release/gyr` to somewhere in your `$PATH`
 
-#### Option 3: Pre-built binaries
-
-Pre-built binaries for Linux (x86_64 and aarch64) are available in the [releases](https://github.com/Mjoyufull/gyr/releases).
 
 ## Usage
 
@@ -98,7 +95,10 @@ for_window [title="^launcher$"] floating enable, resize set width 500 height 430
 ## TODO
 
 * [X] Most used entries first
-* [ ] Cached entries
+* [X] Cached entries
+* [X] Multiple launch backends (systemd-run, uwsm, sway)
+* [X] UI customization options
+* [X] Nix flake for universal installation
 
 ## Contributing
 
