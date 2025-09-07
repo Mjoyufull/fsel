@@ -30,9 +30,9 @@
     $ nix run github:Mjoyufull/gyr
     ```
 
-* Install to your profile:
+* Add to your profile:
     ```sh
-    $ nix profile install github:Mjoyufull/gyr
+    $ nix profile add github:Mjoyufull/gyr
     ```
 
 * Add to your `flake.nix` inputs:
