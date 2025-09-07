@@ -1,0 +1,33 @@
+# Default values
+highlight_color = "LightBlue"
+cursor = "█"
+terminal_launcher = "alacritty -e"
+hard_stop = false
+
+# UI Customization
+rounded_borders = true
+
+# Border Colors (individual colors for each panel)
+main_border_color = "White"      # Border color for the main info panel (top)
+apps_border_color = "White"      # Border color for the apps list panel (middle)
+input_border_color = "White"     # Border color for the input panel (bottom)
+
+# Text Colors (non-highlighted text in each panel)
+main_text_color = "White"        # Text color for the main info panel
+apps_text_color = "White"        # Text color for the apps list
+input_text_color = "White"       # Text color for the input field
+
+# Fancy Mode - Show selected app info in panel titles
+fancy_mode = false               # When true: "Apps" becomes selected app name, "Gyr" becomes app description
+
+# Header title color (for panel border titles)
+header_title_color = "LightBlue" # Color for all panel header titles
+
+# Layout Configuration (percentages and sizes)
+title_panel_height_percent = 30  # Height of top panel as percentage (10-70%)
+input_panel_height = 3           # Height of input panel in lines (1-10)
+# Note: Apps panel gets the remaining space automatically
+
+# Cache Configuration (for faster startup)
+enable_cache = true              # Enable application cache for faster startup
+cache_ttl_seconds = 86400        # Cache TTL in seconds (86400 = 24 hours)
