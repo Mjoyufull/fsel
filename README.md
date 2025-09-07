@@ -3,7 +3,6 @@
   ![Logo](./assets/gyr.png)
 
   [![License](https://img.shields.io/crates/l/gyr?style=flat-square)](https://github.com/Mjoyufull/gyr/blob/main/LICENSE)
-  [![Latest version](https://img.shields.io/crates/v/gyr?style=flat-square)](https://crates.io/crates/gyr)
   [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
   ![written in Rust](https://img.shields.io/badge/language-rust-red.svg?style=flat-square)
 
