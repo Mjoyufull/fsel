@@ -47,7 +47,7 @@
 
             src = ./.;
 
-            cargoHash = pkgs.lib.fakeHash;
+            cargoHash = "sha256-m/KHv/S4b+zDqV1xwfJ+Oaf0Ftfix05w85eRT+7CO1U=";
 
             inherit buildInputs nativeBuildInputs;
 
