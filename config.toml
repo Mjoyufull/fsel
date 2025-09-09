@@ -28,6 +28,3 @@ title_panel_height_percent = 30  # Height of top panel as percentage (10-70%)
 input_panel_height = 3           # Height of input panel in lines (1-10)
 # Note: Apps panel gets the remaining space automatically
 
-# Cache Configuration (for faster startup)
-enable_cache = true              # Enable application cache for faster startup
-cache_ttl_seconds = 86400        # Cache TTL in seconds (86400 = 24 hours)

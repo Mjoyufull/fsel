@@ -4,29 +4,11 @@ use std::fs;
 use std::path;
 use std::sync::mpsc;
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use eyre::eyre;
 use ratatui::widgets::ListItem;
-use safe_regex::{regex, Matcher1};
 use walkdir::WalkDir;
 
-/// Cache entry for a single application
-#[derive(serde::Serialize, serde::Deserialize)]
-struct CachedApp {
-    app: App,
-    file_path: String,
-    file_mtime: u64,
-    cached_at: u64,
-}
-
-/// Cache entry for a directory scan
-#[derive(serde::Serialize, serde::Deserialize)]
-struct DirectoryCache {
-    directory: String,
-    last_scan: u64,
-    apps: Vec<CachedApp>,
-}
 
 pub struct AppHistory {
     pub db: sled::Db,
@@ -47,172 +29,67 @@ impl AppHistory {
         app
     }
 
-    /// Get current unix timestamp
-    fn now() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    }
-
-    /// Get file modification time
-    fn get_mtime(path: &path::Path) -> u64 {
-        fs::metadata(path)
-            .and_then(|meta| meta.modified())
-            .map(|time| time.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs())
-            .unwrap_or(0)
-    }
-
-    /// Cache key for directory
-    fn cache_key(dir: &path::Path) -> String {
-        format!("cache:dir:{}", dir.to_string_lossy())
-    }
-
-    /// Get cached apps for a directory if valid
-    pub fn get_cached_apps(&self, dir: &path::Path, ttl_seconds: u64) -> Option<Vec<App>> {
-        let key = Self::cache_key(dir);
-        if let Ok(Some(data)) = self.db.get(key.as_bytes()) {
-            if let Ok(cache) = bincode::deserialize::<DirectoryCache>(&data) {
-                let now = Self::now();
-                // Check if cache is still valid
-                if now - cache.last_scan < ttl_seconds {
-                    // Check if any files have been modified
-                    let mut all_valid = true;
-                    for cached_app in &cache.apps {
-                        let file_path = path::Path::new(&cached_app.file_path);
-                        if !file_path.exists() || Self::get_mtime(file_path) != cached_app.file_mtime {
-                            all_valid = false;
-                            break;
-                        }
-                    }
-                    if all_valid {
-                        return Some(cache.apps.into_iter().map(|ca| self.get(ca.app)).collect());
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    /// Cache apps for a directory
-    pub fn cache_apps(&self, dir: &path::Path, apps: &[App], file_paths: &[path::PathBuf]) {
-        let now = Self::now();
-        let cached_apps: Vec<CachedApp> = apps
-            .iter()
-            .zip(file_paths.iter())
-            .map(|(app, file_path)| CachedApp {
-                app: app.clone(),
-                file_path: file_path.to_string_lossy().to_string(),
-                file_mtime: Self::get_mtime(file_path),
-                cached_at: now,
-            })
-            .collect();
-
-        let directory_cache = DirectoryCache {
-            directory: dir.to_string_lossy().to_string(),
-            last_scan: now,
-            apps: cached_apps,
-        };
-
-        if let Ok(data) = bincode::serialize(&directory_cache) {
-            let key = Self::cache_key(dir);
-            let _ = self.db.insert(key.as_bytes(), data);
-        }
-    }
-
-    /// Clear all cache entries
-    pub fn clear_cache(&self) -> eyre::Result<u32> {
-        let mut cleared = 0;
-        for item in self.db.scan_prefix(b"cache:") {
-            if let Ok((key, _)) = item {
-                self.db.remove(key)?;
-                cleared += 1;
-            }
-        }
-        Ok(cleared)
-    }
 }
 
 /// Find XDG applications in `dirs` (recursive).
 ///
 /// Spawns a new thread and sends apps via a mpsc [Receiver]
 ///
-/// Updates history using the database and optionally uses cache
+/// Updates history using the database
 ///
 /// [Receiver]: std::sync::mpsc::Receiver
-pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db, enable_cache: bool, cache_ttl: u64) -> mpsc::Receiver<App> {
+pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db) -> mpsc::Receiver<App> {
     let (sender, receiver) = mpsc::channel();
 
     let dirs: Vec<path::PathBuf> = dirs.into_iter().map(Into::into).collect();
     let db = AppHistory { db: db.clone() };
 
     let _worker = thread::spawn(move || {
-        for dir in dirs {
-            // Try to get cached apps first
-            if enable_cache {
-                if let Some(cached_apps) = db.get_cached_apps(&dir, cache_ttl) {
-                    // Send cached apps and continue to next directory
-                    for app in cached_apps {
-                        if sender.send(app).is_err() {
-                            return; // Receiver dropped
-                        }
-                    }
+        // Collect all .desktop files first
+        let mut desktop_files = Vec::new();
+        for dir in &dirs {
+            for entry in WalkDir::new(dir)
+                .min_depth(1)
+                .max_depth(3) // Limit depth to avoid deep recursion
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    !entry.file_type().is_dir() && 
+                    entry.path().extension().and_then(|s| s.to_str()) == Some("desktop")
+                })
+            {
+                desktop_files.push(entry.path().to_path_buf());
+            }
+        }
+
+        // Process files in batches for better performance
+        for file_path in desktop_files {
+            if let Ok(contents) = fs::read_to_string(&file_path) {
+                // Skip files without [Desktop Entry] section early
+                if !contents.contains("[Desktop Entry]") {
                     continue;
                 }
-            }
-
-            // Cache miss or caching disabled - scan directory
-            let mut files: Vec<path::PathBuf> = vec![];
-            let mut apps_for_cache: Vec<App> = vec![];
-
-            for entry in WalkDir::new(&dir)
-                .min_depth(1)
-                .into_iter()
-                .filter(|entry| {
-                    if let Ok(path) = entry {
-                        if !path.file_type().is_dir() {
-                            return true;
-                        }
-                    }
-                    false
-                })
-                .map(Result::unwrap)
-            {
-                files.push(entry.path().to_owned());
-            }
-
-            let mut processed_files = vec![];
-            for file in &files {
-                if let Ok(contents) = fs::read_to_string(file) {
-                    if let Ok(app) = App::parse(&contents, None) {
-                        let app_with_history = db.get(app.clone());
-                        
-                        if let Some(actions) = &app.actions {
-                            for action in actions {
-                                let ac = Action::default().name(action).from(app.name.clone());
-                                if let Ok(a) = App::parse(&contents, Some(&ac)) {
-                                    let action_app = db.get(a);
-                                    if sender.send(action_app).is_err() {
-                                        return; // Receiver dropped
-                                    }
+                
+                if let Ok(app) = App::parse(&contents, None) {
+                    let app_with_history = db.get(app.clone());
+                    
+                    // Handle actions
+                    if let Some(actions) = &app.actions {
+                        for action in actions {
+                            let ac = Action::default().name(action).from(app.name.clone());
+                            if let Ok(a) = App::parse(&contents, Some(&ac)) {
+                                let action_app = db.get(a);
+                                if sender.send(action_app).is_err() {
+                                    return; // Receiver dropped
                                 }
                             }
                         }
+                    }
 
-                        if sender.send(app_with_history.clone()).is_err() {
-                            return; // Receiver dropped
-                        }
-                        
-                        // Store for caching (without history to avoid duplication)
-                        apps_for_cache.push(app);
-                        processed_files.push(file.clone());
+                    if sender.send(app_with_history).is_err() {
+                        return; // Receiver dropped
                     }
                 }
-            }
-
-            // Cache the results if caching is enabled
-            if enable_cache && !apps_for_cache.is_empty() {
-                db.cache_apps(&dir, &apps_for_cache, &processed_files);
             }
         }
         drop(sender);
@@ -328,59 +205,57 @@ impl App {
 
         let mut search = false;
 
+        // Fast parsing with early exits and optimizations
         for line in contents.lines() {
+            if line.is_empty() { continue; }
+            
             if line.starts_with("[Desktop") && search {
-                search = false;
+                break; // Early exit when we hit another section
             }
 
             if line == pattern {
                 search = true;
+                continue;
             }
 
             if search {
-                if line.starts_with("Name=") && name.is_none() {
-                    let line = line.trim_start_matches("Name=");
-                    if let Some(a) = &action {
-                        name = Some(format!("{} ({})", &a.from, line));
-                    } else {
-                        name = Some(line.to_string());
+                // Use match for better performance than multiple if-else
+                if let Some((key, value)) = line.split_once('=') {
+                    match key {
+                        "Name" if name.is_none() => {
+                            name = Some(if let Some(a) = &action {
+                                format!("{} ({})", &a.from, value)
+                            } else {
+                                value.to_string()
+                            });
+                        }
+                        "Comment" if description.is_none() => {
+                            description = Some(value.to_string());
+                        }
+                        "Terminal" => {
+                            terminal_exec = value == "true";
+                        }
+                        "Exec" if exec.is_none() => {
+                            // Fast regex-free approach for XDG parameter removal
+                            let mut trimmed = value;
+                            if let Some(pos) = value.find(" %") {
+                                trimmed = &value[..pos];
+                            }
+                            exec = Some(trimmed.to_string());
+                        }
+                        "NoDisplay" => {
+                            if value.eq_ignore_ascii_case("true") {
+                                return Err(eyre!("App is hidden"));
+                            }
+                        }
+                        "Path" if path.is_none() => {
+                            path = Some(value.to_string());
+                        }
+                        "Actions" if actions.is_none() && action.is_none() => {
+                            actions = Some(value.split(';').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect());
+                        }
+                        _ => {} // Ignore other keys
                     }
-                } else if line.starts_with("Comment=") && description.is_none() {
-                    let line = line.trim_start_matches("Comment=");
-                    description = Some(line.to_string());
-                } else if line.starts_with("Terminal=") {
-                    if line.trim_start_matches("Terminal=") == "true" {
-                        terminal_exec = true;
-                    }
-                } else if line.starts_with("Exec=") && exec.is_none() {
-                    let line = line.trim_start_matches("Exec=");
-
-                    // Trim %u/%U/%someLetter (which is used as arguments when launching XDG apps,
-                    // not used by Gyr)
-                    #[allow(clippy::assign_op_pattern)]
-                    let matcher: Matcher1<_> = regex!(br".*( ?%[cDdFfikmNnUuv]).*");
-                    let mut trimmed = line.to_string();
-
-                    if let Some(range) = matcher.match_ranges(line.as_bytes()) {
-                        trimmed.replace_range(range.0.start..range.0.end, "");
-                    }
-
-                    exec = Some(trimmed.to_string());
-                } else if line.starts_with("NoDisplay=") {
-                    let line = line.trim_start_matches("NoDisplay=");
-                    if line.to_lowercase() == "true" {
-                        return Err(eyre!("App is hidden"));
-                    }
-                } else if line.starts_with("Path=") && path.is_none() {
-                    let line = line.trim_start_matches("Path=");
-                    path = Some(line.to_string());
-                } else if line.starts_with("Actions=") && actions.is_none() && action.is_none() {
-                    let line = line.trim_start_matches("Actions=");
-                    let vector = line
-                        .split(';')
-                        .map(ToString::to_string)
-                        .collect::<Vec<String>>();
-                    actions = Some(vector);
                 }
             }
         }

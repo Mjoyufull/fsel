@@ -30,31 +30,44 @@ use std::sync::mpsc;
 use directories::ProjectDirs;
 use eyre::eyre;
 use eyre::WrapErr;
-use ratatui::backend::TermionBackend;
+use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
-use termion::event::Key;
-use termion::input::MouseTerminal;
-use termion::raw::IntoRawMode;
+use crossterm::{
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
+};
+use scopeguard::defer;
 
 fn main() {
     if let Err(error) = real_main() {
-        // Ensure terminal is in a good state for error display
-        use std::io::Write;
-        let _ = write!(io::stdout(), "\x1b[?25h"); // Show cursor
-        let _ = write!(io::stdout(), "\x1b[0m");   // Reset colors
-        let _ = io::stdout().flush();
-        
+        shutdown_terminal();
         eprintln!("{error:?}");
         process::exit(1);
     }
 }
 
+fn setup_terminal() -> eyre::Result<()> {
+    enable_raw_mode().wrap_err("Failed to enable raw mode")?;
+    io::stdout().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
+    Ok(())
+}
+
+fn shutdown_terminal() {
+    let _ = io::stdout().execute(LeaveAlternateScreen);
+    let _ = disable_raw_mode();
+}
+
 fn real_main() -> eyre::Result<()> {
     let cli = cli::parse()?;
+    
+    setup_terminal()?;
+    defer! {
+        shutdown_terminal();
+    }
     let db: sled::Db;
     let lock_path: path::PathBuf;
 
@@ -111,6 +124,7 @@ fn real_main() -> eyre::Result<()> {
             unsafe {
                 pid = libc::getpid();
             }
+            use std::io::Write;
             lock_file.write_all(pid.to_string().as_bytes())?;
         }
 
@@ -140,13 +154,6 @@ fn real_main() -> eyre::Result<()> {
             return Ok(());
         }
 
-        if cli.clear_cache {
-            let app_history = xdg::AppHistory { db: db.clone() };
-            let cleared = app_history.clear_cache().wrap_err("Error clearing cache")?;
-            println!("Cache cleared successfully! Removed {} cached entries.", cleared);
-            // Lock file cleanup is handled by LockGuard when it goes out of scope
-            return Ok(());
-        }
     } else {
         return Err(eyre!(
             "can't find data dir for {}, is your system broken?",
@@ -180,23 +187,14 @@ fn real_main() -> eyre::Result<()> {
     }
 
 
-    // Read applications (with cache support)
-    let apps = xdg::read(dirs, &db, cli.enable_cache, cli.cache_ttl_seconds);
+    // Read applications
+    let apps = xdg::read(dirs, &db);
 
-    // Initialize the terminal
-    let raw_handle = io::stdout()
-        .into_raw_mode()
-        .wrap_err("Failed to initialize raw stdout handle")?;
-    let stdout = io::stdout()
-        .into_raw_mode()
-        .wrap_err("Failed to init stdout")?;
-    let stdout = MouseTerminal::from(stdout);
-    let backend = TermionBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).wrap_err("Failed to start termion::Terminal")?;
-    // Clear terminal. We could use termion::screen::AlternateScreen, but then we lose panic!() and
-    // println!() output
-    terminal.clear().wrap_err("Failed to clear terminal")?;
+    // Initialize the terminal with crossterm backend
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
+    terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Input handler
     let input = Input::new();
@@ -381,41 +379,42 @@ fn real_main() -> eyre::Result<()> {
 
         // Handle user input
         if let Event::Input(key) = input.next()? {
-            match key {
+            use crossterm::event::{KeyCode, KeyModifiers};
+            match (key.code, key.modifiers) {
                 // Exit on escape
-                Key::Esc | Key::Ctrl('q' | 'c') => {
+                (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::CONTROL) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                     ui.selected = None;
                     break;
                 }
                 // Run app on enter
-                Key::Char('\n') | Key::Ctrl('y') => {
+                (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
                     break;
                 }
                 // Add character to query
-                Key::Char(c) => {
+                (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                     ui.query.push(c);
                     ui.filter();
                 }
                 // Remove character from query
-                Key::Backspace => {
+                (KeyCode::Backspace, _) => {
                     ui.query.pop();
                     ui.filter();
                 }
                 // Go to top of list
-                Key::Left => {
+                (KeyCode::Left, _) => {
                     if !ui.shown.is_empty() {
                         ui.selected = Some(0);
                     }
                 }
                 // Go to end of list
-                Key::Right => {
+                (KeyCode::Right, _) => {
                     if !ui.shown.is_empty() {
                         ui.selected = Some(ui.shown.len() - 1);
                     }
                 }
                 // Go down one item.
                 // If we're at the bottom, back to the top.
-                Key::Down | Key::Ctrl('n') => {
+                (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
                     if let Some(selected) = ui.selected {
                         ui.selected = if selected < ui.shown.len() - 1 {
                             Some(selected + 1)
@@ -428,7 +427,7 @@ fn real_main() -> eyre::Result<()> {
                 }
                 // Go up one item.
                 // If we're at the top, go to the end.
-                Key::Up | Key::Ctrl('p') => {
+                (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
                     if let Some(selected) = ui.selected {
                         ui.selected = if selected > 0 {
                             Some(selected - 1)
@@ -446,20 +445,8 @@ fn real_main() -> eyre::Result<()> {
         }
     }
 
-    // Properly reset terminal state
-    terminal.clear().wrap_err("Failed to clear terminal")?;
+    // Clean terminal exit (defer handles the rest)
     terminal.show_cursor().wrap_err("Failed to show cursor")?;
-    
-    // Exit raw mode
-    raw_handle
-        .suspend_raw_mode()
-        .wrap_err("Failed to suspend raw stdout")?;
-        
-    // Additional cleanup - ensure cursor is visible and colors are reset
-    use std::io::Write;
-    let _ = write!(io::stdout(), "\x1b[?25h"); // Show cursor (extra insurance)
-    let _ = write!(io::stdout(), "\x1b[0m");   // Reset all text formatting
-    let _ = io::stdout().flush();
 
     if let Some(selected) = ui.selected {
         let app_to_run = &ui.shown[selected];

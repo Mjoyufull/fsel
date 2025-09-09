@@ -10,7 +10,6 @@ fn usage() -> ! {
   -c, --config <config>  Specify a config file.
   -r, --replace          Replace existing gyr instances
   --clear_history        Clear launch history.
-  --clear-cache          Clear application cache.
   -v, --verbose          Increase verbosity level (multiple).
       --no-exec          Print selected application to stdout instead of launching.
       --systemd-run      Launch applications using systemd-run --user --scope.
@@ -48,8 +47,6 @@ pub struct Opts {
     pub systemd_run: bool,
     /// Launch applications using uwsm app
     pub uwsm: bool,
-    /// Clear application cache
-    pub clear_cache: bool,
     /// Use rounded borders
     pub rounded_borders: bool,
     /// Border colors for different panels
@@ -67,9 +64,6 @@ pub struct Opts {
     /// Layout configuration
     pub title_panel_height_percent: u16,
     pub input_panel_height: u16,
-    /// Cache configuration
-    pub enable_cache: bool,
-    pub cache_ttl_seconds: u64,
 }
 
 impl Default for Opts {
@@ -86,7 +80,6 @@ impl Default for Opts {
             no_exec: false,
             systemd_run: false,
             uwsm: false,
-            clear_cache: false,
             rounded_borders: true,
             main_border_color: ratatui::style::Color::White,
             apps_border_color: ratatui::style::Color::White,
@@ -98,8 +91,6 @@ impl Default for Opts {
             header_title_color: ratatui::style::Color::White,
             title_panel_height_percent: 30,
             input_panel_height: 3,
-            enable_cache: true,
-            cache_ttl_seconds: 86400, // 24 hours
         }
     }
 }
@@ -128,9 +119,6 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
             Long("clear_history") => {
                 default.clear_history = true;
-            }
-            Long("clear-cache") => {
-                default.clear_cache = true;
             }
             Long("no-exec") => {
                 default.no_exec = true;
@@ -292,17 +280,6 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
     }
 
-    if let Some(enable) = file_conf.enable_cache {
-        default.enable_cache = enable;
-    }
-
-    if let Some(ttl) = file_conf.cache_ttl_seconds {
-        if ttl > 0 && ttl <= 604800 { // Max 1 week
-            default.cache_ttl_seconds = ttl;
-        } else {
-            eprintln!("Warning: cache_ttl_seconds must be between 1-604800 (1 week), using default");
-        }
-    }
 
     // Validate flag conflicts - no-exec overrides all launch methods
     if default.no_exec {
@@ -357,10 +334,6 @@ pub struct FileConf {
     pub title_panel_height_percent: Option<u16>,
     /// Input panel height in lines
     pub input_panel_height: Option<u16>,
-    /// Enable application cache for faster startup
-    pub enable_cache: Option<bool>,
-    /// Cache TTL in seconds (how long to keep cache entries)
-    pub cache_ttl_seconds: Option<u64>,
 }
 
 impl FileConf {

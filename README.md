@@ -94,7 +94,7 @@ for_window [title="^launcher$"] floating enable, resize set width 500 height 430
 ## TODO
 
 * [X] Most used entries first
-* [X] Cached entries
+* [ ] Cached entries (removed; scanning is fast without it)
 * [X] Multiple launch backends (systemd-run, uwsm, sway)
 * [X] UI customization options
 * [X] Nix flake for universal installation

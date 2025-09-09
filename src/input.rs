@@ -1,10 +1,8 @@
-use std::io;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use termion::event::Key;
-use termion::input::TermRead;
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent};
 
 /// Builder for `Input`
 ///
@@ -24,14 +22,14 @@ use termion::input::TermRead;
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
-    pub exit_key: Key,
+    pub exit_key: KeyCode,
     pub tick_rate: Duration,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            exit_key: Key::Esc,
+            exit_key: KeyCode::Esc,
             tick_rate: Duration::from_millis(250),
         }
     }
@@ -49,9 +47,9 @@ pub enum Event<I> {
     Tick,
 }
 
-/// Small input handler. Uses Termion as the backend.
+/// Small input handler. Uses crossterm as the backend.
 pub struct Input {
-    rx: mpsc::Receiver<Event<Key>>,
+    rx: mpsc::Receiver<Event<KeyEvent>>,
     _input_handle: thread::JoinHandle<()>,
     _tick_handle: thread::JoinHandle<()>,
 }
@@ -67,14 +65,20 @@ impl Input {
         let _input_handle = {
             let tx = tx.clone();
 
-            thread::spawn(move || {
-                let stdin = io::stdin();
-                for key in stdin.keys().flatten() {
-                    if tx.send(Event::Input(key)).is_err() {
-                        return;
-                    }
-                    if key == config.exit_key {
-                        return;
+            thread::spawn(move || loop {
+                if let Ok(true) = event::poll(Duration::from_millis(100)) {
+                    if let Ok(event) = event::read() {
+                        match event {
+                            CrosstermEvent::Key(key) => {
+                                if tx.send(Event::Input(key)).is_err() {
+                                    return;
+                                }
+                                if key.code == config.exit_key {
+                                    return;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
             })
@@ -97,7 +101,7 @@ impl Input {
     }
 
     /// Next key pressed by user.
-    pub fn next(&self) -> Result<Event<Key>, mpsc::RecvError> {
+    pub fn next(&self) -> Result<Event<KeyEvent>, mpsc::RecvError> {
         self.rx.recv()
     }
 }

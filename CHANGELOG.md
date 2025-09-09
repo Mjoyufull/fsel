@@ -4,13 +4,30 @@ All notable changes to Gyr will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.2.5] - 2025-09-08
+
+### Removed
+
+* Cached entries system - removed due to reliability issues with detecting new applications
+* `--clear-cache` CLI option - no longer needed
+* Cache configuration options from config.toml (`enable_cache`, `cache_ttl_seconds`)
+* Unused safe-regex dependency
+
+### Changed
+
+* Migrated from termion to crossterm for professional terminal handling
+* Optimized application scanning for better performance without caching
+* Improved terminal cleanup - no more blank lines or artifacts on exit
+* Enhanced input handling with crossterm KeyEvent system
 
 ## [0.2.1] - 2025-09-07
 
 ### Added
 
 * Multiple launch backends: `--systemd-run`, `--uwsm`, and `--no-exec` options
-* Cached entries system with 36% performance improvement
+* ~~Cached entries system with 36% performance improvement~~ (later removed)
 * Extensive UI customization options (15+ configuration settings)
 * Nix flake for universal installation across distributions
 * Enhanced configuration system with validation
