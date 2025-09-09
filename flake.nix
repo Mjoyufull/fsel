@@ -42,11 +42,11 @@
         packages = {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "gyr";
-            version = "0.2.5";
+            version = "0.2.6";
 
             src = ./.;
 
-            cargoHash = "sha256-kf1VoRrvYnr1ZmdFrgXhHYJeRyINja4CDGen7qWR0Vo=";
+            cargoHash = "sha256-mjQTuHJ6jVSlDMgr7rDp+aIox2auhzIjIbK0kNHgjgU=";
 
             inherit buildInputs nativeBuildInputs;
 

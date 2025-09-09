@@ -1,6 +1,6 @@
 [package]
 name = "gyr"
-version = "0.2.5"
+version = "0.2.6"
 authors = ["Namkhai B. <me@forkbomb9.ch>"]
 edition = "2021"
 

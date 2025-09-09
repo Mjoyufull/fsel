@@ -8,6 +8,14 @@ hard_stop = false
 rounded_borders = true
 
 # Border Colors (individual colors for each panel)
+# Color formats supported:
+#   - Named colors: "Red", "Blue", "Green", "Yellow", "Cyan", "Magenta", "White", "Black"
+#                   "LightRed", "LightBlue", "LightGreen", "LightYellow", "LightCyan", "LightMagenta"
+#                   "Gray"/"Grey", "DarkGray"/"DarkGrey", "Reset"
+#   - Hex colors: "#ff0000" (red), "#00ff00" (green), "#0000ff" (blue)
+#   - Short hex: "#f00" (red), "#0f0" (green), "#00f" (blue)
+#   - RGB colors: "rgb(255,0,0)" or "(255,0,0)"
+#   - 8-bit colors: "196" (bright red), "21" (bright blue), "46" (bright green)
 main_border_color = "White"      # Border color for the main info panel (top)
 apps_border_color = "White"      # Border color for the apps list panel (middle)
 input_border_color = "White"     # Border color for the input panel (bottom)

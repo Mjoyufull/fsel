@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2025-09-08
+
+### Added
+
+* Enhanced color support with multiple formats:
+  - Hex colors: `#ff0000`, `#f00`
+  - RGB colors: `rgb(255,0,0)`, `(255,0,0)`
+  - 8-bit terminal colors: `196` (0-255)
+  - Additional named colors: `gray`/`grey`, `darkgray`/`darkgrey`, `reset`
+* Color examples file with popular themes (Gruvbox, Nord, Dracula, One Dark)
+* Improved error messages for invalid color formats
+
 ## [0.2.5] - 2025-09-08
 
 ### Removed
