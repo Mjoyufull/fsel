@@ -8,7 +8,8 @@
 
   Fast TUI launcher for GNU/Linux and \*BSD
 
-  [![asciicast](https://asciinema.org/a/n34HCGxXINEoryRkuM8XOIVbJ.svg)](https://asciinema.org/a/n34HCGxXINEoryRkuM8XOIVbJ)
+  <img width="840" height="953" alt="image" src="https://github.com/user-attachments/assets/d2af06f1-0331-4fa9-a24a-54e562fc4c6f" />
+
 
 </div>
 
