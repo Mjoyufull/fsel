@@ -18,6 +18,8 @@ pub struct UI<'a> {
     pub query: String,
     /// Verbosity level
     pub verbose: u64,
+    /// Scroll offset for the list (how many items are scrolled off the top)
+    pub scroll_offset: usize,
     #[doc(hidden)]
     // Matching algorithm
     matcher: SkimMatcherV2,
@@ -36,6 +38,7 @@ impl<'a> UI<'a> {
             text: vec![],
             query: String::new(),
             verbose: 0,
+            scroll_offset: 0,
             matcher: SkimMatcherV2::default(),
         }
     }
@@ -183,13 +186,28 @@ impl<'a> UI<'a> {
         // Sort the vector (should use our custom Cmp)
         self.shown.sort();
 
-        // Reset selection to beginning (don't want to have the user go to the start
+        // Reset selection to beginning and scroll offset
         if self.shown.is_empty() {
             // Can't select anything if there's no items
             self.selected = None;
+            self.scroll_offset = 0;
         } else {
-            // The list changed, go to first item
-            self.selected = Some(0);
+            // The list changed, ensure we have a valid selection
+            // Try to keep current selection if it's still valid, otherwise go to first
+            if let Some(current_selected) = self.selected {
+                if current_selected >= self.shown.len() {
+                    // Current selection is out of bounds, go to first item
+                    self.selected = Some(0);
+                    self.scroll_offset = 0;
+                } else {
+                    // Current selection is still valid, keep it but reset scroll
+                    self.scroll_offset = 0;
+                }
+            } else {
+                // No selection, go to first item
+                self.selected = Some(0);
+                self.scroll_offset = 0;
+            }
         }
     }
     

@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "gyr"
-version = "0.2.6"
+version = "0.2.8-bolttree"
 dependencies = [
  "bincode",
  "crossterm 0.27.0",

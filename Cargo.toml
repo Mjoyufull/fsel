@@ -1,6 +1,6 @@
 [package]
 name = "gyr"
-version = "0.2.7"
+version = "0.2.8-bolttree"
 authors = ["Namkhai B. <me@forkbomb9.ch>"]
 edition = "2021"
 

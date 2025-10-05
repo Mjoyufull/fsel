@@ -214,7 +214,7 @@ pub struct App {
     /// Not part of the specification  
     pub history: u64,
 
-    // This is not pub because I use it only on this file
+    // Private field for internal use only
     #[doc(hidden)]
     actions: Option<Vec<String>>,
 }

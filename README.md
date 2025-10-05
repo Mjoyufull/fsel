@@ -57,27 +57,94 @@
 
 ## Usage
 
-Run `gyr` from a terminal. Scroll through the app list, find some app typing chars, run selected pressing ENTER. Pretty straightforward.
-Oh, yes: go to the bottom with the left arrow, top with right. Cancel pressing Esc.
+### Interactive Mode
 
-Alternative bindings are Ctrl-Q to cancel, Ctrl-Y to run the app, Ctrl-N scroll down and Ctrl-P to scroll up (VIM bindings).
+Run `gyr` from a terminal to open the interactive TUI launcher.
 
-Gyr works well with tiling window managers like [Sway](https://swaywm.org/) or [i3](https://i3wm.org/).
+#### Navigation
 
-> Note for Sway: When `$SWAYSOCK` is set, `swaymsg exec` is used to run the program.
-> This allows Sway to spawn the program in the workspace Gyr was run in.
+**Keyboard:**
+- Type to search/filter applications
+- `↑`/`↓` or `Ctrl-P`/`Ctrl-N` to navigate up/down
+- `←`/`→` to jump to top/bottom of list
+- `Enter` or `Ctrl-Y` to launch selected application
+- `Esc` or `Ctrl-Q` to exit
+- `Backspace` to remove characters from search
 
-You can configure some stuff with cli flags, see `gyr --help`
+**Mouse:**
+- Hover over applications to select them
+- Click on an application to launch it
+- Scroll wheel to scroll through the application list
+- All mouse interactions work alongside keyboard navigation
 
-Gyr also has a history feature, so most used entries will be sorted first. This can be reset with `gyr --clear_history`
+#### Features
 
-There's also a config file which can be placed in `$HOME/.config/gyr/config.toml` or `$XDG_DATA_HOME/gyr/config.toml` ([sample](./config.toml))
+- **Fuzzy Search**: Type partial names to find applications quickly
+- **Smart Matching**: Searches app names, descriptions, keywords, and categories
+- **Usage History**: Frequently used applications appear higher in results
+- **Real-time Filtering**: Results update as you type
 
-Verbosity levels (`-v`, `-vv`, `-vvv`, each level adds logs to the previous one):
+### Direct Launch Mode
 
-* `-v`: will make the launched binary inherit Gyr's `stdio`. (which means you'll see the logs)
-* `-vv`: will show the path of each app in the info
-* `-vvv`: adds some debug information (number of times the apps were run, etc.)
+Launch applications directly from the command line without opening the TUI:
+
+```sh
+# Launch Firefox directly
+gyr -p firefox
+
+# Launch first match for "terminal"
+gyr -p terminal
+
+# Works with partial names
+gyr -p fire  # Finds Firefox
+
+# Combine with launch options
+gyr --uwsm -p discord
+gyr --systemd-run -vv -p code
+```
+
+### Command Line Options
+
+```
+Usage: gyr [options]
+
+  -s, --nosway           Disable Sway integration
+  -c, --config <config>  Specify a config file
+  -r, --replace          Replace existing gyr instances
+      --clear_history    Clear launch history
+  -p, --program <name>   Launch program directly (bypass TUI)
+  -v, --verbose          Increase verbosity level (multiple)
+      --no-exec          Print selected application to stdout instead of launching
+      --systemd-run      Launch applications using systemd-run --user --scope
+      --uwsm             Launch applications using uwsm app
+  -h, --help             Show this help message
+  -V, --version          Show the version number and quit
+```
+
+#### Launch Methods
+
+- **Default**: Standard execution
+- **Sway Integration**: Automatically enabled when `$SWAYSOCK` is set. Uses `swaymsg exec` to launch applications in the current workspace
+- **systemd-run**: `--systemd-run` launches applications in isolated systemd user scopes
+- **uwsm**: `--uwsm` launches applications through the Universal Wayland Session Manager
+
+#### Verbosity Levels
+
+- `-v`: Show application execution details
+- `-vv`: Show application paths and additional metadata
+- `-vvv`: Show debug information including usage statistics
+
+### Configuration
+
+Gyr supports extensive customization through a configuration file located at:
+- `$XDG_CONFIG_HOME/gyr/config.toml` or
+- `$HOME/.config/gyr/config.toml`
+
+See the [sample configuration](./config.toml) for available options including:
+- Color schemes and UI customization
+- Panel layout and sizing
+- Border styles and cursor appearance
+- Terminal launcher configuration
 
 ### Sway-specific usage
 
@@ -95,9 +162,11 @@ for_window [title="^launcher$"] floating enable, resize set width 500 height 430
 ## TODO
 
 * [X] Most used entries first
-* [ ] Cached entries (removed; scanning is fast without it)
+* [X] Mouse support (hover, click, scroll wheel)
+* [X] Direct launch mode for command-line usage
 * [X] Multiple launch backends (systemd-run, uwsm, sway)
 * [X] UI customization options
+* [X] XDG Desktop Entry specification compliance
 * [X] Nix flake for universal installation
 
 ## Contributing

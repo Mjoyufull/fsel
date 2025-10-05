@@ -2,7 +2,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, MouseEvent};
 
 /// Builder for `Input`
 ///
@@ -44,6 +44,7 @@ impl Config {
 
 pub enum Event<I> {
     Input(I),
+    Mouse(MouseEvent),
     Tick,
 }
 
@@ -74,6 +75,11 @@ impl Input {
                                     return;
                                 }
                                 if key.code == config.exit_key {
+                                    return;
+                                }
+                            }
+                            CrosstermEvent::Mouse(mouse) => {
+                                if tx.send(Event::Mouse(mouse)).is_err() {
                                     return;
                                 }
                             }

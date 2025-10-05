@@ -9,7 +9,8 @@ fn usage() -> ! {
   -s, --nosway           Disable Sway integration.
   -c, --config <config>  Specify a config file.
   -r, --replace          Replace existing gyr instances
-  --clear_history        Clear launch history.
+      --clear_history    Clear launch history.
+  -p, --program <name>   Launch program directly (bypass TUI).
   -v, --verbose          Increase verbosity level (multiple).
       --no-exec          Print selected application to stdout instead of launching.
       --systemd-run      Launch applications using systemd-run --user --scope.
@@ -64,6 +65,8 @@ pub struct Opts {
     /// Layout configuration
     pub title_panel_height_percent: u16,
     pub input_panel_height: u16,
+    /// Program name for direct launch (bypasses TUI)
+    pub program: Option<String>,
 }
 
 impl Default for Opts {
@@ -91,6 +94,7 @@ impl Default for Opts {
             header_title_color: ratatui::style::Color::White,
             title_panel_height_percent: 30,
             input_panel_height: 3,
+            program: None,
         }
     }
 }
@@ -128,6 +132,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
             Long("uwsm") => {
                 default.uwsm = true;
+            }
+            Short('p') | Long("program") => {
+                default.program = Some(parser.value()?.into_string().map_err(|_| "Program name must be valid UTF-8")?);
             }
             Short('v') | Long("verbose") => {
                 if let Some(v) = default.verbose {
@@ -190,7 +197,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         match string_to_color(color) {
             Ok(color) => default.highlight_color = color,
             Err(e) => {
-                // @TODO: Better error messages
+                // Improve error messages in future version
                 eprintln!("Error parsing config file: {e}");
                 std::process::exit(1);
             }
