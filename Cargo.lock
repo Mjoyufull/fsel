@@ -146,7 +146,23 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys",
+ "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "either"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.1",
 ]
 
 [[package]]
@@ -217,6 +233,7 @@ dependencies = [
  "sled",
  "toml",
  "walkdir",
+ "which",
 ]
 
 [[package]]
@@ -224,6 +241,15 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+
+[[package]]
+name = "home"
+version = "0.5.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "589533453244b0995c858700322199b2becb13b627df2851f64a2775d024abcf"
+dependencies = [
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "indenter"
@@ -269,6 +295,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a82ae493e598baaea5209805c49bbf2ea7de956d50d7da0da1164f9c6d28543"
 
 [[package]]
+name = "linux-raw-sys"
+version = "0.4.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d26c52dbd32dccf2d10cac7725f8eae5296885fb5703b261f7d0a0739ec807ab"
+
+[[package]]
 name = "lock_api"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -311,7 +343,7 @@ dependencies = [
  "libc",
  "log",
  "wasi",
- "windows-sys",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -440,6 +472,19 @@ dependencies = [
  "getrandom",
  "redox_syscall 0.2.16",
  "thiserror",
+]
+
+[[package]]
+name = "rustix"
+version = "0.38.44"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdb5bc1ae2baa591800df16c9ca78619bf65c0488b41b96ccec5d11220d8c154"
+dependencies = [
+ "bitflags 2.4.0",
+ "errno",
+ "libc",
+ "linux-raw-sys",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -654,6 +699,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
 
 [[package]]
+name = "which"
+version = "4.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
+dependencies = [
+ "either",
+ "home",
+ "once_cell",
+ "rustix",
+]
+
+[[package]]
 name = "winapi"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -685,12 +742,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
+name = "windows-link"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45e46c0661abb7180e7b9c281db115305d49ca1709ab8242adf09666d2173c65"
+
+[[package]]
 name = "windows-sys"
 version = "0.48.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "677d2418bec65e3338edb076e806bc1ec15693c5d0104683f2efe857f61056a9"
 dependencies = [
  "windows-targets 0.48.0",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
+dependencies = [
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.61.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f109e41dd4a3c848907eb83d5a42ea98b3769495597450cf6d153507b166f0f"
+dependencies = [
+ "windows-link",
 ]
 
 [[package]]

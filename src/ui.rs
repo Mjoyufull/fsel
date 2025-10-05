@@ -82,7 +82,51 @@ impl<'a> UI<'a> {
 
                 self.text.push(Line::from(text));
 
+                // Show generic name if available
+                if let Some(ref generic_name) = self.shown[selected].generic_name {
+                    self.text.push(Line::from(Span::raw(format!(
+                        "Generic Name: {}", generic_name
+                    ))));
+                }
+
+                // Show categories if available
+                if !self.shown[selected].categories.is_empty() {
+                    self.text.push(Line::from(Span::raw(format!(
+                        "Categories: {}", 
+                        self.shown[selected].categories.join(", ")
+                    ))));
+                }
+
+                // Show keywords if available
+                if !self.shown[selected].keywords.is_empty() {
+                    self.text.push(Line::from(Span::raw(format!(
+                        "Keywords: {}", 
+                        self.shown[selected].keywords.join(", ")
+                    ))));
+                }
+
                 if self.verbose > 2 {
+                    // Show MIME types if available
+                    if !self.shown[selected].mime_types.is_empty() {
+                        self.text.push(Line::from(Span::raw(format!(
+                            "MIME Types: {}", 
+                            self.shown[selected].mime_types.join(", ")
+                        ))));
+                    }
+
+                    // Show desktop entry type
+                    self.text.push(Line::from(Span::raw(format!(
+                        "Type: {}", 
+                        &self.shown[selected].entry_type
+                    ))));
+
+                    // Show icon if available
+                    if let Some(ref icon) = self.shown[selected].icon {
+                        self.text.push(Line::from(Span::raw(format!(
+                            "Icon: {}", icon
+                        ))));
+                    }
+
                     self.text.push(Line::from(Span::raw(format!(
                         "Times run: {}",
                         &self.shown[selected].history
@@ -99,9 +143,10 @@ impl<'a> UI<'a> {
         }
     }
 
-    /// Updates shown and hidden apps
+    /// Updates shown and hidden apps with enhanced fuzzy matching
     ///
-    /// Matches using [`fuzzy_matcher`], with pattern being `self.query`
+    /// Matches using [`fuzzy_matcher`] against name, generic name, keywords, and description
+    /// with pattern being `self.query`
     ///
     /// Should be called every time user adds/removes characters from `self.query`
     pub fn filter(&mut self) {
@@ -109,7 +154,8 @@ impl<'a> UI<'a> {
         // and update score for the ones that do
         let mut i = 0;
         while i != self.shown.len() {
-            match self.matcher.fuzzy_match(&self.shown[i].name, &self.query) {
+            let score = self.calculate_match_score(&self.shown[i]);
+            match score {
                 // No match. Set score to 0 and move to self.hidden
                 None => {
                     self.shown[i].score = 0;
@@ -126,7 +172,7 @@ impl<'a> UI<'a> {
         // Re-add hidden apps that *do* match the current filter, and update their score
         i = 0;
         while i != self.hidden.len() {
-            if let Some(score) = self.matcher.fuzzy_match(&self.hidden[i].name, &self.query) {
+            if let Some(score) = self.calculate_match_score(&self.hidden[i]) {
                 self.hidden[i].score = score;
                 self.shown.push(self.hidden.remove(i));
             } else {
@@ -145,5 +191,49 @@ impl<'a> UI<'a> {
             // The list changed, go to first item
             self.selected = Some(0);
         }
+    }
+    
+    /// Calculate match score against multiple app fields for better fuzzy matching
+    fn calculate_match_score(&self, app: &xdg::App) -> Option<i64> {
+        if self.query.is_empty() {
+            return Some(0);
+        }
+        
+        let mut best_score = None;
+        
+        // Match against app name (highest priority)
+        if let Some(score) = self.matcher.fuzzy_match(&app.name, &self.query) {
+            best_score = Some(score * 3); // Boost name matches
+        }
+        
+        // Match against generic name
+        if let Some(ref generic_name) = app.generic_name {
+            if let Some(score) = self.matcher.fuzzy_match(generic_name, &self.query) {
+                let boosted_score = score * 2;
+                best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
+            }
+        }
+        
+        // Match against keywords
+        for keyword in &app.keywords {
+            if let Some(score) = self.matcher.fuzzy_match(keyword, &self.query) {
+                let boosted_score = score * 2;
+                best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
+            }
+        }
+        
+        // Match against description (lower priority)
+        if let Some(score) = self.matcher.fuzzy_match(&app.description, &self.query) {
+            best_score = Some(best_score.map_or(score, |current| current.max(score)));
+        }
+        
+        // Match against categories (lower priority)
+        for category in &app.categories {
+            if let Some(score) = self.matcher.fuzzy_match(category, &self.query) {
+                best_score = Some(best_score.map_or(score, |current| current.max(score)));
+            }
+        }
+        
+        best_score
     }
 }

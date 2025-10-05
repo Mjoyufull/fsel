@@ -6,6 +6,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2025-01-05
+
+### Added
+
+* XDG Desktop Entry Specification support:
+  - Localization support for Name, Comment, GenericName fields
+  - Keywords field parsing
+  - Categories field parsing
+  - MimeType field parsing
+  - Icon field support
+  - OnlyShowIn/NotShowIn desktop environment filtering
+  - Hidden field support
+  - StartupNotify and StartupWMClass fields
+  - TryExec field validation
+  - Type field validation
+  - Desktop file ID tracking
+
+* Multi-field fuzzy matching against name, generic name, keywords, description, and categories
+* Weighted scoring system for better search results
+* Extended verbose mode output with additional metadata
+
+### Fixed
+
+* XDG Base Directory Specification compliance:
+  - Added missing XDG_DATA_HOME support
+  - Fixed ~/.local/share/applications/ scanning
+  - Proper directory scanning order
+  - Correct XDG specification fallback logic
+
+* Desktop entry parsing:
+  - Proper semicolon-separated list handling
+  - Better XDG field code removal from Exec commands
+  - Comment and empty line handling
+  - Section parsing boundary detection
+
+### Changed
+
+* Extended App struct with XDG Desktop Entry fields
+* Application discovery now includes user-specific directories
+
+### Dependencies
+
+* Added `which` crate v4.4 for TryExec validation
+
 ## [0.2.6] - 2025-09-08
 
 ### Added

@@ -4,10 +4,70 @@ use std::fs;
 use std::path;
 use std::sync::mpsc;
 use std::thread;
+use std::env;
 
 use eyre::eyre;
 use ratatui::widgets::ListItem;
 use walkdir::WalkDir;
+
+/// Get the current locale for desktop entry localization
+fn get_locale() -> Vec<String> {
+    let mut locales = Vec::new();
+    
+    // Check LC_MESSAGES first, then LANG, then LC_ALL
+    let locale_var = env::var("LC_MESSAGES")
+        .or_else(|_| env::var("LANG"))
+        .or_else(|_| env::var("LC_ALL"))
+        .unwrap_or_else(|_| "C".to_string());
+    
+    if locale_var != "C" && locale_var != "POSIX" {
+        let base_locale = locale_var.split('.').next().unwrap_or(&locale_var);
+        
+        // Add full locale (e.g., "en_US")
+        locales.push(base_locale.to_string());
+        
+        // Add language only (e.g., "en")
+        if let Some(lang) = base_locale.split('_').next() {
+            if lang != base_locale {
+                locales.push(lang.to_string());
+            }
+        }
+    }
+    
+    locales
+}
+
+/// Parse a semicolon-separated list into a vector
+fn parse_semicolon_list(value: &str) -> Vec<String> {
+    value.split(';')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+/// Get the best localized value for a key
+fn get_localized_value(key: &str, value: &str, existing_value: &Option<String>, locales: &[String]) -> Option<String> {
+    if let Some(bracket_pos) = key.find('[') {
+        let locale_part = &key[bracket_pos + 1..key.len() - 1];
+        
+        // Only process localized versions of the key we care about
+        if existing_value.is_none() {
+            // If we don't have any value yet, check if this locale matches
+            if locales.contains(&locale_part.to_string()) {
+                return Some(value.to_string());
+            }
+        }
+        None
+    } else {
+        // Non-localized key, use as fallback if no localized version was found
+        if existing_value.is_none() {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    }
+}
 
 
 pub struct AppHistory {
@@ -70,14 +130,23 @@ pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db) -> mpsc::Receive
                     continue;
                 }
                 
-                if let Ok(app) = App::parse(&contents, None) {
+                if let Ok(mut app) = App::parse(&contents, None) {
+                    // Set desktop ID from file path
+                    if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
+                        app.desktop_id = Some(file_name.to_string());
+                    }
+                    
                     let app_with_history = db.get(app.clone());
                     
                     // Handle actions
                     if let Some(actions) = &app.actions {
                         for action in actions {
                             let ac = Action::default().name(action).from(app.name.clone());
-                            if let Ok(a) = App::parse(&contents, Some(&ac)) {
+                            if let Ok(mut a) = App::parse(&contents, Some(&ac)) {
+                                // Set desktop ID for action too
+                                if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
+                                    a.desktop_id = Some(format!("{}#{}", file_name, action));
+                                }
                                 let action_app = db.get(a);
                                 if sender.send(action_app).is_err() {
                                     return; // Receiver dropped
@@ -98,26 +167,51 @@ pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db) -> mpsc::Receive
     receiver
 }
 
-/// An XDG Specification App
+/// An XDG Specification App with full XDG Desktop Entry support
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct App {
-    /// App name
+    /// App name (Name field)
     pub name: String,
-    /// Command to run
+    /// Command to run (Exec field)
     pub command: String,
-    /// App description
+    /// App description/comment (Comment field)
     pub description: String,
-    /// Whether the app should be run in terminal
+    /// Generic name of application (GenericName field)
+    pub generic_name: Option<String>,
+    /// Keywords for searching (Keywords field)
+    pub keywords: Vec<String>,
+    /// Categories this application belongs to (Categories field)
+    pub categories: Vec<String>,
+    /// MIME types this application can handle (MimeType field)
+    pub mime_types: Vec<String>,
+    /// Icon name or path (Icon field)
+    pub icon: Option<String>,
+    /// Whether the app should be run in terminal (Terminal field)
     pub is_terminal: bool,
-    /// Path from which to run the command
+    /// Path from which to run the command (Path field)
     pub path: Option<String>,
+    /// Desktop environments where this should be shown (OnlyShowIn field)
+    pub only_show_in: Vec<String>,
+    /// Desktop environments where this should NOT be shown (NotShowIn field)
+    pub not_show_in: Vec<String>,
+    /// Whether the app is hidden (Hidden field)
+    pub hidden: bool,
+    /// Application startup notification (StartupNotify field)
+    pub startup_notify: bool,
+    /// WM class for startup notification (StartupWMClass field)
+    pub startup_wm_class: Option<String>,
+    /// Command to test if executable exists (TryExec field)
+    pub try_exec: Option<String>,
+    /// Desktop Entry type (Type field) - should be "Application"
+    pub entry_type: String,
+    /// Desktop file ID for tracking
+    pub desktop_id: Option<String>,
+    
     /// Matching score (used in [UI](super::ui::UI))
-    ///
     /// Not part of the specification
     pub score: i64,
     /// Number of times this app was run
-    ///
-    /// Not part of the specification
+    /// Not part of the specification  
     pub history: u64,
 
     // This is not pub because I use it only on this file
@@ -183,10 +277,12 @@ impl<'a> From<&'a App> for ListItem<'a> {
 }
 
 impl App {
-    /// Parse an application, or, if `action.is_some()`, an app action
+    /// Parse an application with full XDG Desktop Entry specification support
+    /// Includes localization, all standard fields, and proper validation
     pub fn parse<T: AsRef<str>>(contents: T, action: Option<&Action>) -> eyre::Result<App> {
         let contents: &str = contents.as_ref();
-
+        let locales = get_locale();
+        
         let pattern = if let Some(a) = &action {
             if a.name.is_empty() {
                 return Err(eyre!("Action is empty"));
@@ -196,21 +292,39 @@ impl App {
             "[Desktop Entry]".to_string()
         };
 
+        // Initialize all fields
         let mut name = None;
+        let mut generic_name = None;
         let mut exec = None;
         let mut description = None;
+        let mut keywords = Vec::new();
+        let mut categories = Vec::new();
+        let mut mime_types = Vec::new();
+        let mut icon = None;
         let mut terminal_exec = false;
         let mut path = None;
+        let mut only_show_in = Vec::new();
+        let mut not_show_in = Vec::new();
+        let mut hidden = false;
+        let mut no_display = false;
+        let mut startup_notify = false;
+        let mut startup_wm_class = None;
+        let mut try_exec = None;
+        let mut entry_type = None;
         let mut actions = None;
 
         let mut search = false;
 
-        // Fast parsing with early exits and optimizations
+        // Parse desktop entry with full XDG specification support
         for line in contents.lines() {
-            if line.is_empty() { continue; }
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') { 
+                continue; 
+            }
             
-            if line.starts_with("[Desktop") && search {
-                break; // Early exit when we hit another section
+            // Stop parsing when we hit another section
+            if line.starts_with('[') && search && line != pattern {
+                break;
             }
 
             if line == pattern {
@@ -219,64 +333,174 @@ impl App {
             }
 
             if search {
-                // Use match for better performance than multiple if-else
                 if let Some((key, value)) = line.split_once('=') {
-                    match key {
-                        "Name" if name.is_none() => {
-                            name = Some(if let Some(a) = &action {
-                                format!("{} ({})", &a.from, value)
-                            } else {
-                                value.to_string()
-                            });
+                    let key = key.trim();
+                    let value = value.trim();
+                    
+                    // Handle both localized and non-localized keys
+                    let base_key = key.split('[').next().unwrap_or(key);
+                    
+                    match base_key {
+                        "Type" => {
+                            entry_type = Some(value.to_string());
                         }
-                        "Comment" if description.is_none() => {
-                            description = Some(value.to_string());
+                        "Name" => {
+                            if let Some(val) = get_localized_value(key, value, &name, &locales) {
+                                name = Some(if let Some(a) = &action {
+                                    format!("{} ({})", &a.from, val)
+                                } else {
+                                    val
+                                });
+                            }
+                        }
+                        "GenericName" => {
+                            if let Some(val) = get_localized_value(key, value, &generic_name, &locales) {
+                                generic_name = Some(val);
+                            }
+                        }
+                        "Comment" => {
+                            if let Some(val) = get_localized_value(key, value, &description, &locales) {
+                                description = Some(val);
+                            }
+                        }
+                        "Keywords" => {
+                            if keywords.is_empty() {
+                                keywords = parse_semicolon_list(value);
+                            }
+                        }
+                        "Categories" => {
+                            if categories.is_empty() {
+                                categories = parse_semicolon_list(value);
+                            }
+                        }
+                        "MimeType" => {
+                            if mime_types.is_empty() {
+                                mime_types = parse_semicolon_list(value);
+                            }
+                        }
+                        "Icon" => {
+                            if icon.is_none() {
+                                icon = Some(value.to_string());
+                            }
                         }
                         "Terminal" => {
-                            terminal_exec = value == "true";
+                            terminal_exec = value.eq_ignore_ascii_case("true");
                         }
-                        "Exec" if exec.is_none() => {
-                            // Fast regex-free approach for XDG parameter removal
-                            let mut trimmed = value;
-                            if let Some(pos) = value.find(" %") {
-                                trimmed = &value[..pos];
+                        "Exec" => {
+                            if exec.is_none() {
+                                // Remove XDG field codes (%f, %F, %u, %U, etc.)
+                                let cleaned = value.split_whitespace()
+                                    .filter(|part| !part.starts_with('%'))
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                exec = Some(cleaned);
                             }
-                            exec = Some(trimmed.to_string());
+                        }
+                        "Path" => {
+                            if path.is_none() {
+                                path = Some(value.to_string());
+                            }
+                        }
+                        "TryExec" => {
+                            if try_exec.is_none() {
+                                try_exec = Some(value.to_string());
+                            }
+                        }
+                        "OnlyShowIn" => {
+                            if only_show_in.is_empty() {
+                                only_show_in = parse_semicolon_list(value);
+                            }
+                        }
+                        "NotShowIn" => {
+                            if not_show_in.is_empty() {
+                                not_show_in = parse_semicolon_list(value);
+                            }
+                        }
+                        "Hidden" => {
+                            hidden = value.eq_ignore_ascii_case("true");
                         }
                         "NoDisplay" => {
-                            if value.eq_ignore_ascii_case("true") {
-                                return Err(eyre!("App is hidden"));
+                            no_display = value.eq_ignore_ascii_case("true");
+                        }
+                        "StartupNotify" => {
+                            startup_notify = value.eq_ignore_ascii_case("true");
+                        }
+                        "StartupWMClass" => {
+                            if startup_wm_class.is_none() {
+                                startup_wm_class = Some(value.to_string());
                             }
                         }
-                        "Path" if path.is_none() => {
-                            path = Some(value.to_string());
+                        "Actions" => {
+                            if actions.is_none() && action.is_none() {
+                                actions = Some(parse_semicolon_list(value));
+                            }
                         }
-                        "Actions" if actions.is_none() && action.is_none() => {
-                            actions = Some(value.split(';').filter(|s| !s.is_empty()).map(|s| s.to_string()).collect());
-                        }
-                        _ => {} // Ignore other keys
+                        _ => {} // Ignore unknown keys
                     }
                 }
             }
         }
 
-        let name = name.unwrap_or_else(|| "Unknown".to_string());
-
-        if exec.is_none() {
-            return Err(eyre!("No command to run!"));
+        // Validate required fields according to XDG spec
+        let entry_type = entry_type.unwrap_or_else(|| "Application".to_string());
+        if entry_type != "Application" {
+            return Err(eyre!("Not an Application type desktop entry"));
         }
 
-        let exec = exec.unwrap();
-        let description = description.unwrap_or_default();
+        let name = name.unwrap_or_else(|| "Unknown".to_string());
+        
+        if exec.is_none() {
+            return Err(eyre!("Missing required Exec field"));
+        }
+        let command = exec.unwrap();
+
+        // Check if app should be hidden
+        if hidden || no_display {
+            return Err(eyre!("Application is hidden"));
+        }
+
+        // Check desktop environment filtering
+        let current_desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        if !only_show_in.is_empty() {
+            if !current_desktop.is_empty() && 
+               !only_show_in.iter().any(|de| current_desktop.contains(de)) {
+                return Err(eyre!("Application not shown in current desktop environment"));
+            }
+        }
+        if !not_show_in.is_empty() && !current_desktop.is_empty() {
+            if not_show_in.iter().any(|de| current_desktop.contains(de)) {
+                return Err(eyre!("Application explicitly hidden in current desktop environment"));
+            }
+        }
+
+        // Validate TryExec if present
+        if let Some(ref try_exec_cmd) = try_exec {
+            if which::which(try_exec_cmd).is_err() {
+                return Err(eyre!("TryExec command not found: {}", try_exec_cmd));
+            }
+        }
 
         Ok(App {
             score: 0,
             history: 0,
             name,
-            command: exec,
-            description,
+            command,
+            description: description.unwrap_or_default(),
+            generic_name,
+            keywords,
+            categories,
+            mime_types,
+            icon,
             is_terminal: terminal_exec,
             path,
+            only_show_in,
+            not_show_in,
+            hidden,
+            startup_notify,
+            startup_wm_class,
+            try_exec,
+            entry_type,
+            desktop_id: None, // Will be set by the caller
             actions,
         })
     }

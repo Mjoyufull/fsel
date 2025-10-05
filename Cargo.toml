@@ -1,6 +1,6 @@
 [package]
 name = "gyr"
-version = "0.2.6"
+version = "0.2.7"
 authors = ["Namkhai B. <me@forkbomb9.ch>"]
 edition = "2021"
 
@@ -33,3 +33,4 @@ scopeguard = "1.1"
 toml = "0.7"
 ratatui = { version = "0.22.0", default-features = false, features = ["crossterm"]}
 walkdir = "2.3"
+which = "4.4"

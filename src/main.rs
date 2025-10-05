@@ -161,24 +161,39 @@ fn real_main() -> eyre::Result<()> {
         ));
     };
 
-    // Directories to look for applications
+    // Directories to look for applications (XDG Base Directory Specification)
     let mut dirs: Vec<path::PathBuf> = vec![];
+    
+    // FIRST: Add user's data directory (XDG_DATA_HOME or ~/.local/share)
+    if let Some(xdg_data_home) = env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()) {
+        let mut dir = path::PathBuf::from(xdg_data_home);
+        dir.push("applications");
+        if dir.exists() {
+            dirs.push(dir);
+        }
+    } else if let Some(home_dir) = dirs::home_dir() {
+        let mut dir = home_dir;
+        dir.push(".local/share/applications");
+        if dir.exists() {
+            dirs.push(dir);
+        }
+    }
+    
+    // SECOND: Add system data directories (XDG_DATA_DIRS)
     if let Ok(res) = env::var("XDG_DATA_DIRS") {
-        for data_dir in res.split(':') {
+        for data_dir in res.split(':').filter(|s| !s.is_empty()) {
             let mut dir = path::PathBuf::from(data_dir);
             dir.push("applications");
             if dir.exists() {
-                dirs.push(dir.clone());
+                dirs.push(dir);
             }
         }
     } else {
+        // XDG specification fallback directories
         for data_dir in &mut [
-            // Data directories
-            path::PathBuf::from("/usr/share"),
             path::PathBuf::from("/usr/local/share"),
-            dirs::data_local_dir().ok_or_else(|| eyre!("failed to get local data dir"))?,
+            path::PathBuf::from("/usr/share"),
         ] {
-            // Add `/applications`
             data_dir.push("applications");
             if data_dir.exists() {
                 dirs.push(data_dir.clone());

@@ -42,7 +42,7 @@
         packages = {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "gyr";
-            version = "0.2.6";
+            version = "0.2.7";
 
             src = ./.;
 
