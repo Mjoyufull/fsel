@@ -472,12 +472,13 @@ fn real_main() -> eyre::Result<()> {
             let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
             let input_height = cli.input_panel_height;
             
-            // Split the window into three parts
+            // Split the window into three parts: title, apps, input
             let window = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
                     Constraint::Length(title_height.max(3)),  // Title panel (min 3 lines)
-                    Constraint::Min(3),                       // Apps panel (remaining space, min 3)
+                    Constraint::Min(1),                       // Apps panel (remaining space, no borders)
+                    Constraint::Length(input_height),         // Input panel (configurable height)
                 ].as_ref())
                 .split(f.size());
 
@@ -521,22 +522,13 @@ fn real_main() -> eyre::Result<()> {
                     .border_style(Style::default().fg(cli.input_border_color))
             };
 
-            // Split the bottom section (apps + input)
-            let bottom_half = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(3),                      // Apps panel (remaining space)
-                    Constraint::Length(input_height),        // Input panel (configurable height)
-                ].as_ref())
-                .split(window[1]);
-
             // Determine panel titles based on fancy mode
             let (main_title, apps_title) = if cli.fancy_mode 
                 && ui.selected.is_some() 
                 && !ui.shown.is_empty() 
                 && ui.selected.unwrap() < ui.shown.len() {
                 let selected_app = &ui.shown[ui.selected.unwrap()];
-                // In fancy mode: main panel shows app name, apps panel shows description or "Apps"
+                // In fancy mode: main panel shows app name, apps panel shows "Apps"
                 (selected_app.name.clone(), "Apps".to_string())
             } else {
                 // Normal mode: static titles
@@ -551,9 +543,9 @@ fn real_main() -> eyre::Result<()> {
                 .wrap(Wrap { trim: false })
                 .alignment(Alignment::Left);
 
-            // Calculate visible apps based on scroll offset
-            let apps_panel_height = f.size().height - (f.size().height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16 - cli.input_panel_height - 2; // -2 for borders
-            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for top/bottom borders inside the panel
+            // Calculate apps panel height - account for borders (2 rows: top + bottom)
+            let apps_panel_height = window[1].height;
+            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for top/bottom borders
             
             // Get the visible slice of apps based on scroll offset
             let visible_apps = ui.shown
@@ -563,7 +555,7 @@ fn real_main() -> eyre::Result<()> {
                 .map(ListItem::from)
                 .collect::<Vec<ListItem>>();
 
-            // App list (stateful widget)
+            // App list (stateful widget) with borders
             let list = List::new(visible_apps)
                 .block(create_apps_block(apps_title))
                 .style(Style::default().fg(cli.apps_text_color))
@@ -628,10 +620,10 @@ fn real_main() -> eyre::Result<()> {
 
             // Render description
             f.render_widget(description, window[0]);
-            // Render app list
-            f.render_stateful_widget(list, bottom_half[0], &mut app_state);
+            // Render app list (fills entire middle section)
+            f.render_stateful_widget(list, window[1], &mut app_state);
             // Render query
-            f.render_widget(query, bottom_half[1]);
+            f.render_widget(query, window[2]);
         })?;
 
         // Handle user input
@@ -684,8 +676,11 @@ fn real_main() -> eyre::Result<()> {
                         
                         // Auto-scroll to keep selection visible
                         if let Some(new_selected) = ui.selected {
-                            let apps_panel_height = terminal.size()?.height - (terminal.size()?.height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16 - cli.input_panel_height - 2;
-                            let max_visible = apps_panel_height.saturating_sub(2) as usize;
+                            let total_height = terminal.size()?.height;
+                            let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
+                            let input_height = cli.input_panel_height;
+                            let apps_panel_height = total_height - title_height - input_height;
+                            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for borders
                             
                             // Scroll down if selection is below visible area
                             if new_selected >= ui.scroll_offset + max_visible {
@@ -712,8 +707,11 @@ fn real_main() -> eyre::Result<()> {
                         
                         // Auto-scroll to keep selection visible
                         if let Some(new_selected) = ui.selected {
-                            let apps_panel_height = terminal.size()?.height - (terminal.size()?.height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16 - cli.input_panel_height - 2;
-                            let max_visible = apps_panel_height.saturating_sub(2) as usize;
+                            let total_height = terminal.size()?.height;
+                            let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
+                            let input_height = cli.input_panel_height;
+                            let apps_panel_height = total_height - title_height - input_height;
+                            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for borders
                             
                             // Scroll up if selection is above visible area
                             if new_selected < ui.scroll_offset {
@@ -734,28 +732,27 @@ fn real_main() -> eyre::Result<()> {
             Event::Mouse(mouse_event) => {
                 let mouse_row = mouse_event.row;
                 
-                // Get the layout areas to determine the apps panel area
+                // Get the layout areas - apps panel starts right after title panel
                 let total_height = terminal.size()?.height;
                 let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
                 let input_height = cli.input_panel_height;
                 
-                // Calculate the apps panel area
-                let apps_panel_start = title_height + 1; // +1 for border
-                let apps_panel_height = total_height - title_height - input_height - 2; // -2 for borders
-                let apps_panel_end = apps_panel_start + apps_panel_height;
+                // Apps panel coordinates - account for borders
+                let apps_panel_start = title_height;
+                let apps_panel_height = total_height - title_height - input_height;
                 
-                // Update selection based on current mouse position
+                // List content area (inside the borders) - first item starts 1 row down from panel start
+                let list_content_start = apps_panel_start + 1; // +1 for top border
+                let max_visible_rows = apps_panel_height.saturating_sub(2); // -2 for top/bottom borders
+                let list_content_end = list_content_start + max_visible_rows;
+                
                 let update_selection_for_mouse_pos = |ui: &mut UI, mouse_row: u16| {
-                    if !ui.shown.is_empty() && mouse_row > apps_panel_start && mouse_row < apps_panel_end - 1 {
-                        let row_in_panel = mouse_row - apps_panel_start;
-                        let max_visible = apps_panel_height.saturating_sub(2) as u16;
-                        
-                        if row_in_panel < max_visible {
-                            let hovered_app_index = ui.scroll_offset + row_in_panel as usize;
-                            if hovered_app_index < ui.shown.len() {
-                                ui.selected = Some(hovered_app_index);
-                                ui.info(cli.highlight_color, cli.fancy_mode);
-                            }
+                    if !ui.shown.is_empty() && mouse_row >= list_content_start && mouse_row < list_content_end {
+                        let row_in_content = mouse_row - list_content_start;
+                        let hovered_app_index = ui.scroll_offset + row_in_content as usize;
+                        if hovered_app_index < ui.shown.len() {
+                            ui.selected = Some(hovered_app_index);
+                            ui.info(cli.highlight_color, cli.fancy_mode);
                         }
                     }
                 };
@@ -767,22 +764,15 @@ fn real_main() -> eyre::Result<()> {
                     }
                     // Handle left mouse button clicks to launch
                     MouseEventKind::Down(MouseButton::Left) => {
-                        // Check if click is within the apps panel content area
-                        if mouse_row > apps_panel_start && mouse_row < apps_panel_end - 1 && !ui.shown.is_empty() {
-                            // Calculate which visible index was clicked
-                            let row_in_panel = mouse_row - apps_panel_start; // Subtract border
-                            let max_visible = apps_panel_height.saturating_sub(2) as u16; // -2 for borders
+                        // Check if click is within the list content area
+                        if mouse_row >= list_content_start && mouse_row < list_content_end && !ui.shown.is_empty() {
+                            let row_in_content = mouse_row - list_content_start;
+                            let clicked_app_index = ui.scroll_offset + row_in_content as usize;
                             
-                            if row_in_panel < max_visible {
-                                // Convert to absolute index by adding scroll offset
-                                let clicked_app_index = ui.scroll_offset + row_in_panel as usize;
-                                
-                                // Check if the clicked index is valid
-                                if clicked_app_index < ui.shown.len() {
-                                    ui.selected = Some(clicked_app_index);
-                                    ui.info(cli.highlight_color, cli.fancy_mode);
-                                    break; // Launch the clicked app
-                                }
+                            if clicked_app_index < ui.shown.len() {
+                                ui.selected = Some(clicked_app_index);
+                                ui.info(cli.highlight_color, cli.fancy_mode);
+                                break; // Launch the clicked app
                             }
                         }
                     }
@@ -796,9 +786,8 @@ fn real_main() -> eyre::Result<()> {
                     }
                     MouseEventKind::ScrollDown => {
                         if !ui.shown.is_empty() {
-                            // Calculate maximum visible items in the apps panel
-                            let apps_panel_height = total_height - title_height - input_height - 2; // -2 for borders
-                            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for top/bottom borders
+                            // Calculate maximum visible items (account for borders)
+                            let max_visible = max_visible_rows as usize;
                             
                             // Only scroll down if there are more items to show
                             if ui.scroll_offset + max_visible < ui.shown.len() {
