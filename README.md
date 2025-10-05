@@ -44,7 +44,15 @@
     }
     ```
 
-#### Option 2: Build from source
+#### Option 2: Curl Install (Recommended for most users)
+
+* Install directly from GitHub:
+    ```sh
+    $ curl -sSL https://raw.githubusercontent.com/Mjoyufull/gyr/main/install.sh | bash
+    ```
+* To update later, run the same command
+
+#### Option 3: Build from source
 
 * Install [Rust](https://www.rust-lang.org/learn/get-started)
 * Build:
@@ -54,6 +62,11 @@
     ```
 * Copy `target/release/gyr` to somewhere in your `$PATH`
 
+### Optional Dependencies
+
+* **uwsm** - Universal Wayland Session Manager (for `--uwsm` flag)
+* **systemd** - For `--systemd-run` flag (usually pre-installed on most Linux distributions)
+* **sway** - For automatic Sway integration when `$SWAYSOCK` is set
 
 ## Usage
 
@@ -143,9 +156,9 @@ Usage: gyr [options]
 #### Launch Methods
 
 - **Default**: Standard execution
-- **Sway Integration**: Automatically enabled when `$SWAYSOCK` is set. Uses `swaymsg exec` to launch applications in the current workspace
-- **systemd-run**: `--systemd-run` launches applications in isolated systemd user scopes
-- **uwsm**: `--uwsm` launches applications through the Universal Wayland Session Manager
+- **Sway Integration**: Automatically enabled when `$SWAYSOCK` is set. Uses `swaymsg exec` to launch applications in the current workspace (requires Sway)
+- **systemd-run**: `--systemd-run` launches applications in isolated systemd user scopes (requires systemd)
+- **uwsm**: `--uwsm` launches applications through the Universal Wayland Session Manager (requires uwsm to be installed)
 
 #### Verbosity Levels
 

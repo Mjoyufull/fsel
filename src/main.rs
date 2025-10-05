@@ -746,8 +746,8 @@ fn real_main() -> eyre::Result<()> {
                 
                 // Update selection based on current mouse position
                 let update_selection_for_mouse_pos = |ui: &mut UI, mouse_row: u16| {
-                    if !ui.shown.is_empty() && mouse_row >= apps_panel_start + 1 && mouse_row < apps_panel_end - 1 {
-                        let row_in_panel = mouse_row - apps_panel_start - 1;
+                    if !ui.shown.is_empty() && mouse_row > apps_panel_start && mouse_row < apps_panel_end - 1 {
+                        let row_in_panel = mouse_row - apps_panel_start;
                         let max_visible = apps_panel_height.saturating_sub(2) as u16;
                         
                         if row_in_panel < max_visible {
@@ -768,9 +768,9 @@ fn real_main() -> eyre::Result<()> {
                     // Handle left mouse button clicks to launch
                     MouseEventKind::Down(MouseButton::Left) => {
                         // Check if click is within the apps panel content area
-                        if mouse_row >= apps_panel_start + 1 && mouse_row < apps_panel_end - 1 && !ui.shown.is_empty() {
-                            // Calculate which visible index was clicked (fixed offset calculation)
-                            let row_in_panel = mouse_row - apps_panel_start - 1; // Subtract border
+                        if mouse_row > apps_panel_start && mouse_row < apps_panel_end - 1 && !ui.shown.is_empty() {
+                            // Calculate which visible index was clicked
+                            let row_in_panel = mouse_row - apps_panel_start; // Subtract border
                             let max_visible = apps_panel_height.saturating_sub(2) as u16; // -2 for borders
                             
                             if row_in_panel < max_visible {
