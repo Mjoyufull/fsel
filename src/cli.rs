@@ -11,6 +11,7 @@ fn usage() -> ! {
   -r, --replace          Replace existing gyr instances
       --clear_history    Clear launch history.
   -p, --program <name>   Launch program directly (bypass TUI).
+  -ss <search>           Pre-fill search in TUI (must be last option).
   -v, --verbose          Increase verbosity level (multiple).
       --no-exec          Print selected application to stdout instead of launching.
       --systemd-run      Launch applications using systemd-run --user --scope.
@@ -67,6 +68,8 @@ pub struct Opts {
     pub input_panel_height: u16,
     /// Program name for direct launch (bypasses TUI)
     pub program: Option<String>,
+    /// Search string to pre-populate in TUI
+    pub search_string: Option<String>,
 }
 
 impl Default for Opts {
@@ -95,6 +98,7 @@ impl Default for Opts {
             title_panel_height_percent: 30,
             input_panel_height: 3,
             program: None,
+            search_string: None,
         }
     }
 }
@@ -108,6 +112,22 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     if let Ok(_socket) = env::var("SWAYSOCK") {
         default.sway = true;
+    }
+    
+    // Check for -ss option first and handle it specially
+    let args: Vec<String> = env::args().collect();
+    if let Some(ss_pos) = args.iter().position(|arg| arg == "-ss") {
+        // Everything after -ss is the search string
+        if ss_pos + 1 < args.len() {
+            let search_parts: Vec<String> = args[ss_pos + 1..].to_vec();
+            default.search_string = Some(search_parts.join(" "));
+            
+            // Create a new parser without the -ss and search string parts
+            let filtered_args: Vec<String> = args[..ss_pos].to_vec();
+            parser = lexopt::Parser::from_args(filtered_args.into_iter().skip(1));
+        } else {
+            return Err(lexopt::Error::MissingValue { option: Some("-ss".to_string()) });
+        }
     }
 
     while let Some(arg) = parser.next()? {
@@ -288,6 +308,13 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
 
 
+    // Validate mutually exclusive options
+    if default.program.is_some() && default.search_string.is_some() {
+        eprintln!("Error: Cannot use -p/--program and -ss together");
+        eprintln!("Use -p for direct launch or -ss for pre-filled TUI search");
+        std::process::exit(1);
+    }
+    
     // Validate flag conflicts - no-exec overrides all launch methods
     if default.no_exec {
         if default.sway || default.systemd_run || default.uwsm {

@@ -425,6 +425,11 @@ fn real_main() -> eyre::Result<()> {
     if let Some(level) = cli.verbose {
         ui.verbosity(level);
     }
+    
+    // Pre-fill search string if provided
+    if let Some(ref search_str) = cli.search_string {
+        ui.query = search_str.clone();
+    }
 
     // App list
     let mut app_state = ListState::default();
@@ -445,6 +450,12 @@ fn real_main() -> eyre::Result<()> {
                                 app_loading_finished = true;
                                 ui.filter();
                                 ui.info(cli.highlight_color, cli.fancy_mode);
+                                
+                                // If we have a pre-filled search string, run filter again to apply it
+                                if cli.search_string.is_some() {
+                                    ui.filter();
+                                    ui.info(cli.highlight_color, cli.fancy_mode);
+                                }
                             }
                             mpsc::TryRecvError::Empty => (),
                         }

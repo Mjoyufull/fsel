@@ -10,31 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-* Full mouse support:
-  - Hover over applications to select them
-  - Click on applications to launch them
-  - Scroll wheel to navigate through the application list
-  - Mouse interactions work seamlessly alongside keyboard navigation
-
-* Direct launch mode:
-  - New `-p/--program` flag to launch applications directly from command line
-  - Bypass TUI entirely for scripting and automation
-  - Supports fuzzy matching with partial application names
-  - Works with all launch methods (--uwsm, --systemd-run, --sway)
-  - Example: `gyr -p firefox` or `gyr --uwsm -p discord`
+* Full mouse support (hover, click, scroll wheel)
+* Direct launch mode with `-p/--program` flag
+* Pre-filled search mode with `-ss` flag
 
 ### Improved
 
-* Mouse cursor positioning accuracy
-* Scroll behavior with proper bounds checking
-* Selection persistence during rapid scrolling
-* Visual consistency with improved border handling
+* Mouse cursor positioning and scroll behavior
+* Selection persistence during rapid interactions
+* Command-line argument validation
 
 ### Fixed
 
-* Input field border visual gaps
-* Selection disappearing during fast mouse movements
-* Line spacing issues when scrolling quickly
+* Input field border gaps
+* Selection disappearing during fast scrolling
 
 ## [0.2.7] - 2025-01-05
 

@@ -103,6 +103,24 @@ gyr --uwsm -p discord
 gyr --systemd-run -vv -p code
 ```
 
+### Pre-filled Search Mode
+
+Open the TUI with a pre-filled search string:
+
+```sh
+# Open TUI with "firefox" already searched
+gyr -ss firefox
+
+# Multi-word search terms work
+gyr -ss web browser
+
+# Combine with other options (must be last)
+gyr --uwsm -vv -r -ss text editor
+
+# Search for anything, even non-existent apps
+gyr -ss asdhaskdjahs
+```
+
 ### Command Line Options
 
 ```
@@ -113,6 +131,7 @@ Usage: gyr [options]
   -r, --replace          Replace existing gyr instances
       --clear_history    Clear launch history
   -p, --program <name>   Launch program directly (bypass TUI)
+  -ss <search>           Pre-fill search in TUI (must be last option)
   -v, --verbose          Increase verbosity level (multiple)
       --no-exec          Print selected application to stdout instead of launching
       --systemd-run      Launch applications using systemd-run --user --scope
