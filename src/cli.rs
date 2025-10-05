@@ -126,7 +126,12 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             let filtered_args: Vec<String> = args[..ss_pos].to_vec();
             parser = lexopt::Parser::from_args(filtered_args.into_iter().skip(1));
         } else {
-            return Err(lexopt::Error::MissingValue { option: Some("-ss".to_string()) });
+            // -ss with no arguments, just set empty search string and open TUI normally
+            default.search_string = Some(String::new());
+            
+            // Create a new parser without the -ss part
+            let filtered_args: Vec<String> = args[..ss_pos].to_vec();
+            parser = lexopt::Parser::from_args(filtered_args.into_iter().skip(1));
         }
     }
 
