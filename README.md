@@ -8,7 +8,8 @@
 
   Fast TUI app launcher and fuzzy finder for GNU/Linux and \*BSD
 
-  <img width="840" height="953" alt="image" src="https://github.com/user-attachments/assets/d2af06f1-0331-4fa9-a24a-54e562fc4c6f" />
+  <img width="860" height="1019" alt="Screenshot_20251006-032156" src="https://github.com/user-attachments/assets/777bd0a4-eb52-4014-837b-d361ab57cfff" />
+
 
 
 </div>
@@ -67,7 +68,7 @@
 * **uwsm** - Universal Wayland Session Manager (for `--uwsm` flag)
 * **systemd** - For `--systemd-run` flag (usually pre-installed on most Linux distributions)
 * **sway** - For automatic Sway integration when `$SWAYSOCK` is set
-* **cclip** - Clipboard manager (for `--cclip` mode with clipboard history browsing)
+* [**heather7283/cclip** ](https://github.com/heather7283/cclip) - Clipboard manager (for `--cclip` mode with clipboard history browsing)
 * **chafa** - Terminal image viewer (for image previews in cclip mode)
 * **Kitty** or **Sixel-capable terminal** - For inline image rendering support
 
@@ -165,6 +166,7 @@ git log --oneline | gyr --dmenu
 - **Line Numbers**: Optional line numbers in content display
 
 ### Clipboard History Mode
+<img width="853" height="605" alt="image" src="https://github.com/user-attachments/assets/0bf71952-f09a-4ce2-8807-bca1003c8daf" />
 
 Browse and select from your clipboard history with image previews:
 
