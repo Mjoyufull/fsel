@@ -16,6 +16,9 @@ fn usage() -> ! {
       --no-exec          Print selected application to stdout instead of launching.
       --systemd-run      Launch applications using systemd-run --user --scope.
       --uwsm             Launch applications using uwsm app.
+      --dmenu            Dmenu mode: read from stdin, output selection to stdout.
+      --with-nth <cols>  Display only specified columns (comma-separated, e.g., 1,3).
+      --delimiter <char> Column delimiter for --with-nth (default: space).
   -h, --help             Show this help message.
   -V, --version          Show the version number and quit.
 ",
@@ -70,6 +73,26 @@ pub struct Opts {
     pub program: Option<String>,
     /// Search string to pre-populate in TUI
     pub search_string: Option<String>,
+    /// Dmenu mode settings
+    pub dmenu_mode: bool,
+    pub dmenu_with_nth: Option<Vec<usize>>,
+    pub dmenu_delimiter: String,
+    pub dmenu_show_line_numbers: bool,
+    pub dmenu_wrap_long_lines: bool,
+    /// Dmenu-specific colors and layout (override regular mode when in dmenu)
+    pub dmenu_highlight_color: Option<ratatui::style::Color>,
+    pub dmenu_cursor: Option<String>,
+    pub dmenu_hard_stop: Option<bool>,
+    pub dmenu_rounded_borders: Option<bool>,
+    pub dmenu_main_border_color: Option<ratatui::style::Color>,
+    pub dmenu_items_border_color: Option<ratatui::style::Color>,
+    pub dmenu_input_border_color: Option<ratatui::style::Color>,
+    pub dmenu_main_text_color: Option<ratatui::style::Color>,
+    pub dmenu_items_text_color: Option<ratatui::style::Color>,
+    pub dmenu_input_text_color: Option<ratatui::style::Color>,
+    pub dmenu_header_title_color: Option<ratatui::style::Color>,
+    pub dmenu_content_panel_height_percent: Option<u16>,
+    pub dmenu_input_panel_height: Option<u16>,
 }
 
 impl Default for Opts {
@@ -99,6 +122,26 @@ impl Default for Opts {
             input_panel_height: 3,
             program: None,
             search_string: None,
+            // Dmenu mode defaults
+            dmenu_mode: false,
+            dmenu_with_nth: None,
+            dmenu_delimiter: " ".to_string(),
+            dmenu_show_line_numbers: false,
+            dmenu_wrap_long_lines: true,
+            // Dmenu-specific styling (None means use regular mode values)
+            dmenu_highlight_color: None,
+            dmenu_cursor: None,
+            dmenu_hard_stop: None,
+            dmenu_rounded_borders: None,
+            dmenu_main_border_color: None,
+            dmenu_items_border_color: None,
+            dmenu_input_border_color: None,
+            dmenu_main_text_color: None,
+            dmenu_items_text_color: None,
+            dmenu_input_text_color: None,
+            dmenu_header_title_color: None,
+            dmenu_content_panel_height_percent: None,
+            dmenu_input_panel_height: None,
         }
     }
 }
@@ -157,6 +200,19 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
             Long("uwsm") => {
                 default.uwsm = true;
+            }
+            Long("dmenu") => {
+                default.dmenu_mode = true;
+            }
+            Long("with-nth") => {
+                let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
+                let cols: Result<Vec<usize>, _> = cols_str.split(',')
+                    .map(|s| s.trim().parse::<usize>())
+                    .collect();
+                default.dmenu_with_nth = Some(cols.map_err(|_| "Invalid column specification. Use comma-separated numbers like: 1,2,4")?);
+            }
+            Long("delimiter") => {
+                default.dmenu_delimiter = parser.value()?.into_string().map_err(|_| "Delimiter must be valid UTF-8")?;
             }
             Short('p') | Long("program") => {
                 default.program = Some(parser.value()?.into_string().map_err(|_| "Program name must be valid UTF-8")?);
@@ -313,11 +369,114 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
 
 
+    // Load dmenu configuration if present
+    if let Some(dmenu_conf) = &file_conf.dmenu {
+        if let Some(color) = &dmenu_conf.highlight_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_highlight_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu highlight_color in config"),
+            }
+        }
+        if let Some(cursor) = &dmenu_conf.cursor {
+            default.dmenu_cursor = Some(cursor.clone());
+        }
+        if let Some(hard_stop) = dmenu_conf.hard_stop {
+            default.dmenu_hard_stop = Some(hard_stop);
+        }
+        if let Some(rounded_borders) = dmenu_conf.rounded_borders {
+            default.dmenu_rounded_borders = Some(rounded_borders);
+        }
+        
+        // Load dmenu border colors
+        if let Some(color) = &dmenu_conf.main_border_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_main_border_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu main_border_color in config"),
+            }
+        }
+        if let Some(color) = &dmenu_conf.items_border_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_items_border_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu items_border_color in config"),
+            }
+        }
+        if let Some(color) = &dmenu_conf.input_border_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_input_border_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu input_border_color in config"),
+            }
+        }
+        
+        // Load dmenu text colors
+        if let Some(color) = &dmenu_conf.main_text_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_main_text_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu main_text_color in config"),
+            }
+        }
+        if let Some(color) = &dmenu_conf.items_text_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_items_text_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu items_text_color in config"),
+            }
+        }
+        if let Some(color) = &dmenu_conf.input_text_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_input_text_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu input_text_color in config"),
+            }
+        }
+        if let Some(color) = &dmenu_conf.header_title_color {
+            match string_to_color(color) {
+                Ok(c) => default.dmenu_header_title_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid dmenu header_title_color in config"),
+            }
+        }
+        
+        // Load dmenu layout
+        if let Some(height) = dmenu_conf.content_panel_height_percent {
+            if height >= 10 && height <= 70 {
+                default.dmenu_content_panel_height_percent = Some(height);
+            } else {
+                eprintln!("Warning: dmenu content_panel_height_percent must be between 10-70%, using default");
+            }
+        }
+        if let Some(height) = dmenu_conf.input_panel_height {
+            if height >= 1 && height <= 10 {
+                default.dmenu_input_panel_height = Some(height);
+            } else {
+                eprintln!("Warning: dmenu input_panel_height must be between 1-10 lines, using default");
+            }
+        }
+        
+        // Load other dmenu options
+        if let Some(delimiter) = &dmenu_conf.delimiter {
+            default.dmenu_delimiter = delimiter.clone();
+        }
+        if let Some(show_line_numbers) = dmenu_conf.show_line_numbers {
+            default.dmenu_show_line_numbers = show_line_numbers;
+        }
+        if let Some(wrap_long_lines) = dmenu_conf.wrap_long_lines {
+            default.dmenu_wrap_long_lines = wrap_long_lines;
+        }
+    }
+
     // Validate mutually exclusive options
     if default.program.is_some() && default.search_string.is_some() {
         eprintln!("Error: Cannot use -p/--program and -ss together");
         eprintln!("Use -p for direct launch or -ss for pre-filled TUI search");
         std::process::exit(1);
+    }
+    
+    // Validate dmenu mode conflicts
+    if default.dmenu_mode {
+        if default.program.is_some() || default.search_string.is_some() {
+            eprintln!("Error: --dmenu cannot be used with -p/--program or -ss");
+            eprintln!("Dmenu mode reads from stdin and outputs to stdout");
+            std::process::exit(1);
+        }
+        // dmenu mode implies no-exec behavior
+        default.no_exec = true;
     }
     
     // Validate flag conflicts - no-exec overrides all launch methods
@@ -373,6 +532,40 @@ pub struct FileConf {
     pub title_panel_height_percent: Option<u16>,
     /// Input panel height in lines
     pub input_panel_height: Option<u16>,
+    /// Dmenu-specific configuration
+    pub dmenu: Option<DmenuConf>,
+}
+
+/// Dmenu-specific configuration section
+#[derive(Debug, Deserialize, Default)]
+pub struct DmenuConf {
+    /// Highlight color used in dmenu mode
+    pub highlight_color: Option<String>,
+    /// Cursor character for dmenu search
+    pub cursor: Option<String>,
+    /// Don't scroll past the last/first item in dmenu
+    pub hard_stop: Option<bool>,
+    /// Use rounded borders in dmenu (default: true)
+    pub rounded_borders: Option<bool>,
+    /// Border colors for dmenu mode
+    pub main_border_color: Option<String>,
+    pub items_border_color: Option<String>,
+    pub input_border_color: Option<String>,
+    /// Text colors for dmenu mode
+    pub main_text_color: Option<String>,
+    pub items_text_color: Option<String>,
+    pub input_text_color: Option<String>,
+    /// Color for panel header titles in dmenu
+    pub header_title_color: Option<String>,
+    /// Layout configuration for dmenu
+    pub content_panel_height_percent: Option<u16>,
+    pub input_panel_height: Option<u16>,
+    /// Default delimiter for column parsing
+    pub delimiter: Option<String>,
+    /// Show line numbers in selection
+    pub show_line_numbers: Option<bool>,
+    /// Wrap long lines in content display
+    pub wrap_long_lines: Option<bool>,
 }
 
 impl FileConf {

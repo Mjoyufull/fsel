@@ -3,6 +3,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 use super::xdg;
+use crate::dmenu::DmenuItem;
 
 /// Application filtering and sorting facility
 pub struct UI<'a> {
@@ -253,5 +254,137 @@ impl<'a> UI<'a> {
         }
         
         best_score
+    }
+}
+
+/// Dmenu-specific UI filtering and sorting facility
+pub struct DmenuUI<'a> {
+    /// Hidden items (They don't match the current query)
+    pub hidden: Vec<DmenuItem>,
+    /// Shown items (They match the current query)
+    pub shown: Vec<DmenuItem>,
+    /// Current selection (index of `self.shown`)
+    pub selected: Option<usize>,
+    /// Info text for content display
+    pub text: Vec<Line<'a>>,
+    /// User query (used for matching)
+    pub query: String,
+    /// Scroll offset for the list
+    pub scroll_offset: usize,
+    /// Whether to wrap long lines in content display
+    pub wrap_long_lines: bool,
+    /// Show line numbers
+    pub show_line_numbers: bool,
+    #[doc(hidden)]
+    // Matching algorithm
+    matcher: SkimMatcherV2,
+}
+
+impl<'a> DmenuUI<'a> {
+    /// Creates a new DmenuUI from a Vec of DmenuItems
+    pub fn new(items: Vec<DmenuItem>, wrap_long_lines: bool, show_line_numbers: bool) -> DmenuUI<'a> {
+        DmenuUI {
+            shown: vec![],
+            hidden: items,
+            selected: Some(0),
+            text: vec![],
+            query: String::new(),
+            scroll_offset: 0,
+            wrap_long_lines,
+            show_line_numbers,
+            matcher: SkimMatcherV2::default(),
+        }
+    }
+
+    /// Update `self.text` to show content for current selection
+    pub fn info(&mut self, _color: Color) {
+        if let Some(selected) = self.selected {
+            if selected < self.shown.len() {
+                let item = &self.shown[selected];
+                let content = item.get_content_display();
+                
+                // Create content display with optional line numbers
+                let mut lines = Vec::new();
+                
+                if self.show_line_numbers {
+                    lines.push(Line::from(Span::raw(format!("Line {}: ", item.line_number))));
+                }
+                
+                if self.wrap_long_lines {
+                    // Split long content into multiple lines for better display
+                    const MAX_WIDTH: usize = 80; // Reasonable default
+                    if content.len() > MAX_WIDTH {
+                        // Create owned strings to avoid lifetime issues
+                        let mut start = 0;
+                        while start < content.len() {
+                            let end = std::cmp::min(start + MAX_WIDTH, content.len());
+                            let chunk = content[start..end].to_string();
+                            lines.push(Line::from(Span::raw(chunk)));
+                            start = end;
+                        }
+                    } else {
+                        lines.push(Line::from(Span::raw(content)));
+                    }
+                } else {
+                    lines.push(Line::from(Span::raw(content)));
+                }
+                
+                self.text = lines;
+            }
+        } else {
+            // Clear info if no selection
+            self.text.clear();
+        }
+    }
+
+    /// Updates shown and hidden items with fuzzy matching
+    pub fn filter(&mut self) {
+        // Hide items that don't match the current filter
+        let mut i = 0;
+        while i != self.shown.len() {
+            let score = self.shown[i].calculate_score(&self.query, &self.matcher);
+            match score {
+                None => {
+                    self.shown[i].set_score(0);
+                    self.hidden.push(self.shown.remove(i));
+                }
+                Some(score) => {
+                    self.shown[i].set_score(score);
+                    i += 1;
+                }
+            }
+        }
+
+        // Re-add hidden items that now match
+        i = 0;
+        while i != self.hidden.len() {
+            if let Some(score) = self.hidden[i].calculate_score(&self.query, &self.matcher) {
+                self.hidden[i].set_score(score);
+                self.shown.push(self.hidden.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+
+        // Sort by score
+        self.shown.sort();
+
+        // Reset selection and scroll
+        if self.shown.is_empty() {
+            self.selected = None;
+            self.scroll_offset = 0;
+        } else {
+            if let Some(current_selected) = self.selected {
+                if current_selected >= self.shown.len() {
+                    self.selected = Some(0);
+                    self.scroll_offset = 0;
+                } else {
+                    self.scroll_offset = 0;
+                }
+            } else {
+                self.selected = Some(0);
+                self.scroll_offset = 0;
+            }
+        }
     }
 }

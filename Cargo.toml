@@ -34,3 +34,4 @@ toml = "0.7"
 ratatui = { version = "0.22.0", default-features = false, features = ["crossterm"]}
 walkdir = "2.3"
 which = "4.4"
+is-terminal = "0.4"

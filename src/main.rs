@@ -9,6 +9,8 @@
 
 /// CLI parser
 mod cli;
+/// Dmenu functionality
+mod dmenu;
 /// Terminal input helpers
 mod input;
 /// Ui helpers
@@ -17,7 +19,8 @@ mod ui;
 mod xdg;
 
 use input::{Event, Input};
-use ui::UI;
+use ui::{UI, DmenuUI};
+use dmenu::{is_stdin_piped, read_stdin_lines, parse_stdin_to_items};
 
 use std::env;
 use std::fs;
@@ -62,6 +65,382 @@ fn shutdown_terminal() {
     let _ = io::stdout().execute(DisableMouseCapture);
     let _ = io::stdout().execute(LeaveAlternateScreen);
     let _ = disable_raw_mode();
+}
+
+fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
+    use crossterm::{
+        event::{KeyCode, KeyModifiers},
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+        ExecutableCommand,
+    };
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
+    use ratatui::Terminal;
+    use crossterm::event::{EnableMouseCapture, DisableMouseCapture, MouseButton, MouseEventKind};
+
+    // Check if stdin is piped, if not in dmenu mode this is an error
+    if !is_stdin_piped() {
+        return Err(eyre!("dmenu mode requires input from stdin"));
+    }
+
+    // Read stdin lines
+    let lines = read_stdin_lines()
+        .wrap_err("Failed to read from stdin")?;
+    
+    if lines.is_empty() {
+        // No input, just exit cleanly
+        return Ok(());
+    }
+
+    // Parse items
+    let items = parse_stdin_to_items(
+        lines,
+        &cli.dmenu_delimiter,
+        cli.dmenu_with_nth.as_ref(),
+    );
+
+    // Setup terminal
+    enable_raw_mode().wrap_err("Failed to enable raw mode")?;
+    io::stdout().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
+    io::stdout().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    
+    // Ensure cleanup on exit
+    defer! {
+        let _ = io::stdout().execute(DisableMouseCapture);
+        let _ = io::stdout().execute(LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+    }
+
+    // Initialize terminal
+    let backend = CrosstermBackend::new(io::stdout());
+    let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
+    terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
+    terminal.clear().wrap_err("Failed to clear terminal")?;
+
+    // Input handler
+    let input = Input::new();
+
+    // Create dmenu UI
+    let mut ui = DmenuUI::new(items, cli.dmenu_wrap_long_lines, cli.dmenu_show_line_numbers);
+    ui.filter(); // Initial filter to show all items
+    ui.info(cli.dmenu_highlight_color.unwrap_or(cli.highlight_color));
+    
+    // List state for ratatui
+    let mut list_state = ListState::default();
+    
+    // Helper function to get effective dmenu colors/options
+    let get_dmenu_color = |dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
+        dmenu_opt.unwrap_or(default)
+    };
+    let get_dmenu_bool = |dmenu_opt: Option<bool>, default: bool| {
+        dmenu_opt.unwrap_or(default)
+    };
+    let get_dmenu_u16 = |dmenu_opt: Option<u16>, default: u16| {
+        dmenu_opt.unwrap_or(default)
+    };
+    // Get effective cursor string
+    let cursor = cli.dmenu_cursor.as_ref().unwrap_or(&cli.cursor);
+
+    // Main TUI loop
+    loop {
+        terminal.draw(|f| {
+            // Get effective colors and settings for dmenu mode
+            let highlight_color = get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color);
+            let main_border_color = get_dmenu_color(cli.dmenu_main_border_color, cli.main_border_color);
+            let items_border_color = get_dmenu_color(cli.dmenu_items_border_color, cli.apps_border_color);
+            let input_border_color = get_dmenu_color(cli.dmenu_input_border_color, cli.input_border_color);
+            let main_text_color = get_dmenu_color(cli.dmenu_main_text_color, cli.main_text_color);
+            let items_text_color = get_dmenu_color(cli.dmenu_items_text_color, cli.apps_text_color);
+            let input_text_color = get_dmenu_color(cli.dmenu_input_text_color, cli.input_text_color);
+            let header_title_color = get_dmenu_color(cli.dmenu_header_title_color, cli.header_title_color);
+            let rounded_borders = get_dmenu_bool(cli.dmenu_rounded_borders, cli.rounded_borders);
+            let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+            let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+            
+            // Layout calculation
+            let total_height = f.size().height;
+            let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+            
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(content_height.max(3)),
+                    Constraint::Min(1),
+                    Constraint::Length(input_panel_height),
+                ].as_ref())
+                .split(f.size());
+            
+            // Border type
+            let border_type = if rounded_borders {
+                BorderType::Rounded
+            } else {
+                BorderType::Plain
+            };
+            
+            // Content panel (shows selected item's full content)
+            let content_block = Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled(
+                    " Content ",
+                    Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                ))
+                .border_type(border_type)
+                .border_style(Style::default().fg(main_border_color));
+            
+            let content_paragraph = Paragraph::new(ui.text.clone())
+                .block(content_block)
+                .style(Style::default().fg(main_text_color))
+                .wrap(Wrap { trim: false })
+                .alignment(Alignment::Left);
+            
+            // Items panel
+            let items_panel_height = chunks[1].height;
+            let max_visible = items_panel_height.saturating_sub(2) as usize;
+            
+            let visible_items = ui.shown
+                .iter()
+                .skip(ui.scroll_offset)
+                .take(max_visible)
+                .map(ListItem::from)
+                .collect::<Vec<ListItem>>();
+            
+            let items_list = List::new(visible_items)
+                .block(Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        " Items ",
+                        Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                    ))
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(items_border_color))
+                )
+                .style(Style::default().fg(items_text_color))
+                .highlight_style(
+                    Style::default()
+                        .fg(highlight_color)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol("> ");
+            
+            // Update list state selection
+            let visible_selection = ui.selected.and_then(|sel| {
+                if sel >= ui.scroll_offset && sel < ui.scroll_offset + max_visible {
+                    Some(sel - ui.scroll_offset)
+                } else {
+                    None
+                }
+            });
+            list_state.select(visible_selection);
+            
+            // Input panel
+            let input_paragraph = Paragraph::new(Line::from(vec![
+                Span::styled("(", Style::default().fg(input_text_color)),
+                Span::styled(
+                    (ui.selected.map_or(0, |v| v + 1)).to_string(),
+                    Style::default().fg(highlight_color),
+                ),
+                Span::styled("/", Style::default().fg(input_text_color)),
+                Span::styled(ui.shown.len().to_string(), Style::default().fg(input_text_color)),
+                Span::styled(") ", Style::default().fg(input_text_color)),
+                Span::styled(">", Style::default().fg(highlight_color)),
+                Span::styled("> ", Style::default().fg(input_text_color)),
+                Span::styled(&ui.query, Style::default().fg(input_text_color)),
+                Span::styled(cursor, Style::default().fg(highlight_color)),
+            ]))
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled(
+                    " Filter ",
+                    Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                ))
+                .border_type(border_type)
+                .border_style(Style::default().fg(input_border_color))
+            )
+            .style(Style::default().fg(input_text_color))
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: false });
+            
+            // Render all components
+            f.render_widget(content_paragraph, chunks[0]);
+            f.render_stateful_widget(items_list, chunks[1], &mut list_state);
+            f.render_widget(input_paragraph, chunks[2]);
+        })?;
+        
+        // Handle input events
+        match input.next()? {
+            Event::Input(key) => {
+                match (key.code, key.modifiers) {
+                    // Exit on escape or Ctrl+C/Q
+                    (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::CONTROL) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                        return Ok(()); // Exit without output
+                    }
+                    // Select item on Enter or Ctrl+Y
+                    (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                        if let Some(selected) = ui.selected {
+                            if selected < ui.shown.len() {
+                                println!("{}", ui.shown[selected].original_line);
+                            }
+                        }
+                        return Ok(());
+                    }
+                    // Add character to query
+                    (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+                        ui.query.push(c);
+                        ui.filter();
+                    }
+                    // Remove character from query
+                    (KeyCode::Backspace, _) => {
+                        ui.query.pop();
+                        ui.filter();
+                    }
+                    // Navigation
+                    (KeyCode::Left, _) => {
+                        if !ui.shown.is_empty() {
+                            ui.selected = Some(0);
+                            ui.scroll_offset = 0;
+                        }
+                    }
+                    (KeyCode::Right, _) => {
+                        if !ui.shown.is_empty() {
+                            ui.selected = Some(ui.shown.len() - 1);
+                            // Scroll to show last item
+                            let total_height = terminal.size()?.height;
+                            let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                            let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+                            let items_panel_height = total_height - content_height - input_height;
+                            let max_visible = items_panel_height.saturating_sub(2) as usize;
+                            if ui.shown.len() > max_visible {
+                                ui.scroll_offset = ui.shown.len() - max_visible;
+                            }
+                        }
+                    }
+                    (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                        if let Some(selected) = ui.selected {
+                            let hard_stop = get_dmenu_bool(cli.dmenu_hard_stop, cli.hard_stop);
+                            ui.selected = if selected < ui.shown.len() - 1 {
+                                Some(selected + 1)
+                            } else if !hard_stop {
+                                Some(0)
+                            } else {
+                                Some(selected)
+                            };
+                            
+                            // Auto-scroll
+                            if let Some(new_selected) = ui.selected {
+                                let total_height = terminal.size()?.height;
+                                let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+                                let items_panel_height = total_height - content_height - input_height;
+                                let max_visible = items_panel_height.saturating_sub(2) as usize;
+                                
+                                if new_selected >= ui.scroll_offset + max_visible {
+                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                } else if new_selected < ui.scroll_offset {
+                                    ui.scroll_offset = new_selected;
+                                }
+                            }
+                        }
+                    }
+                    (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                        if let Some(selected) = ui.selected {
+                            let hard_stop = get_dmenu_bool(cli.dmenu_hard_stop, cli.hard_stop);
+                            ui.selected = if selected > 0 {
+                                Some(selected - 1)
+                            } else if !hard_stop {
+                                Some(ui.shown.len() - 1)
+                            } else {
+                                Some(selected)
+                            };
+                            
+                            // Auto-scroll
+                            if let Some(new_selected) = ui.selected {
+                                let total_height = terminal.size()?.height;
+                                let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+                                let items_panel_height = total_height - content_height - input_height;
+                                let max_visible = items_panel_height.saturating_sub(2) as usize;
+                                
+                                if new_selected < ui.scroll_offset {
+                                    ui.scroll_offset = new_selected;
+                                } else if new_selected >= ui.scroll_offset + max_visible {
+                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                
+                // Update info display
+                ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
+            }
+            Event::Mouse(mouse_event) => {
+                // Similar mouse handling as regular mode but adapted for dmenu layout
+                let mouse_row = mouse_event.row;
+                let total_height = terminal.size()?.height;
+                let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+                
+                let items_panel_start = content_height;
+                let items_panel_height = total_height - content_height - input_height;
+                
+                let list_content_start = items_panel_start + 1;
+                let max_visible_rows = items_panel_height.saturating_sub(2);
+                let list_content_end = list_content_start + max_visible_rows;
+                
+                let update_selection_for_mouse_pos = |ui: &mut DmenuUI, mouse_row: u16| {
+                    if !ui.shown.is_empty() && mouse_row >= list_content_start && mouse_row < list_content_end {
+                        let row_in_content = mouse_row - list_content_start;
+                        let hovered_item_index = ui.scroll_offset + row_in_content as usize;
+                        if hovered_item_index < ui.shown.len() {
+                            ui.selected = Some(hovered_item_index);
+                            ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
+                        }
+                    }
+                };
+                
+                match mouse_event.kind {
+                    MouseEventKind::Moved => {
+                        update_selection_for_mouse_pos(&mut ui, mouse_row);
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if mouse_row >= list_content_start && mouse_row < list_content_end && !ui.shown.is_empty() {
+                            let row_in_content = mouse_row - list_content_start;
+                            let clicked_item_index = ui.scroll_offset + row_in_content as usize;
+                            
+                            if clicked_item_index < ui.shown.len() {
+                                ui.selected = Some(clicked_item_index);
+                                ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
+                                // Output selection and exit
+                                println!("{}", ui.shown[clicked_item_index].original_line);
+                                return Ok(());
+                            }
+                        }
+                    }
+                    MouseEventKind::ScrollUp => {
+                        if !ui.shown.is_empty() && ui.scroll_offset > 0 {
+                            ui.scroll_offset -= 1;
+                            update_selection_for_mouse_pos(&mut ui, mouse_row);
+                        }
+                    }
+                    MouseEventKind::ScrollDown => {
+                        if !ui.shown.is_empty() {
+                            let max_visible = max_visible_rows as usize;
+                            if ui.scroll_offset + max_visible < ui.shown.len() {
+                                ui.scroll_offset += 1;
+                                update_selection_for_mouse_pos(&mut ui, mouse_row);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Event::Tick => {}
+        }
+    }
 }
 
 fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<()> {
@@ -260,6 +639,11 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
 
 fn real_main() -> eyre::Result<()> {
     let cli = cli::parse()?;
+    
+    // Handle dmenu mode
+    if cli.dmenu_mode {
+        return run_dmenu_mode(&cli);
+    }
     
     // Handle direct launch mode (bypass TUI)
     if let Some(ref program_name) = cli.program {

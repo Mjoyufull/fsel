@@ -36,3 +36,37 @@ title_panel_height_percent = 30  # Height of top panel as percentage (10-70%)
 input_panel_height = 3           # Height of input panel in lines (1-10)
 # Note: Apps panel gets the remaining space automatically
 
+# ===== DMENU MODE CONFIGURATION =====
+# Settings specific to dmenu mode (--dmenu flag)
+# If not specified, regular mode settings are used as fallback
+[dmenu]
+
+# Dmenu-specific colors (override regular mode when in dmenu)
+highlight_color = "LightBlue"     # Highlighted text and cursor color
+cursor = "█"                     # Cursor character in filter input
+
+# Dmenu border colors (separate from regular mode)
+main_border_color = "White"      # Border color for content panel (top)
+items_border_color = "White"     # Border color for items list panel (middle)
+input_border_color = "White"     # Border color for filter panel (bottom)
+
+# Dmenu text colors
+main_text_color = "White"        # Text color in content panel
+items_text_color = "White"       # Text color in items list
+input_text_color = "White"       # Text color in filter field
+
+# Dmenu UI settings
+rounded_borders = true           # Use rounded borders in dmenu mode
+hard_stop = false                # Don't wrap around at list ends
+header_title_color = "LightBlue" # Color for panel titles
+
+# Dmenu layout (different from regular mode)
+content_panel_height_percent = 40  # Height of content panel as percentage (10-70%)
+input_panel_height = 3             # Height of filter panel in lines (1-10)
+# Note: Items panel gets the remaining space
+
+# Dmenu parsing options
+delimiter = " "                  # Default column delimiter (can be overridden by --delimiter)
+show_line_numbers = false        # Show line numbers in content display
+wrap_long_lines = true           # Wrap long lines in content panel
+
