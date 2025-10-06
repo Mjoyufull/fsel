@@ -33,20 +33,25 @@ impl CclipItem {
     pub fn get_display_name(&self) -> String {
         match self.mime_type.as_str() {
             mime if mime.starts_with("image/") => {
-                format!("  {} ({})", 
+                format!("{} ({})", 
                     self.preview.chars().take(50).collect::<String>(),
                     mime)
             },
             mime if mime.starts_with("text/") => {
-                format!("  {}", 
-                    self.preview.chars().take(80).collect::<String>())
+                self.preview.chars().take(80).collect::<String>()
             },
             _ => {
-                format!("  {} ({})", 
+                format!("{} ({})", 
                     self.preview.chars().take(50).collect::<String>(),
                     self.mime_type)
             }
         }
+    }
+    
+    /// Get display name with rowid number prefix (for show_line_numbers)
+    pub fn get_display_name_with_number(&self) -> String {
+        let base_name = self.get_display_name();
+        format!("{:<3} {}", self.rowid, base_name)
     }
     
     /// Check if this item is an image
@@ -199,47 +204,23 @@ pub fn check_chafa_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Generate image preview using chafa for the content panel
-pub fn generate_image_preview(content: &[u8], width: u16, height: u16) -> Result<String> {
-    // Try different chafa formats for better compatibility
-    let formats = ["kitty", "sixels", "symbols"];
+/// Check if current terminal supports graphics
+pub fn check_graphics_support() -> bool {
+    let term = std::env::var("TERM").unwrap_or_default();
+    let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
     
-    for format in formats {
-        let result = std::process::Command::new("chafa")
-            .args(&[
-                "-f", format,
-                "--align", "center", 
-                "--scale", "max",
-                "--view-size", &format!("{}x{}", width.min(80), height.min(40)), // Reasonable limits
-                "-"
-            ])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-            
-        if let Ok(mut child) = result {
-            // Write image data to stdin
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                let content_copy = content.to_vec();
-                std::thread::spawn(move || {
-                    stdin.write_all(&content_copy).ok();
-                });
-            }
-            
-            if let Ok(output) = child.wait_with_output() {
-                if output.status.success() && !output.stdout.is_empty() {
-                    let preview = String::from_utf8_lossy(&output.stdout).to_string();
-                    // Check if output looks like actual graphics (not just raw data)
-                    if !preview.trim().is_empty() && (format != "symbols" || preview.len() > 10) {
-                        return Ok(preview);
-                    }
-                }
-            }
-        }
+    // Kitty supports kitty protocol
+    if term_program == "kitty" || term.contains("kitty") {
+        return true;
     }
     
-    // Fallback: return a simple text representation
-    Ok(format!("[IMAGE: {} bytes]", content.len()))
+    // Foot, alacritty, xterm support sixels
+    if term.contains("foot") || term.contains("alacritty") || term.contains("xterm") {
+        return true;
+    }
+    
+    // Default to false for unknown terminals
+    false
 }
+
+

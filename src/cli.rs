@@ -113,6 +113,7 @@ pub struct Opts {
     pub cclip_show_line_numbers: Option<bool>,
     pub cclip_wrap_long_lines: Option<bool>,
     pub cclip_image_preview: Option<bool>,
+    pub cclip_hide_inline_image_message: Option<bool>,
 }
 
 impl Default for Opts {
@@ -181,6 +182,7 @@ impl Default for Opts {
             cclip_show_line_numbers: None,
             cclip_wrap_long_lines: None,
             cclip_image_preview: None,
+            cclip_hide_inline_image_message: None,
         }
     }
 }
@@ -593,6 +595,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         if let Some(image_preview) = cclip_conf.image_preview {
             default.cclip_image_preview = Some(image_preview);
         }
+        if let Some(hide_message) = cclip_conf.hide_inline_image_message {
+            default.cclip_hide_inline_image_message = Some(hide_message);
+        }
     }
 
     // Validate mutually exclusive options
@@ -751,6 +756,8 @@ pub struct CclipConf {
     pub wrap_long_lines: Option<bool>,
     /// Enable image previews using chafa
     pub image_preview: Option<bool>,
+    /// Hide the inline image preview message (show blank instead)
+    pub hide_inline_image_message: Option<bool>,
 }
 
 impl FileConf {

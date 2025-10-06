@@ -70,3 +70,40 @@ delimiter = " "                  # Default column delimiter (can be overridden b
 show_line_numbers = true        # Show line numbers in content display
 wrap_long_lines = true           # Wrap long lines in content panel
 
+# ===== CCLIP MODE CONFIGURATION =====
+# Settings specific to clipboard history mode (--cclip flag)
+# Inherits from [dmenu] section first, then regular mode settings as fallback
+[cclip]
+
+# Cclip-specific colors (override dmenu and regular mode when in cclip)
+highlight_color = "LightBlue"     # Highlighted text and cursor color
+cursor = "█"                     # Cursor character in filter input
+
+# Cclip border colors (separate from dmenu and regular mode)
+main_border_color = "White"      # Border color for content preview panel (top)
+items_border_color = "White"     # Border color for clipboard items list panel (middle)
+input_border_color = "White"     # Border color for filter panel (bottom)
+
+# Cclip text colors
+main_text_color = "White"        # Text color in content preview panel
+items_text_color = "White"       # Text color in clipboard items list
+input_text_color = "White"       # Text color in filter field
+
+# Cclip UI settings
+rounded_borders = true           # Use rounded borders in cclip mode
+hard_stop = false                # Don't wrap around at list ends
+header_title_color = "LightBlue" # Color for panel titles
+
+# Cclip layout (different from regular and dmenu modes)
+content_panel_height_percent = 40  # Height of content preview panel as percentage (10-70%)
+input_panel_height = 3             # Height of filter panel in lines (1-10)
+# Note: Clipboard items panel gets the remaining space
+
+# Cclip display options
+show_line_numbers = true         # Show cclip rowid as line numbers next to items
+wrap_long_lines = true           # Wrap long lines in content preview panel
+
+# Cclip image support
+image_preview = true             # Enable inline image previews using chafa/terminal graphics
+hide_inline_image_message = false # Hide "[Inline Image Preview]" message (show blank instead)
+

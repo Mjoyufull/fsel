@@ -1,5 +1,5 @@
 {
-  description = "Fast TUI launcher for GNU/Linux and *BSD";
+  description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -42,7 +42,7 @@
         packages = {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "gyr";
-            version = "0.2.8-bolttree";
+            version = "0.3.0-eggrind";
 
             src = ./.;
 
@@ -51,10 +51,10 @@
             inherit buildInputs nativeBuildInputs;
 
             meta = with pkgs.lib; {
-              description = "Fast TUI launcher for GNU/Linux and *BSD";
+              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD";
               homepage = "https://github.com/Mjoyufull/gyr";
               license = licenses.bsd2;
-              maintainers = [ ];
+              maintainers = with maintainers; [ "Mjoyufull" ];
               platforms = platforms.linux ++ platforms.darwin;
             };
           };

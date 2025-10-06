@@ -1,10 +1,10 @@
 [package]
 name = "gyr"
-version = "0.2.8-bolttree"
+version = "0.3.0-eggrind"
 authors = ["Namkhai B. <me@forkbomb9.ch>"]
 edition = "2021"
 
-description = "Blazing fast TUI launcher for GNU/Linux and *BSD"
+description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD"
 
 homepage = "https://github.com/Mjoyufull/gyr"
 repository = "https://github.com/Mjoyufull/gyr"
@@ -36,3 +36,5 @@ walkdir = "2.3"
 which = "4.4"
 is-terminal = "0.4"
 strip-ansi-escapes = "0.2"
+base64 = "0.22"
+tokio = { version = "1.0", features = ["process", "rt", "rt-multi-thread"] }

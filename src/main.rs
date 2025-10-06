@@ -13,6 +13,8 @@ mod cli;
 mod cclip;
 /// Dmenu functionality
 mod dmenu;
+/// Terminal graphics handling (inspired by Yazi)
+mod graphics;
 /// Terminal input helpers
 mod input;
 /// Ui helpers
@@ -69,7 +71,7 @@ fn shutdown_terminal() {
     let _ = disable_raw_mode();
 }
 
-fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
+async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     use crossterm::{
         event::{KeyCode, KeyModifiers},
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -101,14 +103,24 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         return Ok(());
     }
 
+    // Get show_line_numbers setting early for item conversion
+    let show_line_numbers = cli.cclip_show_line_numbers.or(Some(cli.dmenu_show_line_numbers)).unwrap_or(false);
+
     // Convert to DmenuItems
     let items: Vec<dmenu::DmenuItem> = cclip_items
         .into_iter()
         .enumerate()
         .map(|(idx, cclip_item)| {
+            // Use numbered display name if show_line_numbers is enabled
+            let display_name = if show_line_numbers {
+                cclip_item.get_display_name_with_number()
+            } else {
+                cclip_item.get_display_name()
+            };
+            
             dmenu::DmenuItem::new_simple(
                 cclip_item.original_line.clone(),
-                cclip_item.get_display_name(),
+                display_name,
                 idx + 1
             )
         })
@@ -135,9 +147,8 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // Input handler
     let input = Input::new();
 
-    // Create dmenu UI using cclip settings with inheritance
+    // Create dmenu UI using cclip settings with inheritance  
     let wrap_long_lines = cli.cclip_wrap_long_lines.or(Some(cli.dmenu_wrap_long_lines)).unwrap_or(true);
-    let show_line_numbers = cli.cclip_show_line_numbers.or(Some(cli.dmenu_show_line_numbers)).unwrap_or(false);
     let mut ui = DmenuUI::new(items, wrap_long_lines, show_line_numbers);
     ui.filter(); // Initial filter to show all items
     
@@ -146,9 +157,10 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         ui.selected = Some(0);
     }
     
-    // Check if chafa is available for image previews
+    // Check if terminal supports graphics and chafa is available
     let chafa_available = cclip::check_chafa_available();
-    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available);
+    let graphics_supported = cclip::check_graphics_support();
+    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available && graphics_supported);
     
     // Get effective colors with cclip -> dmenu -> regular inheritance
     let get_cclip_color = |cclip_opt: Option<ratatui::style::Color>, dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
@@ -166,9 +178,13 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
     let content_panel_height = content_panel_height.max(3).saturating_sub(2); // Account for borders
     
+    // Get hide image message setting
+    let hide_image_message = cli.cclip_hide_inline_image_message.unwrap_or(false);
+    
     ui.info_with_image_support(
         get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
         image_preview_enabled,
+        hide_image_message,
         content_panel_width,
         content_panel_height
     );
@@ -183,6 +199,19 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
 
     // Main TUI loop
     loop {
+        // Update UI content BEFORE drawing to avoid race conditions with graphics clearing
+        let content_panel_width = terminal.size()?.width.saturating_sub(2);
+        let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
+        let content_panel_height = content_panel_height.max(3).saturating_sub(2);
+        
+        ui.info_with_image_support(
+            get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
+            image_preview_enabled,
+            hide_image_message,
+            content_panel_width,
+            content_panel_height
+        );
+        
         terminal.draw(|f| {
             // Get effective colors and settings for cclip mode with inheritance
             let highlight_color = get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color);
@@ -306,6 +335,44 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             f.render_widget(input_paragraph, chunks[2]);
         })?;
         
+        // After ratatui draws, overlay inline image if needed (Yazi's approach!)
+        if image_preview_enabled {
+            let graphics = crate::graphics::GraphicsAdapter::detect();
+            let mut should_show_image = false;
+            
+            if let Some(selected) = ui.selected {
+                if selected < ui.shown.len() {
+                    let item = &ui.shown[selected];
+                    if let Some(rowid) = ui.get_cclip_rowid(item) {
+                        // We have an image to show
+                        should_show_image = true;
+                        
+                        // Calculate content panel area coordinates
+                        let total_height = terminal.size()?.height;
+                        let content_panel_height_percent = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                        let content_height = (total_height as f32 * content_panel_height_percent as f32 / 100.0).round() as u16;
+                        let content_height = content_height.max(3);
+                        
+                        // Content area (inside the border)
+                        let content_area = ratatui::layout::Rect {
+                            x: 1, // Inside left border
+                            y: 1, // Inside top border  
+                            width: terminal.size()?.width.saturating_sub(2), // Account for borders
+                            height: content_height.saturating_sub(2), // Account for borders
+                        };
+                        
+                        // Only show image if it's different from the currently displayed one
+                        let _ = graphics.show_cclip_image_if_different(&rowid, content_area).await;
+                    }
+                }
+            }
+            
+            // Only clear if we were showing an image and now we're not
+            if !should_show_image {
+                let _ = graphics.handle_non_image_content();
+            }
+        }
+        
         // Handle input events with full navigation and clipboard copying
         match input.next()? {
             Event::Input(key) => {
@@ -350,8 +417,23 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             }
                         }
                     }
-                    // Add character to query
-                    (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+                    // Display image in terminal (bypass TUI)
+                    (KeyCode::Char('i'), KeyModifiers::NONE) => {
+                        if let Some(selected) = ui.selected {
+                            if selected < ui.shown.len() {
+                                let item = &ui.shown[selected];
+                                if ui.display_image_to_terminal(item) {
+                                    // Image was displayed, wait for user input to continue
+                                    use crossterm::event::read;
+                                    let _ = read(); // Wait for any key press
+                                    // Refresh the terminal display
+                                    terminal.clear().wrap_err("Failed to clear terminal")?;
+                                }
+                            }
+                        }
+                    }
+                    // Add character to query (exclude 'i' as it's handled above)
+                    (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) if c != 'i' => {
                         ui.query.push(c);
                         ui.filter();
                     }
@@ -463,18 +545,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     }
                     _ => {}
                 }
-                
-                // Update info display after any input with image support
-                let content_panel_width = terminal.size()?.width.saturating_sub(2);
-                let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
-                let content_panel_height = content_panel_height.max(3).saturating_sub(2);
-                
-                ui.info_with_image_support(
-                    get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
-                    image_preview_enabled,
-                    content_panel_width,
-                    content_panel_height
-                );
+                // Content update now happens at the start of the loop before drawing
             }
             Event::Mouse(mouse_event) => {
                 // Mouse handling (similar to dmenu mode)
@@ -500,20 +571,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                         let hovered_item_index = ui.scroll_offset + row_in_content as usize;
                         if hovered_item_index < ui.shown.len() {
                             ui.selected = Some(hovered_item_index);
-                            
-                            // Update info with image support on hover
-                            let content_panel_width = terminal.size().map(|s| s.width.saturating_sub(2)).unwrap_or(80);
-                            let content_panel_height = terminal.size().map(|s| {
-                                let height = (s.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
-                                height.max(3).saturating_sub(2)
-                            }).unwrap_or(10);
-                            
-                            ui.info_with_image_support(
-                                get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
-                                image_preview_enabled,
-                                content_panel_width,
-                                content_panel_height
-                            );
+                            // Content update happens at start of loop
                         }
                     }
                 };
@@ -1225,7 +1283,8 @@ fn real_main() -> eyre::Result<()> {
     
     // Handle cclip mode
     if cli.cclip_mode {
-        return run_cclip_mode(&cli);
+        let rt = tokio::runtime::Runtime::new()?;
+        return rt.block_on(run_cclip_mode(&cli));
     }
     
     // Handle direct launch mode (bypass TUI)

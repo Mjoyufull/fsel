@@ -6,7 +6,7 @@
   [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
   ![written in Rust](https://img.shields.io/badge/language-rust-red.svg?style=flat-square)
 
-  Fast TUI launcher for GNU/Linux and \*BSD
+  Fast TUI app launcher and fuzzy finder for GNU/Linux and \*BSD
 
   <img width="840" height="953" alt="image" src="https://github.com/user-attachments/assets/d2af06f1-0331-4fa9-a24a-54e562fc4c6f" />
 
@@ -67,6 +67,9 @@
 * **uwsm** - Universal Wayland Session Manager (for `--uwsm` flag)
 * **systemd** - For `--systemd-run` flag (usually pre-installed on most Linux distributions)
 * **sway** - For automatic Sway integration when `$SWAYSOCK` is set
+* **cclip** - Clipboard manager (for `--cclip` mode with clipboard history browsing)
+* **chafa** - Terminal image viewer (for image previews in cclip mode)
+* **Kitty** or **Sixel-capable terminal** - For inline image rendering support
 
 ## Usage
 
@@ -134,6 +137,81 @@ gyr --uwsm -vv -r -ss text editor
 gyr -ss asdhaskdjahs
 ```
 
+### Dmenu Mode
+
+Gyr now includes a full dmenu replacement mode that reads from stdin and outputs selections to stdout:
+
+```sh
+# Basic dmenu replacement
+echo -e "Option 1\nOption 2\nOption 3" | gyr --dmenu
+
+# Display only specific columns (like cut)
+ps aux | gyr --dmenu --with-nth 2,11  # Show only PID and command
+
+# Use custom delimiter
+echo "foo:bar:baz" | gyr --dmenu --delimiter ":"
+
+# Pipe from any command
+ls -la | gyr --dmenu
+find . -name "*.rs" | gyr --dmenu
+git log --oneline | gyr --dmenu
+```
+
+#### Dmenu Features
+- **Column Filtering**: Use `--with-nth` to display only specific columns
+- **Custom Delimiters**: Use `--delimiter` to specify column separators
+- **Content Preview**: Selected line content is shown in the top panel
+- **Fuzzy Matching**: Same powerful fuzzy search as regular mode
+- **Line Numbers**: Optional line numbers in content display
+
+### Clipboard History Mode
+
+Browse and select from your clipboard history with image previews:
+
+```sh
+# Browse clipboard history with cclip integration
+gyr --cclip
+```
+
+#### Clipboard Features
+- **Image Previews**: Inline image rendering for copied images (Kitty/Sixel protocols)
+- **Content Preview**: Full text preview in the top panel
+- **History Navigation**: Browse through clipboard history with fuzzy search
+- **Line Numbers**: Shows actual cclip rowid for each entry
+- **Smart Copying**: Automatically copies selection back to clipboard
+
+### Usage Examples
+
+#### As a dmenu replacement:
+```sh
+# Simple menu selection
+echo -e "Edit\nView\nDelete" | gyr --dmenu
+
+# Process selection with column filtering
+ps aux | gyr --dmenu --with-nth 2,11 | xargs kill  # Select and kill process
+
+# File browser
+find . -type f | gyr --dmenu | xargs open  # Select and open file
+
+# Git branch switcher
+git branch | gyr --dmenu | xargs git checkout
+
+# SSH connection picker
+grep "^Host " ~/.ssh/config | gyr --dmenu --with-nth 2 | xargs ssh
+```
+
+#### Window manager integration:
+```sh
+# Sway/i3 window switcher
+swaymsg -t get_tree | jq -r '..|select(.type=="con" and .name!=null)|.name' | gyr --dmenu | xargs swaymsg '[title="^.*"] focus'
+
+# Application launcher (traditional usage)
+sway: bindsym $mod+d exec 'alacritty --title launcher -e gyr'
+
+# Clipboard history browser
+sway: bindsym $mod+v exec 'alacritty --title clipboard -e gyr --cclip'
+```
+
 ### Command Line Options
 
 ```
@@ -149,6 +227,10 @@ Usage: gyr [options]
       --no-exec          Print selected application to stdout instead of launching
       --systemd-run      Launch applications using systemd-run --user --scope
       --uwsm             Launch applications using uwsm app
+      --dmenu            Dmenu mode: read from stdin, output selection to stdout
+      --cclip            Clipboard history mode: browse cclip history with previews
+      --with-nth <cols>  Display only specified columns (comma-separated, e.g., 1,3)
+      --delimiter <char> Column delimiter for --with-nth (default: space)
   -h, --help             Show this help message
   -V, --version          Show the version number and quit
 ```
@@ -200,6 +282,11 @@ for_window [title="^launcher$"] floating enable, resize set width 500 height 430
 * [X] UI customization options
 * [X] XDG Desktop Entry specification compliance
 * [X] Nix flake for universal installation
+* [X] Dmenu mode with stdin/stdout interface
+* [X] Column filtering and custom delimiters for dmenu mode
+* [X] Clipboard history integration (cclip mode)
+* [X] Image preview support for clipboard content
+* [X] Configurable UI themes for different modes
 
 ## Contributing
 

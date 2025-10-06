@@ -6,6 +6,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-eggrind] - 2025-01-06
+
+### Added
+
+* **Dmenu Mode**: Full dmenu replacement with `--dmenu` flag
+  - Reads from stdin, outputs to stdout
+  - Column filtering with `--with-nth` (comma-separated column numbers)
+  - Custom delimiters with `--delimiter`
+  - Content preview panel
+  - Fuzzy matching support
+
+* **Clipboard History Mode**: Browse clipboard history with `--cclip` flag
+  - Integrates with cclip clipboard manager
+  - Inline image previews for Kitty/Sixel terminals
+  - Shows cclip rowid as line numbers
+  - Automatically copies selection back to clipboard
+
+* **Enhanced Configuration**:
+  - Separate `[dmenu]` and `[cclip]` config sections
+  - Mode-specific color schemes and layouts
+  - Image preview settings (`hide_inline_image_message`)
+  - Display options (`show_line_numbers`, `wrap_long_lines`)
+
+### Changed
+
+* Project tagline: now "Fast TUI app launcher and fuzzy finder"
+* Updated Nix flake with new version and maintainer
+
+### Technical
+
+* Modular UI system supporting multiple interaction modes
+* Advanced terminal graphics integration with Kitty/Sixel protocols
+* Configuration inheritance system (cclip → dmenu → regular mode)
+* Zero-copy string handling for large clipboard content
+* Non-blocking image preview generation
+* This release was ground up like an eggshell - hence "eggrind" 🥚
+
+### Dependencies
+
+* Optional: cclip (clipboard manager), chafa (image previews)
+
 ## [0.2.8-bolttree] - 2025-01-05
 
 ### Added

@@ -298,56 +298,81 @@ impl<'a> DmenuUI<'a> {
 
     /// Update `self.text` to show content for current selection
     pub fn info(&mut self, _color: Color) {
-        self.info_with_image_support(_color, false, 0, 0);
+        self.info_with_image_support(_color, false, false, 0, 0);
     }
     
     /// Update `self.text` to show content with optional image preview support
-    pub fn info_with_image_support(&mut self, _color: Color, enable_images: bool, panel_width: u16, panel_height: u16) {
+    pub fn info_with_image_support(&mut self, _color: Color, enable_images: bool, hide_image_message: bool, _panel_width: u16, _panel_height: u16) {
         if let Some(selected) = self.selected {
             if selected < self.shown.len() {
                 let item = &self.shown[selected];
                 
                 // Check if this is a cclip image item and image previews are enabled
                 if enable_images && self.is_cclip_image_item(item) {
-                    // Try to generate image preview
-                    if let Ok(image_preview) = self.generate_cclip_image_preview(item, panel_width, panel_height) {
-                        // Split image preview into lines
-                        let preview_lines: Vec<Line> = image_preview
-                            .lines()
-                            .map(|line| Line::from(Span::raw(line.to_string())))
-                            .collect();
-                        self.text = preview_lines;
-                        return;
+                    if hide_image_message {
+                        // Show minimal or blank content for images
+                        self.text = vec![Line::from(Span::raw("".to_string()))];
+                    } else {
+                        // Show placeholder text - the actual image will be drawn after ratatui finishes
+                        let image_info = self.get_image_info(item);
+                        let info_lines = vec![
+                            Line::from(Span::raw("  [INLINE IMAGE PREVIEW]".to_string())),
+                            Line::from(Span::raw(image_info)),
+                            Line::from(Span::raw("".to_string())),
+                            Line::from(Span::raw("󱇛 Press 'i' for fullscreen view".to_string())),
+                            Line::from(Span::raw(" Press 'Enter' to copy to clipboard".to_string())),
+                            Line::from(Span::raw("".to_string())),
+                            Line::from(Span::raw("Loading image preview...".to_string())),
+                        ];
+                        self.text = info_lines;
                     }
+                    return;
                 }
                 
-                // Fallback to regular content display
-                let content = item.get_content_display();
+                // For cclip items, get the actual clipboard content
+                let content = if self.is_cclip_item(item) {
+                    self.get_cclip_content_for_display(item)
+                } else {
+                    item.get_content_display()
+                };
+                
+                // Simple content handling - just limit length, don't filter aggressively
+                let safe_content = if content.len() > 5000 {
+                    format!("{}...", &content[..5000])
+                } else {
+                    content
+                };
                 
                 // Create content display with optional line numbers
                 let mut lines = Vec::new();
                 
-                if self.show_line_numbers {
-                    lines.push(Line::from(Span::raw(format!("Line {}: ", item.line_number))));
-                }
+                // Add line number if enabled
+                let display_content = if self.show_line_numbers {
+                    format!("{}  {}", item.line_number, safe_content)
+                } else {
+                    safe_content
+                };
                 
                 if self.wrap_long_lines {
-                    // Split long content into multiple lines for better display
-                    const MAX_WIDTH: usize = 80; // Reasonable default
-                    if content.len() > MAX_WIDTH {
-                        // Create owned strings to avoid lifetime issues
-                        let mut start = 0;
-                        while start < content.len() {
-                            let end = std::cmp::min(start + MAX_WIDTH, content.len());
-                            let chunk = content[start..end].to_string();
-                            lines.push(Line::from(Span::raw(chunk)));
-                            start = end;
+                    // Simple line wrapping
+                    const MAX_WIDTH: usize = 80;
+                    for line in display_content.lines() {
+                        if line.chars().count() > MAX_WIDTH {
+                            // Hard wrap long lines at character boundaries
+                            let chars: Vec<char> = line.chars().collect();
+                            let mut start = 0;
+                            while start < chars.len() {
+                                let end = std::cmp::min(start + MAX_WIDTH, chars.len());
+                                let chunk: String = chars[start..end].iter().collect();
+                                lines.push(Line::from(Span::raw(chunk)));
+                                start = end;
+                            }
+                        } else {
+                            lines.push(Line::from(Span::raw(line.to_string())));
                         }
-                    } else {
-                        lines.push(Line::from(Span::raw(content)));
                     }
                 } else {
-                    lines.push(Line::from(Span::raw(content)));
+                    lines.push(Line::from(Span::raw(display_content)));
                 }
                 
                 self.text = lines;
@@ -356,6 +381,21 @@ impl<'a> DmenuUI<'a> {
             // Clear info if no selection
             self.text.clear();
         }
+    }
+    
+    /// Check if a DmenuItem is a cclip item (has tab-separated format with rowid)
+    fn is_cclip_item(&self, item: &crate::dmenu::DmenuItem) -> bool {
+        // Parse the tab-separated cclip format
+        if item.original_line.trim().is_empty() {
+            return false;
+        }
+        
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        if parts.len() >= 2 {
+            // Check if first part looks like a cclip rowid (numeric)
+            return parts[0].trim().parse::<u64>().is_ok();
+        }
+        false
     }
     
     /// Check if a DmenuItem is a cclip image item by parsing its original line
@@ -375,11 +415,58 @@ impl<'a> DmenuUI<'a> {
         false
     }
     
-    /// Generate image preview for a cclip item
-    fn generate_cclip_image_preview(&self, item: &crate::dmenu::DmenuItem, width: u16, height: u16) -> Result<String, String> {
-        // Add safety checks to prevent crashes
-        if item.original_line.trim().is_empty() {
-            return Err("Empty clipboard entry".to_string());
+    /// Get actual clipboard content for display (simplified fallback for now)
+    fn get_cclip_content_for_display(&self, item: &crate::dmenu::DmenuItem) -> String {
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        if parts.len() >= 3 {
+            // For now, just show the preview part instead of doing blocking I/O
+            let preview = parts[2].trim();
+            if !preview.is_empty() {
+                preview.to_string()
+            } else {
+                format!("[Content for rowid {}]", parts[0].trim())
+            }
+        } else if parts.len() >= 2 {
+            // Show mime type info  
+            format!("[{} content]", parts[1].trim())
+        } else {
+            // Fallback
+            item.original_line.clone()
+        }
+    }
+    
+    /// Get image info for display in the preview panel
+    fn get_image_info(&self, item: &crate::dmenu::DmenuItem) -> String {
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        if parts.len() >= 3 {
+            let mime_type = parts[1].trim();
+            let preview = parts[2].trim();
+            format!("Type: {}\nInfo: {}", mime_type, preview)
+        } else {
+            "Image information unavailable".to_string()
+        }
+    }
+    
+    /// Get the rowid for a cclip item to retrieve image data
+    pub fn get_cclip_rowid(&self, item: &crate::dmenu::DmenuItem) -> Option<String> {
+        if !self.is_cclip_image_item(item) {
+            return None;
+        }
+        
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        if parts.len() >= 1 {
+            Some(parts[0].trim().to_string())
+        } else {
+            None
+        }
+    }
+    
+    
+    /// Display image directly to terminal, bypassing ratatui
+    /// Returns true if image was displayed successfully
+    pub fn display_image_to_terminal(&self, item: &crate::dmenu::DmenuItem) -> bool {
+        if !self.is_cclip_image_item(item) {
+            return false;
         }
         
         // Parse the tab-separated cclip format to get rowid
@@ -387,33 +474,34 @@ impl<'a> DmenuUI<'a> {
         if parts.len() >= 1 {
             let rowid = parts[0].trim();
             
-            // Additional safety check
-            if rowid.is_empty() {
-                return Err("Empty rowid".to_string());
-            }
+            // Detect terminal and choose appropriate format for fullscreen display
+            let terminal_type = std::env::var("TERM").unwrap_or_default();
+            let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
             
-            // Get image content from cclip with timeout/error handling
-            match std::process::Command::new("cclip")
-                .args(&["get", rowid])
-                .output()
-            {
-                Ok(output) if output.status.success() && !output.stdout.is_empty() => {
-                    // Use cclip module's image preview function
-                    match crate::cclip::generate_image_preview(&output.stdout, width, height) {
-                        Ok(preview) => Ok(preview),
-                        Err(e) => Err(format!("Preview generation failed: {}", e))
-                    }
-                }
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    Err(format!("cclip get failed: {}", stderr))
-                }
-                Err(e) => Err(format!("Failed to execute cclip: {}", e))
+            let format = if term_program == "kitty" || terminal_type.contains("kitty") {
+                "kitty"
+            } else {
+                "sixels"  // Default to sixels for foot, alacritty, xterm, etc.
+            };
+            
+            // Get image content from cclip and pipe directly to chafa
+            let result = std::process::Command::new("sh")
+                .arg("-c")
+                .arg(&format!(
+                    "cclip get {} | chafa --size 80x30 -f {} -", 
+                    rowid, format
+                ))
+                .status();
+                
+            match result {
+                Ok(status) => status.success(),
+                Err(_) => false,
             }
         } else {
-            Err("Invalid cclip format - no tab separator found".to_string())
+            false
         }
     }
+    
 
     /// Updates shown and hidden items with fuzzy matching
     pub fn filter(&mut self) {
