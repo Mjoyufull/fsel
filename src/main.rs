@@ -73,13 +73,13 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     };
+    use crossterm::event::{EnableMouseCapture, DisableMouseCapture, MouseButton, MouseEventKind};
     use ratatui::backend::CrosstermBackend;
     use ratatui::layout::{Alignment, Constraint, Direction, Layout};
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
     use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
     use ratatui::Terminal;
-    use crossterm::event::{EnableMouseCapture, DisableMouseCapture, MouseButton, MouseEventKind};
 
     // Check if stdin is piped, if not in dmenu mode this is an error
     if !is_stdin_piped() {
@@ -281,6 +281,13 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
                         if let Some(selected) = ui.selected {
                             if selected < ui.shown.len() {
+                                // Clean up terminal BEFORE printing to stdout
+                                terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                let _ = io::stdout().execute(DisableMouseCapture);
+                                let _ = io::stdout().execute(LeaveAlternateScreen);
+                                let _ = disable_raw_mode();
+                                
+                                // Now print the selection to stdout
                                 println!("{}", ui.shown[selected].original_line);
                             }
                         }
@@ -414,6 +421,13 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             if clicked_item_index < ui.shown.len() {
                                 ui.selected = Some(clicked_item_index);
                                 ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
+                                
+                                // Clean up terminal BEFORE printing to stdout
+                                terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                let _ = io::stdout().execute(DisableMouseCapture);
+                                let _ = io::stdout().execute(LeaveAlternateScreen);
+                                let _ = disable_raw_mode();
+                                
                                 // Output selection and exit
                                 println!("{}", ui.shown[clicked_item_index].original_line);
                                 return Ok(());
