@@ -298,9 +298,30 @@ impl<'a> DmenuUI<'a> {
 
     /// Update `self.text` to show content for current selection
     pub fn info(&mut self, _color: Color) {
+        self.info_with_image_support(_color, false, 0, 0);
+    }
+    
+    /// Update `self.text` to show content with optional image preview support
+    pub fn info_with_image_support(&mut self, _color: Color, enable_images: bool, panel_width: u16, panel_height: u16) {
         if let Some(selected) = self.selected {
             if selected < self.shown.len() {
                 let item = &self.shown[selected];
+                
+                // Check if this is a cclip image item and image previews are enabled
+                if enable_images && self.is_cclip_image_item(item) {
+                    // Try to generate image preview
+                    if let Ok(image_preview) = self.generate_cclip_image_preview(item, panel_width, panel_height) {
+                        // Split image preview into lines
+                        let preview_lines: Vec<Line> = image_preview
+                            .lines()
+                            .map(|line| Line::from(Span::raw(line.to_string())))
+                            .collect();
+                        self.text = preview_lines;
+                        return;
+                    }
+                }
+                
+                // Fallback to regular content display
                 let content = item.get_content_display();
                 
                 // Create content display with optional line numbers
@@ -334,6 +355,43 @@ impl<'a> DmenuUI<'a> {
         } else {
             // Clear info if no selection
             self.text.clear();
+        }
+    }
+    
+    /// Check if a DmenuItem is a cclip image item by parsing its original line
+    fn is_cclip_image_item(&self, item: &crate::dmenu::DmenuItem) -> bool {
+        // Parse the tab-separated cclip format to check mime type
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        if parts.len() >= 2 {
+            let mime_type = parts[1];
+            return mime_type.starts_with("image/");
+        }
+        false
+    }
+    
+    /// Generate image preview for a cclip item
+    fn generate_cclip_image_preview(&self, item: &crate::dmenu::DmenuItem, width: u16, height: u16) -> Result<String, String> {
+        // Parse the tab-separated cclip format to get rowid
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        if parts.len() >= 1 {
+            let rowid = parts[0];
+            
+            // Get image content from cclip
+            match std::process::Command::new("cclip")
+                .args(&["get", rowid])
+                .output()
+            {
+                Ok(output) if output.status.success() => {
+                    // Use cclip module's image preview function
+                    match crate::cclip::generate_image_preview(&output.stdout, width, height) {
+                        Ok(preview) => Ok(preview),
+                        Err(_) => Err("Failed to generate image preview".to_string())
+                    }
+                }
+                _ => Err("Failed to get image content from cclip".to_string())
+            }
+        } else {
+            Err("Invalid cclip format".to_string())
         }
     }
 

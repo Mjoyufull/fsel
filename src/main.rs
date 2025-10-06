@@ -146,6 +146,10 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         ui.selected = Some(0);
     }
     
+    // Check if chafa is available for image previews
+    let chafa_available = cclip::check_chafa_available();
+    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available);
+    
     // Get effective colors with cclip -> dmenu -> regular inheritance
     let get_cclip_color = |cclip_opt: Option<ratatui::style::Color>, dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
         cclip_opt.or(dmenu_opt).unwrap_or(default)
@@ -157,7 +161,17 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         cclip_opt.or(dmenu_opt).unwrap_or(default)
     };
     
-    ui.info(get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color));
+    // Update info with image support
+    let content_panel_width = terminal.size()?.width.saturating_sub(2); // Account for borders
+    let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
+    let content_panel_height = content_panel_height.max(3).saturating_sub(2); // Account for borders
+    
+    ui.info_with_image_support(
+        get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
+        image_preview_enabled,
+        content_panel_width,
+        content_panel_height
+    );
     
     // List state for ratatui
     let mut list_state = ListState::default();
@@ -166,10 +180,6 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     let cursor = cli.cclip_cursor.as_ref()
         .or(cli.dmenu_cursor.as_ref())
         .unwrap_or(&cli.cursor);
-
-    // Check if chafa is available for image previews
-    let chafa_available = cclip::check_chafa_available();
-    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available);
 
     // Main TUI loop
     loop {
@@ -454,8 +464,17 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     _ => {}
                 }
                 
-                // Update info display after any input
-                ui.info(get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color));
+                // Update info display after any input with image support
+                let content_panel_width = terminal.size()?.width.saturating_sub(2);
+                let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
+                let content_panel_height = content_panel_height.max(3).saturating_sub(2);
+                
+                ui.info_with_image_support(
+                    get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
+                    image_preview_enabled,
+                    content_panel_width,
+                    content_panel_height
+                );
             }
             Event::Mouse(mouse_event) => {
                 // Mouse handling (similar to dmenu mode)
@@ -481,7 +500,20 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                         let hovered_item_index = ui.scroll_offset + row_in_content as usize;
                         if hovered_item_index < ui.shown.len() {
                             ui.selected = Some(hovered_item_index);
-                            ui.info(get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color));
+                            
+                            // Update info with image support on hover
+                            let content_panel_width = terminal.size().map(|s| s.width.saturating_sub(2)).unwrap_or(80);
+                            let content_panel_height = terminal.size().map(|s| {
+                                let height = (s.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
+                                height.max(3).saturating_sub(2)
+                            }).unwrap_or(10);
+                            
+                            ui.info_with_image_support(
+                                get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
+                                image_preview_enabled,
+                                content_panel_width,
+                                content_panel_height
+                            );
                         }
                     }
                 };
