@@ -67,6 +67,6 @@ input_panel_height = 3             # Height of filter panel in lines (1-10)
 
 # Dmenu parsing options
 delimiter = " "                  # Default column delimiter (can be overridden by --delimiter)
-show_line_numbers = false        # Show line numbers in content display
+show_line_numbers = true        # Show line numbers in content display
 wrap_long_lines = true           # Wrap long lines in content panel
 

@@ -42,6 +42,9 @@ impl DmenuItem {
         let columns: Vec<String> = if delimiter == " " {
             // Special case for space: split by whitespace and filter empty
             original_line.split_whitespace().map(|s| s.to_string()).collect()
+        } else if delimiter == "\t" {
+            // Special handling for tab delimiter - preserve tabs for column parsing
+            original_line.split('\t').map(|s| s.to_string()).collect()
         } else {
             original_line.split(delimiter).map(|s| s.to_string()).collect()
         };
@@ -53,16 +56,38 @@ impl DmenuItem {
                 .iter()
                 .filter_map(|&col_idx| {
                     if col_idx > 0 && col_idx <= columns.len() {
-                        Some(columns[col_idx - 1].clone()) // Convert 1-based to 0-based
+                        let col_text = columns[col_idx - 1].clone(); // Convert 1-based to 0-based
+                        if !col_text.is_empty() {
+                            Some(col_text)
+                        } else {
+                            Some("<empty>".to_string()) // Show placeholder for empty columns
+                        }
                     } else {
-                        None
+                        None // Column index out of bounds
                     }
                 })
                 .collect();
-            displayed_cols.join(" ")
+            let result = displayed_cols.join(" ");
+            if result.is_empty() {
+                format!("<no column {} found>", nth_cols.iter().map(|n| n.to_string()).collect::<Vec<_>>().join(","))
+            } else {
+                result
+            }
         } else {
-            // Show the full line
-            original_line.clone()
+            // Show the full line - format tab-separated content nicely
+            if delimiter == "\t" && columns.len() > 1 {
+                // For tab-separated content like cliphist, format nicely with padding
+                if columns[0].parse::<u64>().is_ok() {
+                    // First column is numeric (like cliphist ID), format with padding
+                    format!("{:<6} {}", columns[0], columns[1..].join(" "))
+                } else {
+                    // Non-numeric, just use regular spacing
+                    columns.join("  ")
+                }
+            } else {
+                // For other content, replace tabs with double spaces
+                original_line.replace('\t', "  ")
+            }
         };
 
         Self {
@@ -115,6 +140,12 @@ impl DmenuItem {
         } else {
             self.original_line.clone()
         }
+    }
+
+    /// Get the original line with any terminal escape sequences stripped
+    pub fn get_clean_original_line(&self) -> String {
+        // Strip terminal escape sequences (ANSI codes)
+        strip_ansi_escapes::strip_str(&self.original_line)
     }
 }
 

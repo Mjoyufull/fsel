@@ -56,14 +56,14 @@ fn main() {
 
 fn setup_terminal() -> eyre::Result<()> {
     enable_raw_mode().wrap_err("Failed to enable raw mode")?;
-    io::stdout().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
-    io::stdout().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
+    io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
     Ok(())
 }
 
 fn shutdown_terminal() {
-    let _ = io::stdout().execute(DisableMouseCapture);
-    let _ = io::stdout().execute(LeaveAlternateScreen);
+    let _ = io::stderr().execute(DisableMouseCapture);
+    let _ = io::stderr().execute(LeaveAlternateScreen);
     let _ = disable_raw_mode();
 }
 
@@ -104,18 +104,18 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
 
     // Setup terminal
     enable_raw_mode().wrap_err("Failed to enable raw mode")?;
-    io::stdout().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
-    io::stdout().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
+    io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
     
     // Ensure cleanup on exit
     defer! {
-        let _ = io::stdout().execute(DisableMouseCapture);
-        let _ = io::stdout().execute(LeaveAlternateScreen);
+        let _ = io::stderr().execute(DisableMouseCapture);
+        let _ = io::stderr().execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
 
-    // Initialize terminal
-    let backend = CrosstermBackend::new(io::stdout());
+    // Initialize terminal using stderr to keep stdout clean for dmenu output
+    let backend = CrosstermBackend::new(io::stderr());
     let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
@@ -126,6 +126,12 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // Create dmenu UI
     let mut ui = DmenuUI::new(items, cli.dmenu_wrap_long_lines, cli.dmenu_show_line_numbers);
     ui.filter(); // Initial filter to show all items
+    
+    // Ensure we have a valid selection if there are items
+    if !ui.shown.is_empty() && ui.selected.is_none() {
+        ui.selected = Some(0);
+    }
+    
     ui.info(cli.dmenu_highlight_color.unwrap_or(cli.highlight_color));
     
     // List state for ratatui
@@ -279,19 +285,25 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     }
                     // Select item on Enter or Ctrl+Y
                     (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                        // Store selection and exit loop to handle output outside TUI context
                         if let Some(selected) = ui.selected {
                             if selected < ui.shown.len() {
-                                // Clean up terminal BEFORE printing to stdout
+                                // Store the selected line (cleaned of escape sequences)
+                                let selected_line = ui.shown[selected].get_clean_original_line();
+                                
+                                // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
-                                let _ = io::stdout().execute(DisableMouseCapture);
-                                let _ = io::stdout().execute(LeaveAlternateScreen);
+                                drop(terminal); // Ensure terminal is fully cleaned up
+                                let _ = io::stderr().execute(DisableMouseCapture);
+                                let _ = io::stderr().execute(LeaveAlternateScreen);
                                 let _ = disable_raw_mode();
                                 
-                                // Now print the selection to stdout
-                                println!("{}", ui.shown[selected].original_line);
+                                // Now print to stdout in a completely clean context
+                                println!("{}", selected_line);
+                                return Ok(());
                             }
                         }
-                        return Ok(());
+                        return Ok(()); // Exit without selection
                     }
                     // Add character to query
                     (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
@@ -312,30 +324,37 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     }
                     (KeyCode::Right, _) => {
                         if !ui.shown.is_empty() {
-                            ui.selected = Some(ui.shown.len() - 1);
+                            let last_index = ui.shown.len() - 1;
+                            ui.selected = Some(last_index);
+                            
                             // Scroll to show last item
                             let total_height = terminal.size()?.height;
                             let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
                             let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                             let items_panel_height = total_height - content_height - input_height;
                             let max_visible = items_panel_height.saturating_sub(2) as usize;
-                            if ui.shown.len() > max_visible {
-                                ui.scroll_offset = ui.shown.len() - max_visible;
+                            
+                            if max_visible > 0 && ui.shown.len() > max_visible {
+                                ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
+                            } else {
+                                ui.scroll_offset = 0;
                             }
                         }
                     }
                     (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                        if let Some(selected) = ui.selected {
+                        if !ui.shown.is_empty() {
                             let hard_stop = get_dmenu_bool(cli.dmenu_hard_stop, cli.hard_stop);
-                            ui.selected = if selected < ui.shown.len() - 1 {
-                                Some(selected + 1)
+                            let current_selected = ui.selected.unwrap_or(0);
+                            
+                            ui.selected = if current_selected < ui.shown.len() - 1 {
+                                Some(current_selected + 1)
                             } else if !hard_stop {
                                 Some(0)
                             } else {
-                                Some(selected)
+                                Some(current_selected)
                             };
                             
-                            // Auto-scroll
+                            // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
                                 let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
@@ -343,26 +362,34 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                                 let items_panel_height = total_height - content_height - input_height;
                                 let max_visible = items_panel_height.saturating_sub(2) as usize;
                                 
-                                if new_selected >= ui.scroll_offset + max_visible {
-                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-                                } else if new_selected < ui.scroll_offset {
-                                    ui.scroll_offset = new_selected;
+                                // Ensure we have a valid max_visible
+                                if max_visible > 0 {
+                                    // Scroll down if selection goes below visible area
+                                    if new_selected >= ui.scroll_offset + max_visible {
+                                        ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                    }
+                                    // Scroll up if selection goes above visible area (for wrapping)
+                                    else if new_selected < ui.scroll_offset {
+                                        ui.scroll_offset = new_selected;
+                                    }
                                 }
                             }
                         }
                     }
                     (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                        if let Some(selected) = ui.selected {
+                        if !ui.shown.is_empty() {
                             let hard_stop = get_dmenu_bool(cli.dmenu_hard_stop, cli.hard_stop);
-                            ui.selected = if selected > 0 {
-                                Some(selected - 1)
+                            let current_selected = ui.selected.unwrap_or(0);
+                            
+                            ui.selected = if current_selected > 0 {
+                                Some(current_selected - 1)
                             } else if !hard_stop {
                                 Some(ui.shown.len() - 1)
                             } else {
-                                Some(selected)
+                                Some(current_selected)
                             };
                             
-                            // Auto-scroll
+                            // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
                                 let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
@@ -370,10 +397,16 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                                 let items_panel_height = total_height - content_height - input_height;
                                 let max_visible = items_panel_height.saturating_sub(2) as usize;
                                 
-                                if new_selected < ui.scroll_offset {
-                                    ui.scroll_offset = new_selected;
-                                } else if new_selected >= ui.scroll_offset + max_visible {
-                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                // Ensure we have a valid max_visible
+                                if max_visible > 0 {
+                                    // Scroll up if selection goes above visible area
+                                    if new_selected < ui.scroll_offset {
+                                        ui.scroll_offset = new_selected;
+                                    }
+                                    // Scroll down if selection goes below visible area (for wrapping to bottom)
+                                    else if new_selected >= ui.scroll_offset + max_visible {
+                                        ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                    }
                                 }
                             }
                         }
@@ -419,32 +452,46 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             let clicked_item_index = ui.scroll_offset + row_in_content as usize;
                             
                             if clicked_item_index < ui.shown.len() {
-                                ui.selected = Some(clicked_item_index);
-                                ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
+                                // Store the selected line (cleaned of escape sequences)
+                                let selected_line = ui.shown[clicked_item_index].get_clean_original_line();
                                 
-                                // Clean up terminal BEFORE printing to stdout
+                                // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
-                                let _ = io::stdout().execute(DisableMouseCapture);
-                                let _ = io::stdout().execute(LeaveAlternateScreen);
+                                drop(terminal); // Ensure terminal is fully cleaned up
+                                let _ = io::stderr().execute(DisableMouseCapture);
+                                let _ = io::stderr().execute(LeaveAlternateScreen);
                                 let _ = disable_raw_mode();
                                 
-                                // Output selection and exit
-                                println!("{}", ui.shown[clicked_item_index].original_line);
+                                // Output selection in clean context
+                                println!("{}", selected_line);
                                 return Ok(());
                             }
                         }
                     }
                     MouseEventKind::ScrollUp => {
                         if !ui.shown.is_empty() && ui.scroll_offset > 0 {
-                            ui.scroll_offset -= 1;
+                            ui.scroll_offset = ui.scroll_offset.saturating_sub(1);
+                            // Update selection to follow scroll if needed
+                            if let Some(current_selected) = ui.selected {
+                                let max_visible = max_visible_rows as usize;
+                                if current_selected >= ui.scroll_offset + max_visible {
+                                    ui.selected = Some((ui.scroll_offset + max_visible - 1).min(ui.shown.len() - 1));
+                                }
+                            }
                             update_selection_for_mouse_pos(&mut ui, mouse_row);
                         }
                     }
                     MouseEventKind::ScrollDown => {
                         if !ui.shown.is_empty() {
                             let max_visible = max_visible_rows as usize;
-                            if ui.scroll_offset + max_visible < ui.shown.len() {
+                            if max_visible > 0 && ui.scroll_offset + max_visible < ui.shown.len() {
                                 ui.scroll_offset += 1;
+                                // Update selection to follow scroll if needed
+                                if let Some(current_selected) = ui.selected {
+                                    if current_selected < ui.scroll_offset {
+                                        ui.selected = Some(ui.scroll_offset);
+                                    }
+                                }
                                 update_selection_for_mouse_pos(&mut ui, mouse_row);
                             }
                         }
@@ -805,8 +852,8 @@ fn real_main() -> eyre::Result<()> {
     // Read applications
     let apps = xdg::read(dirs, &db);
 
-    // Initialize the terminal with crossterm backend
-    let backend = CrosstermBackend::new(io::stdout());
+    // Initialize the terminal with crossterm backend using stderr
+    let backend = CrosstermBackend::new(io::stderr());
     let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
