@@ -17,6 +17,7 @@ fn usage() -> ! {
       --systemd-run      Launch applications using systemd-run --user --scope.
       --uwsm             Launch applications using uwsm app.
       --dmenu            Dmenu mode: read from stdin, output selection to stdout.
+      --cclip            Clipboard history mode: browse cclip history with previews.
       --with-nth <cols>  Display only specified columns (comma-separated, e.g., 1,3).
       --delimiter <char> Column delimiter for --with-nth (default: space).
   -h, --help             Show this help message.
@@ -79,6 +80,8 @@ pub struct Opts {
     pub dmenu_delimiter: String,
     pub dmenu_show_line_numbers: bool,
     pub dmenu_wrap_long_lines: bool,
+    /// Clipboard history mode settings
+    pub cclip_mode: bool,
     /// Dmenu-specific colors and layout (override regular mode when in dmenu)
     pub dmenu_highlight_color: Option<ratatui::style::Color>,
     pub dmenu_cursor: Option<String>,
@@ -93,6 +96,23 @@ pub struct Opts {
     pub dmenu_header_title_color: Option<ratatui::style::Color>,
     pub dmenu_content_panel_height_percent: Option<u16>,
     pub dmenu_input_panel_height: Option<u16>,
+    /// Cclip-specific colors and layout (inherit from dmenu, then regular mode)
+    pub cclip_highlight_color: Option<ratatui::style::Color>,
+    pub cclip_cursor: Option<String>,
+    pub cclip_hard_stop: Option<bool>,
+    pub cclip_rounded_borders: Option<bool>,
+    pub cclip_main_border_color: Option<ratatui::style::Color>,
+    pub cclip_items_border_color: Option<ratatui::style::Color>,
+    pub cclip_input_border_color: Option<ratatui::style::Color>,
+    pub cclip_main_text_color: Option<ratatui::style::Color>,
+    pub cclip_items_text_color: Option<ratatui::style::Color>,
+    pub cclip_input_text_color: Option<ratatui::style::Color>,
+    pub cclip_header_title_color: Option<ratatui::style::Color>,
+    pub cclip_content_panel_height_percent: Option<u16>,
+    pub cclip_input_panel_height: Option<u16>,
+    pub cclip_show_line_numbers: Option<bool>,
+    pub cclip_wrap_long_lines: Option<bool>,
+    pub cclip_image_preview: Option<bool>,
 }
 
 impl Default for Opts {
@@ -128,6 +148,8 @@ impl Default for Opts {
             dmenu_delimiter: " ".to_string(),
             dmenu_show_line_numbers: false,
             dmenu_wrap_long_lines: true,
+            // Cclip mode defaults
+            cclip_mode: false,
             // Dmenu-specific styling (None means use regular mode values)
             dmenu_highlight_color: None,
             dmenu_cursor: None,
@@ -142,6 +164,23 @@ impl Default for Opts {
             dmenu_header_title_color: None,
             dmenu_content_panel_height_percent: None,
             dmenu_input_panel_height: None,
+            // Cclip-specific styling (None means inherit from dmenu, then regular mode)
+            cclip_highlight_color: None,
+            cclip_cursor: None,
+            cclip_hard_stop: None,
+            cclip_rounded_borders: None,
+            cclip_main_border_color: None,
+            cclip_items_border_color: None,
+            cclip_input_border_color: None,
+            cclip_main_text_color: None,
+            cclip_items_text_color: None,
+            cclip_input_text_color: None,
+            cclip_header_title_color: None,
+            cclip_content_panel_height_percent: None,
+            cclip_input_panel_height: None,
+            cclip_show_line_numbers: None,
+            cclip_wrap_long_lines: None,
+            cclip_image_preview: None,
         }
     }
 }
@@ -203,6 +242,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
             Long("dmenu") => {
                 default.dmenu_mode = true;
+            }
+            Long("cclip") => {
+                default.cclip_mode = true;
             }
             Long("with-nth") => {
                 let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
@@ -461,6 +503,98 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
     }
 
+    // Load cclip configuration if present
+    if let Some(cclip_conf) = &file_conf.cclip {
+        if let Some(color) = &cclip_conf.highlight_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_highlight_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip highlight_color in config"),
+            }
+        }
+        if let Some(cursor) = &cclip_conf.cursor {
+            default.cclip_cursor = Some(cursor.clone());
+        }
+        if let Some(hard_stop) = cclip_conf.hard_stop {
+            default.cclip_hard_stop = Some(hard_stop);
+        }
+        if let Some(rounded_borders) = cclip_conf.rounded_borders {
+            default.cclip_rounded_borders = Some(rounded_borders);
+        }
+        
+        // Load cclip border colors
+        if let Some(color) = &cclip_conf.main_border_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_main_border_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip main_border_color in config"),
+            }
+        }
+        if let Some(color) = &cclip_conf.items_border_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_items_border_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip items_border_color in config"),
+            }
+        }
+        if let Some(color) = &cclip_conf.input_border_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_input_border_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip input_border_color in config"),
+            }
+        }
+        
+        // Load cclip text colors
+        if let Some(color) = &cclip_conf.main_text_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_main_text_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip main_text_color in config"),
+            }
+        }
+        if let Some(color) = &cclip_conf.items_text_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_items_text_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip items_text_color in config"),
+            }
+        }
+        if let Some(color) = &cclip_conf.input_text_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_input_text_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip input_text_color in config"),
+            }
+        }
+        if let Some(color) = &cclip_conf.header_title_color {
+            match string_to_color(color) {
+                Ok(c) => default.cclip_header_title_color = Some(c),
+                Err(_) => eprintln!("Warning: Invalid cclip header_title_color in config"),
+            }
+        }
+        
+        // Load cclip layout
+        if let Some(height) = cclip_conf.content_panel_height_percent {
+            if height >= 10 && height <= 70 {
+                default.cclip_content_panel_height_percent = Some(height);
+            } else {
+                eprintln!("Warning: cclip content_panel_height_percent must be between 10-70%, using default");
+            }
+        }
+        if let Some(height) = cclip_conf.input_panel_height {
+            if height >= 1 && height <= 10 {
+                default.cclip_input_panel_height = Some(height);
+            } else {
+                eprintln!("Warning: cclip input_panel_height must be between 1-10 lines, using default");
+            }
+        }
+        
+        // Load other cclip options
+        if let Some(show_line_numbers) = cclip_conf.show_line_numbers {
+            default.cclip_show_line_numbers = Some(show_line_numbers);
+        }
+        if let Some(wrap_long_lines) = cclip_conf.wrap_long_lines {
+            default.cclip_wrap_long_lines = Some(wrap_long_lines);
+        }
+        if let Some(image_preview) = cclip_conf.image_preview {
+            default.cclip_image_preview = Some(image_preview);
+        }
+    }
+
     // Validate mutually exclusive options
     if default.program.is_some() && default.search_string.is_some() {
         eprintln!("Error: Cannot use -p/--program and -ss together");
@@ -477,6 +611,23 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
         // dmenu mode implies no-exec behavior
         default.no_exec = true;
+    }
+    
+    // Validate cclip mode conflicts
+    if default.cclip_mode {
+        if default.program.is_some() || default.search_string.is_some() {
+            eprintln!("Error: --cclip cannot be used with -p/--program or -ss");
+            eprintln!("Cclip mode browses clipboard history and copies selection");
+            std::process::exit(1);
+        }
+        // cclip mode implies no-exec behavior
+        default.no_exec = true;
+    }
+    
+    // Validate mutually exclusive special modes
+    if default.dmenu_mode && default.cclip_mode {
+        eprintln!("Error: --dmenu and --cclip cannot be used together");
+        std::process::exit(1);
     }
     
     // Validate flag conflicts - no-exec overrides all launch methods
@@ -534,6 +685,8 @@ pub struct FileConf {
     pub input_panel_height: Option<u16>,
     /// Dmenu-specific configuration
     pub dmenu: Option<DmenuConf>,
+    /// Cclip-specific configuration
+    pub cclip: Option<CclipConf>,
 }
 
 /// Dmenu-specific configuration section
@@ -566,6 +719,38 @@ pub struct DmenuConf {
     pub show_line_numbers: Option<bool>,
     /// Wrap long lines in content display
     pub wrap_long_lines: Option<bool>,
+}
+
+/// Cclip-specific configuration section (inherits from dmenu, then regular mode)
+#[derive(Debug, Deserialize, Default)]
+pub struct CclipConf {
+    /// Highlight color used in cclip mode
+    pub highlight_color: Option<String>,
+    /// Cursor character for cclip search
+    pub cursor: Option<String>,
+    /// Don't scroll past the last/first item in cclip
+    pub hard_stop: Option<bool>,
+    /// Use rounded borders in cclip (default: true)
+    pub rounded_borders: Option<bool>,
+    /// Border colors for cclip mode
+    pub main_border_color: Option<String>,
+    pub items_border_color: Option<String>,
+    pub input_border_color: Option<String>,
+    /// Text colors for cclip mode
+    pub main_text_color: Option<String>,
+    pub items_text_color: Option<String>,
+    pub input_text_color: Option<String>,
+    /// Color for panel header titles in cclip
+    pub header_title_color: Option<String>,
+    /// Layout configuration for cclip
+    pub content_panel_height_percent: Option<u16>,
+    pub input_panel_height: Option<u16>,
+    /// Show line numbers in selection
+    pub show_line_numbers: Option<bool>,
+    /// Wrap long lines in content display
+    pub wrap_long_lines: Option<bool>,
+    /// Enable image previews using chafa
+    pub image_preview: Option<bool>,
 }
 
 impl FileConf {

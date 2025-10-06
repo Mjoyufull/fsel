@@ -98,6 +98,18 @@ impl DmenuItem {
             line_number,
         }
     }
+    
+    /// Create a new DmenuItem with simple display text (used for cclip integration)
+    pub fn new_simple(original_line: String, display_text: String, line_number: usize) -> Self {
+        let columns = vec![original_line.clone()];
+        Self {
+            original_line,
+            display_text,
+            columns,
+            score: 0,
+            line_number,
+        }
+    }
 
     /// Calculate fuzzy match score against query
     pub fn calculate_score(&self, query: &str, matcher: &SkimMatcherV2) -> Option<i64> {
@@ -135,10 +147,24 @@ impl DmenuItem {
 
     /// Get content for display in the main panel (description area)
     pub fn get_content_display(&self) -> String {
-        if self.is_image() {
+        let content = if self.is_image() {
             format!("[IMAGE] {}", self.original_line)
         } else {
             self.original_line.clone()
+        };
+        
+        // Format tab-separated content nicely for display
+        if content.contains('\t') {
+            let parts: Vec<&str> = content.split('\t').collect();
+            if parts.len() >= 2 && parts[0].parse::<u64>().is_ok() {
+                // First part is numeric (like cliphist ID), format with padding
+                format!("{:<6} {}", parts[0], parts[1..].join("  "))
+            } else {
+                // Replace tabs with double spaces for better readability
+                content.replace('\t', "  ")
+            }
+        } else {
+            content
         }
     }
 

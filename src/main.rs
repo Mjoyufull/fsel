@@ -9,6 +9,8 @@
 
 /// CLI parser
 mod cli;
+/// Clipboard history integration
+mod cclip;
 /// Dmenu functionality
 mod dmenu;
 /// Terminal input helpers
@@ -65,6 +67,488 @@ fn shutdown_terminal() {
     let _ = io::stderr().execute(DisableMouseCapture);
     let _ = io::stderr().execute(LeaveAlternateScreen);
     let _ = disable_raw_mode();
+}
+
+fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
+    use crossterm::{
+        event::{KeyCode, KeyModifiers},
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+        ExecutableCommand,
+    };
+    use crossterm::event::{EnableMouseCapture, DisableMouseCapture, MouseButton, MouseEventKind};
+    use ratatui::backend::CrosstermBackend;
+    use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
+    use ratatui::Terminal;
+
+    // Check if cclip is available
+    if !cclip::check_cclip_available() {
+        return Err(eyre!("cclip is not available. Please install cclip and ensure it's in your PATH."));
+    }
+    
+    // Check if cclip database is accessible
+    cclip::check_cclip_database()
+        .wrap_err("cclip database check failed")?;
+
+    // Get clipboard history from cclip
+    let cclip_items = cclip::get_clipboard_history()
+        .wrap_err("Failed to get clipboard history from cclip")?;
+    
+    if cclip_items.is_empty() {
+        println!("No clipboard history available");
+        return Ok(());
+    }
+
+    // Convert to DmenuItems
+    let items: Vec<dmenu::DmenuItem> = cclip_items
+        .into_iter()
+        .enumerate()
+        .map(|(idx, cclip_item)| {
+            dmenu::DmenuItem::new_simple(
+                cclip_item.original_line.clone(),
+                cclip_item.get_display_name(),
+                idx + 1
+            )
+        })
+        .collect();
+
+    // Setup terminal
+    enable_raw_mode().wrap_err("Failed to enable raw mode")?;
+    io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
+    io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    
+    // Ensure cleanup on exit
+    defer! {
+        let _ = io::stderr().execute(DisableMouseCapture);
+        let _ = io::stderr().execute(LeaveAlternateScreen);
+        let _ = disable_raw_mode();
+    }
+
+    // Initialize terminal using stderr to keep stdout clean
+    let backend = CrosstermBackend::new(io::stderr());
+    let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
+    terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
+    terminal.clear().wrap_err("Failed to clear terminal")?;
+
+    // Input handler
+    let input = Input::new();
+
+    // Create dmenu UI using cclip settings with inheritance
+    let wrap_long_lines = cli.cclip_wrap_long_lines.or(Some(cli.dmenu_wrap_long_lines)).unwrap_or(true);
+    let show_line_numbers = cli.cclip_show_line_numbers.or(Some(cli.dmenu_show_line_numbers)).unwrap_or(false);
+    let mut ui = DmenuUI::new(items, wrap_long_lines, show_line_numbers);
+    ui.filter(); // Initial filter to show all items
+    
+    // Ensure we have a valid selection if there are items
+    if !ui.shown.is_empty() && ui.selected.is_none() {
+        ui.selected = Some(0);
+    }
+    
+    // Get effective colors with cclip -> dmenu -> regular inheritance
+    let get_cclip_color = |cclip_opt: Option<ratatui::style::Color>, dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
+        cclip_opt.or(dmenu_opt).unwrap_or(default)
+    };
+    let get_cclip_bool = |cclip_opt: Option<bool>, dmenu_opt: Option<bool>, default: bool| {
+        cclip_opt.or(dmenu_opt).unwrap_or(default)
+    };
+    let get_cclip_u16 = |cclip_opt: Option<u16>, dmenu_opt: Option<u16>, default: u16| {
+        cclip_opt.or(dmenu_opt).unwrap_or(default)
+    };
+    
+    ui.info(get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color));
+    
+    // List state for ratatui
+    let mut list_state = ListState::default();
+    
+    // Get effective cursor string with inheritance
+    let cursor = cli.cclip_cursor.as_ref()
+        .or(cli.dmenu_cursor.as_ref())
+        .unwrap_or(&cli.cursor);
+
+    // Check if chafa is available for image previews
+    let chafa_available = cclip::check_chafa_available();
+    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available);
+
+    // Main TUI loop
+    loop {
+        terminal.draw(|f| {
+            // Get effective colors and settings for cclip mode with inheritance
+            let highlight_color = get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color);
+            let main_border_color = get_cclip_color(cli.cclip_main_border_color, cli.dmenu_main_border_color, cli.main_border_color);
+            let items_border_color = get_cclip_color(cli.cclip_items_border_color, cli.dmenu_items_border_color, cli.apps_border_color);
+            let input_border_color = get_cclip_color(cli.cclip_input_border_color, cli.dmenu_input_border_color, cli.input_border_color);
+            let main_text_color = get_cclip_color(cli.cclip_main_text_color, cli.dmenu_main_text_color, cli.main_text_color);
+            let items_text_color = get_cclip_color(cli.cclip_items_text_color, cli.dmenu_items_text_color, cli.apps_text_color);
+            let input_text_color = get_cclip_color(cli.cclip_input_text_color, cli.dmenu_input_text_color, cli.input_text_color);
+            let header_title_color = get_cclip_color(cli.cclip_header_title_color, cli.dmenu_header_title_color, cli.header_title_color);
+            let rounded_borders = get_cclip_bool(cli.cclip_rounded_borders, cli.dmenu_rounded_borders, cli.rounded_borders);
+            let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+            let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
+            
+            // Layout calculation
+            let total_height = f.size().height;
+            let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+            
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(content_height.max(3)),
+                    Constraint::Min(1),
+                    Constraint::Length(input_panel_height),
+                ].as_ref())
+                .split(f.size());
+            
+            // Border type
+            let border_type = if rounded_borders {
+                BorderType::Rounded
+            } else {
+                BorderType::Plain
+            };
+            
+            // Content panel (shows selected item's content with potential image preview)
+            let content_block = Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled(
+                    " Clipboard Preview ",
+                    Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                ))
+                .border_type(border_type)
+                .border_style(Style::default().fg(main_border_color));
+            
+            let content_paragraph = Paragraph::new(ui.text.clone())
+                .block(content_block)
+                .style(Style::default().fg(main_text_color))
+                .wrap(Wrap { trim: false })
+                .alignment(Alignment::Left);
+            
+            // Items panel
+            let items_panel_height = chunks[1].height;
+            let max_visible = items_panel_height.saturating_sub(2) as usize;
+            
+            let visible_items = ui.shown
+                .iter()
+                .skip(ui.scroll_offset)
+                .take(max_visible)
+                .map(ListItem::from)
+                .collect::<Vec<ListItem>>();
+            
+            let items_list = List::new(visible_items)
+                .block(Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        " Clipboard History ",
+                        Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                    ))
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(items_border_color))
+                )
+                .style(Style::default().fg(items_text_color))
+                .highlight_style(
+                    Style::default()
+                        .fg(highlight_color)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .highlight_symbol("> ");
+            
+            // Update list state selection
+            let visible_selection = ui.selected.and_then(|sel| {
+                if sel >= ui.scroll_offset && sel < ui.scroll_offset + max_visible {
+                    Some(sel - ui.scroll_offset)
+                } else {
+                    None
+                }
+            });
+            list_state.select(visible_selection);
+            
+            // Input panel
+            let input_paragraph = Paragraph::new(Line::from(vec![
+                Span::styled("(", Style::default().fg(input_text_color)),
+                Span::styled(
+                    (ui.selected.map_or(0, |v| v + 1)).to_string(),
+                    Style::default().fg(highlight_color),
+                ),
+                Span::styled("/", Style::default().fg(input_text_color)),
+                Span::styled(ui.shown.len().to_string(), Style::default().fg(input_text_color)),
+                Span::styled(") ", Style::default().fg(input_text_color)),
+                Span::styled(">", Style::default().fg(highlight_color)),
+                Span::styled("> ", Style::default().fg(input_text_color)),
+                Span::styled(&ui.query, Style::default().fg(input_text_color)),
+                Span::styled(cursor, Style::default().fg(highlight_color)),
+            ]))
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled(
+                    " Filter ",
+                    Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                ))
+                .border_type(border_type)
+                .border_style(Style::default().fg(input_border_color))
+            )
+            .style(Style::default().fg(input_text_color))
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: false });
+            
+            // Render all components
+            f.render_widget(content_paragraph, chunks[0]);
+            f.render_stateful_widget(items_list, chunks[1], &mut list_state);
+            f.render_widget(input_paragraph, chunks[2]);
+        })?;
+        
+        // Handle input events with full navigation and clipboard copying
+        match input.next()? {
+            Event::Input(key) => {
+                match (key.code, key.modifiers) {
+                    // Exit on escape or Ctrl+C/Q
+                    (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::CONTROL) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                        return Ok(()); // Exit without copying
+                    }
+                    // Copy selection to clipboard on Enter or Ctrl+Y
+                    (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                        if let Some(selected) = ui.selected {
+                            if selected < ui.shown.len() {
+                                // Parse the original cclip line to get rowid and mime_type
+                                let original_line = &ui.shown[selected].original_line;
+                                let parts: Vec<&str> = original_line.splitn(3, '\t').collect();
+                                if parts.len() >= 2 {
+                                    let rowid = parts[0];
+                                    let mime_type = parts[1];
+                                    
+                                    // Use cclip get | wl-copy to restore to clipboard
+                                    match std::process::Command::new("sh")
+                                        .arg("-c")
+                                        .arg(&format!("cclip get {} | wl-copy -t '{}'", rowid, mime_type))
+                                        .status() 
+                                    {
+                                        Ok(status) => {
+                                            if status.success() {
+                                                // Clean up terminal completely
+                                                terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                                drop(terminal);
+                                                let _ = io::stderr().execute(DisableMouseCapture);
+                                                let _ = io::stderr().execute(LeaveAlternateScreen);
+                                                let _ = disable_raw_mode();
+                                                return Ok(());
+                                            }
+                                        }
+                                        Err(_) => {
+                                            // Ignore clipboard copy errors for now
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Add character to query
+                    (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+                        ui.query.push(c);
+                        ui.filter();
+                    }
+                    // Remove character from query
+                    (KeyCode::Backspace, _) => {
+                        ui.query.pop();
+                        ui.filter();
+                    }
+                    // Navigation - Left: go to first item
+                    (KeyCode::Left, _) => {
+                        if !ui.shown.is_empty() {
+                            ui.selected = Some(0);
+                            ui.scroll_offset = 0;
+                        }
+                    }
+                    // Navigation - Right: go to last item
+                    (KeyCode::Right, _) => {
+                        if !ui.shown.is_empty() {
+                            let last_index = ui.shown.len() - 1;
+                            ui.selected = Some(last_index);
+                            
+                            // Scroll to show last item
+                            let total_height = terminal.size()?.height;
+                            let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                            let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
+                            
+                            // Use same calculation as rendering code
+                            let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                            let content_height = content_height.max(3);
+                            let items_panel_height = total_height - content_height - input_panel_height;
+                            let max_visible = items_panel_height.saturating_sub(2) as usize;
+                            
+                            if max_visible > 0 && ui.shown.len() > max_visible {
+                                ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
+                            } else {
+                                ui.scroll_offset = 0;
+                            }
+                        }
+                    }
+                    // Navigation - Down: next item with scrolling
+                    (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                        if let Some(selected) = ui.selected {
+                            let hard_stop = get_cclip_bool(cli.cclip_hard_stop, cli.dmenu_hard_stop, cli.hard_stop);
+                            ui.selected = if selected < ui.shown.len() - 1 {
+                                Some(selected + 1)
+                            } else if !hard_stop {
+                                Some(0)
+                            } else {
+                                Some(selected)
+                            };
+                            
+                            // Auto-scroll to keep selection visible
+                            if let Some(new_selected) = ui.selected {
+                                let total_height = terminal.size()?.height;
+                                let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
+                                
+                                // Use same calculation as rendering code
+                                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                                let content_height = content_height.max(3);
+                                let items_panel_height = total_height - content_height - input_panel_height;
+                                let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                
+                                // Scroll down if selection is below visible area
+                                if new_selected >= ui.scroll_offset + max_visible {
+                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                }
+                                // Scroll up if selection is above visible area (happens when wrapping to top)
+                                else if new_selected < ui.scroll_offset {
+                                    ui.scroll_offset = new_selected;
+                                }
+                            }
+                        }
+                    }
+                    // Navigation - Up: previous item with scrolling
+                    (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                        if let Some(selected) = ui.selected {
+                            let hard_stop = get_cclip_bool(cli.cclip_hard_stop, cli.dmenu_hard_stop, cli.hard_stop);
+                            ui.selected = if selected > 0 {
+                                Some(selected - 1)
+                            } else if !hard_stop {
+                                Some(ui.shown.len() - 1)
+                            } else {
+                                Some(selected)
+                            };
+                            
+                            // Auto-scroll to keep selection visible
+                            if let Some(new_selected) = ui.selected {
+                                let total_height = terminal.size()?.height;
+                                let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
+                                
+                                // Use same calculation as rendering code
+                                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                                let content_height = content_height.max(3);
+                                let items_panel_height = total_height - content_height - input_panel_height;
+                                let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                
+                                // Scroll up if selection is above visible area
+                                if new_selected < ui.scroll_offset {
+                                    ui.scroll_offset = new_selected;
+                                }
+                                // Scroll down if selection is below visible area (happens when wrapping to bottom)
+                                else if new_selected >= ui.scroll_offset + max_visible {
+                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                
+                // Update info display after any input
+                ui.info(get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color));
+            }
+            Event::Mouse(mouse_event) => {
+                // Mouse handling (similar to dmenu mode)
+                let mouse_row = mouse_event.row;
+                let total_height = terminal.size()?.height;
+                let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
+                
+                // Use same calculation as rendering code
+                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                let content_height = content_height.max(3);
+                let items_panel_height = total_height - content_height - input_panel_height;
+                
+                // Cclip layout: Content -> Items -> Filter
+                let items_panel_start = content_height;
+                let items_content_start = items_panel_start + 1; // +1 for top border
+                let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
+                let items_content_end = items_content_start + max_visible_rows;
+                
+                let update_selection_for_mouse_pos = |ui: &mut DmenuUI, mouse_row: u16| {
+                    if !ui.shown.is_empty() && mouse_row >= items_content_start && mouse_row < items_content_end {
+                        let row_in_content = mouse_row - items_content_start;
+                        let hovered_item_index = ui.scroll_offset + row_in_content as usize;
+                        if hovered_item_index < ui.shown.len() {
+                            ui.selected = Some(hovered_item_index);
+                            ui.info(get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color));
+                        }
+                    }
+                };
+                
+                match mouse_event.kind {
+                    MouseEventKind::Moved => {
+                        update_selection_for_mouse_pos(&mut ui, mouse_row);
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if mouse_row >= items_content_start && mouse_row < items_content_end && !ui.shown.is_empty() {
+                            let row_in_content = mouse_row - items_content_start;
+                            let clicked_item_index = ui.scroll_offset + row_in_content as usize;
+                            
+                            if clicked_item_index < ui.shown.len() {
+                                // Parse the original cclip line to get rowid and mime_type
+                                let original_line = &ui.shown[clicked_item_index].original_line;
+                                let parts: Vec<&str> = original_line.splitn(3, '\t').collect();
+                                if parts.len() >= 2 {
+                                    let rowid = parts[0];
+                                    let mime_type = parts[1];
+                                    
+                                    // Use cclip get | wl-copy to restore to clipboard
+                                    match std::process::Command::new("sh")
+                                        .arg("-c")
+                                        .arg(&format!("cclip get {} | wl-copy -t '{}'", rowid, mime_type))
+                                        .status() 
+                                    {
+                                        Ok(status) => {
+                                            if status.success() {
+                                                // Clean up terminal completely
+                                                terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                                drop(terminal);
+                                                let _ = io::stderr().execute(DisableMouseCapture);
+                                                let _ = io::stderr().execute(LeaveAlternateScreen);
+                                                let _ = disable_raw_mode();
+                                                return Ok(());
+                                            }
+                                        }
+                                        Err(_) => {
+                                            // Ignore clipboard copy errors for now
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    MouseEventKind::ScrollUp => {
+                        if !ui.shown.is_empty() && ui.scroll_offset > 0 {
+                            ui.scroll_offset -= 1;
+                            update_selection_for_mouse_pos(&mut ui, mouse_row);
+                        }
+                    }
+                    MouseEventKind::ScrollDown => {
+                        if !ui.shown.is_empty() {
+                            let max_visible = max_visible_rows as usize;
+                            if ui.scroll_offset + max_visible < ui.shown.len() {
+                                ui.scroll_offset += 1;
+                                update_selection_for_mouse_pos(&mut ui, mouse_row);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Event::Tick => {}
+        }
+    }
 }
 
 fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
@@ -288,8 +772,8 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                         // Store selection and exit loop to handle output outside TUI context
                         if let Some(selected) = ui.selected {
                             if selected < ui.shown.len() {
-                                // Store the selected line (cleaned of escape sequences)
-                                let selected_line = ui.shown[selected].get_clean_original_line();
+                                // Store the original line as-is for dmenu output
+                                let selected_line = &ui.shown[selected].original_line;
                                 
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
@@ -329,9 +813,13 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             
                             // Scroll to show last item
                             let total_height = terminal.size()?.height;
-                            let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
-                            let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-                            let items_panel_height = total_height - content_height - input_height;
+                            let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                            let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+                            
+                            // Use same calculation as rendering code
+                            let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                            let content_height = content_height.max(3);
+                            let items_panel_height = total_height - content_height - input_panel_height;
                             let max_visible = items_panel_height.saturating_sub(2) as usize;
                             
                             if max_visible > 0 && ui.shown.len() > max_visible {
@@ -342,72 +830,72 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                         }
                     }
                     (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                        if !ui.shown.is_empty() {
+                        if let Some(selected) = ui.selected {
                             let hard_stop = get_dmenu_bool(cli.dmenu_hard_stop, cli.hard_stop);
-                            let current_selected = ui.selected.unwrap_or(0);
-                            
-                            ui.selected = if current_selected < ui.shown.len() - 1 {
-                                Some(current_selected + 1)
+                            ui.selected = if selected < ui.shown.len() - 1 {
+                                Some(selected + 1)
                             } else if !hard_stop {
                                 Some(0)
                             } else {
-                                Some(current_selected)
+                                Some(selected)
                             };
                             
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
-                                let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-                                let items_panel_height = total_height - content_height - input_height;
-                                let max_visible = items_panel_height.saturating_sub(2) as usize;
+                                let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                                 
-                                // Ensure we have a valid max_visible
-                                if max_visible > 0 {
-                                    // Scroll down if selection goes below visible area
-                                    if new_selected >= ui.scroll_offset + max_visible {
-                                        ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-                                    }
-                                    // Scroll up if selection goes above visible area (for wrapping)
-                                    else if new_selected < ui.scroll_offset {
-                                        ui.scroll_offset = new_selected;
-                                    }
+                                // Use same calculation as rendering code
+                                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                                let content_height = content_height.max(3);
+                                let items_panel_height = total_height - content_height - input_panel_height;
+                                let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                
+                                // Scroll down if selection is below visible area
+                                if new_selected >= ui.scroll_offset + max_visible {
+                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
                                 }
+                                // Scroll up if selection is above visible area (happens when wrapping to top)
+                                else if new_selected < ui.scroll_offset {
+                                    ui.scroll_offset = new_selected;
+                                }
+                                
                             }
                         }
                     }
                     (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                        if !ui.shown.is_empty() {
+                        if let Some(selected) = ui.selected {
                             let hard_stop = get_dmenu_bool(cli.dmenu_hard_stop, cli.hard_stop);
-                            let current_selected = ui.selected.unwrap_or(0);
-                            
-                            ui.selected = if current_selected > 0 {
-                                Some(current_selected - 1)
+                            ui.selected = if selected > 0 {
+                                Some(selected - 1)
                             } else if !hard_stop {
                                 Some(ui.shown.len() - 1)
                             } else {
-                                Some(current_selected)
+                                Some(selected)
                             };
                             
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
-                                let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-                                let items_panel_height = total_height - content_height - input_height;
-                                let max_visible = items_panel_height.saturating_sub(2) as usize;
+                                let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                                 
-                                // Ensure we have a valid max_visible
-                                if max_visible > 0 {
-                                    // Scroll up if selection goes above visible area
-                                    if new_selected < ui.scroll_offset {
-                                        ui.scroll_offset = new_selected;
-                                    }
-                                    // Scroll down if selection goes below visible area (for wrapping to bottom)
-                                    else if new_selected >= ui.scroll_offset + max_visible {
-                                        ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-                                    }
+                                // Use same calculation as rendering code
+                                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                                let content_height = content_height.max(3);
+                                let items_panel_height = total_height - content_height - input_panel_height;
+                                let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                
+                                // Scroll up if selection is above visible area
+                                if new_selected < ui.scroll_offset {
+                                    ui.scroll_offset = new_selected;
                                 }
+                                // Scroll down if selection is below visible area (happens when wrapping to bottom)
+                                else if new_selected >= ui.scroll_offset + max_visible {
+                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                }
+                                
                             }
                         }
                     }
@@ -418,22 +906,27 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
             }
             Event::Mouse(mouse_event) => {
-                // Similar mouse handling as regular mode but adapted for dmenu layout
+                // Dmenu-specific mouse handling with proper layout calculations
                 let mouse_row = mouse_event.row;
                 let total_height = terminal.size()?.height;
-                let content_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
-                let input_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+                let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                 
+                // Use same calculation as rendering code
+                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                let content_height = content_height.max(3);
+                let items_panel_height = total_height - content_height - input_panel_height;
+                
+                // Dmenu layout: Content -> Items -> Filter
                 let items_panel_start = content_height;
-                let items_panel_height = total_height - content_height - input_height;
                 
-                let list_content_start = items_panel_start + 1;
-                let max_visible_rows = items_panel_height.saturating_sub(2);
-                let list_content_end = list_content_start + max_visible_rows;
+                let items_content_start = items_panel_start + 1; // +1 for top border
+                let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
+                let items_content_end = items_content_start + max_visible_rows;
                 
                 let update_selection_for_mouse_pos = |ui: &mut DmenuUI, mouse_row: u16| {
-                    if !ui.shown.is_empty() && mouse_row >= list_content_start && mouse_row < list_content_end {
-                        let row_in_content = mouse_row - list_content_start;
+                    if !ui.shown.is_empty() && mouse_row >= items_content_start && mouse_row < items_content_end {
+                        let row_in_content = mouse_row - items_content_start;
                         let hovered_item_index = ui.scroll_offset + row_in_content as usize;
                         if hovered_item_index < ui.shown.len() {
                             ui.selected = Some(hovered_item_index);
@@ -447,13 +940,13 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                         update_selection_for_mouse_pos(&mut ui, mouse_row);
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if mouse_row >= list_content_start && mouse_row < list_content_end && !ui.shown.is_empty() {
-                            let row_in_content = mouse_row - list_content_start;
+                        if mouse_row >= items_content_start && mouse_row < items_content_end && !ui.shown.is_empty() {
+                            let row_in_content = mouse_row - items_content_start;
                             let clicked_item_index = ui.scroll_offset + row_in_content as usize;
                             
                             if clicked_item_index < ui.shown.len() {
-                                // Store the selected line (cleaned of escape sequences)
-                                let selected_line = ui.shown[clicked_item_index].get_clean_original_line();
+                                // Store the original line as-is for dmenu output
+                                let selected_line = &ui.shown[clicked_item_index].original_line;
                                 
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
@@ -470,28 +963,20 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     }
                     MouseEventKind::ScrollUp => {
                         if !ui.shown.is_empty() && ui.scroll_offset > 0 {
-                            ui.scroll_offset = ui.scroll_offset.saturating_sub(1);
-                            // Update selection to follow scroll if needed
-                            if let Some(current_selected) = ui.selected {
-                                let max_visible = max_visible_rows as usize;
-                                if current_selected >= ui.scroll_offset + max_visible {
-                                    ui.selected = Some((ui.scroll_offset + max_visible - 1).min(ui.shown.len() - 1));
-                                }
-                            }
+                            ui.scroll_offset -= 1;
+                            // Update selection to match current mouse position after scrolling
                             update_selection_for_mouse_pos(&mut ui, mouse_row);
                         }
                     }
                     MouseEventKind::ScrollDown => {
                         if !ui.shown.is_empty() {
+                            // Calculate maximum visible items (account for borders)
                             let max_visible = max_visible_rows as usize;
-                            if max_visible > 0 && ui.scroll_offset + max_visible < ui.shown.len() {
+                            
+                            // Only scroll down if there are more items to show
+                            if ui.scroll_offset + max_visible < ui.shown.len() {
                                 ui.scroll_offset += 1;
-                                // Update selection to follow scroll if needed
-                                if let Some(current_selected) = ui.selected {
-                                    if current_selected < ui.scroll_offset {
-                                        ui.selected = Some(ui.scroll_offset);
-                                    }
-                                }
+                                // Update selection to match current mouse position after scrolling
                                 update_selection_for_mouse_pos(&mut ui, mouse_row);
                             }
                         }
@@ -704,6 +1189,11 @@ fn real_main() -> eyre::Result<()> {
     // Handle dmenu mode
     if cli.dmenu_mode {
         return run_dmenu_mode(&cli);
+    }
+    
+    // Handle cclip mode
+    if cli.cclip_mode {
+        return run_cclip_mode(&cli);
     }
     
     // Handle direct launch mode (bypass TUI)
