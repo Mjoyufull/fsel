@@ -201,33 +201,45 @@ pub fn check_chafa_available() -> bool {
 
 /// Generate image preview using chafa for the content panel
 pub fn generate_image_preview(content: &[u8], width: u16, height: u16) -> Result<String> {
-    let mut child = Command::new("chafa")
-        .args(&[
-            "-f", "sixels",
-            "--align", "center", 
-            "--scale", "max",
-            "--passthrough", "none",
-            "--view-size", &format!("{}x{}", width, height),
-            "-"
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
+    // Try different chafa formats for better compatibility
+    let formats = ["kitty", "sixels", "symbols"];
     
-    if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
-        let content_copy = content.to_vec(); // Copy the content to avoid lifetime issues
-        std::thread::spawn(move || {
-            stdin.write_all(&content_copy).ok();
-        });
+    for format in formats {
+        let result = std::process::Command::new("chafa")
+            .args(&[
+                "-f", format,
+                "--align", "center", 
+                "--scale", "max",
+                "--view-size", &format!("{}x{}", width.min(80), height.min(40)), // Reasonable limits
+                "-"
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+            
+        if let Ok(mut child) = result {
+            // Write image data to stdin
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                let content_copy = content.to_vec();
+                std::thread::spawn(move || {
+                    stdin.write_all(&content_copy).ok();
+                });
+            }
+            
+            if let Ok(output) = child.wait_with_output() {
+                if output.status.success() && !output.stdout.is_empty() {
+                    let preview = String::from_utf8_lossy(&output.stdout).to_string();
+                    // Check if output looks like actual graphics (not just raw data)
+                    if !preview.trim().is_empty() && (format != "symbols" || preview.len() > 10) {
+                        return Ok(preview);
+                    }
+                }
+            }
+        }
     }
     
-    let output = child.wait_with_output()?;
-    
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        Err(eyre!("chafa failed to generate image preview"))
-    }
+    // Fallback: return a simple text representation
+    Ok(format!("[IMAGE: {} bytes]", content.len()))
 }

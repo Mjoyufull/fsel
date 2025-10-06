@@ -361,37 +361,57 @@ impl<'a> DmenuUI<'a> {
     /// Check if a DmenuItem is a cclip image item by parsing its original line
     fn is_cclip_image_item(&self, item: &crate::dmenu::DmenuItem) -> bool {
         // Parse the tab-separated cclip format to check mime type
+        // Add safety checks to prevent crashes
+        if item.original_line.trim().is_empty() {
+            return false;
+        }
+        
         let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
         if parts.len() >= 2 {
-            let mime_type = parts[1];
-            return mime_type.starts_with("image/");
+            let mime_type = parts[1].trim();
+            // Additional safety check
+            return !mime_type.is_empty() && mime_type.starts_with("image/");
         }
         false
     }
     
     /// Generate image preview for a cclip item
     fn generate_cclip_image_preview(&self, item: &crate::dmenu::DmenuItem, width: u16, height: u16) -> Result<String, String> {
+        // Add safety checks to prevent crashes
+        if item.original_line.trim().is_empty() {
+            return Err("Empty clipboard entry".to_string());
+        }
+        
         // Parse the tab-separated cclip format to get rowid
         let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
         if parts.len() >= 1 {
-            let rowid = parts[0];
+            let rowid = parts[0].trim();
             
-            // Get image content from cclip
+            // Additional safety check
+            if rowid.is_empty() {
+                return Err("Empty rowid".to_string());
+            }
+            
+            // Get image content from cclip with timeout/error handling
             match std::process::Command::new("cclip")
                 .args(&["get", rowid])
                 .output()
             {
-                Ok(output) if output.status.success() => {
+                Ok(output) if output.status.success() && !output.stdout.is_empty() => {
                     // Use cclip module's image preview function
                     match crate::cclip::generate_image_preview(&output.stdout, width, height) {
                         Ok(preview) => Ok(preview),
-                        Err(_) => Err("Failed to generate image preview".to_string())
+                        Err(e) => Err(format!("Preview generation failed: {}", e))
                     }
                 }
-                _ => Err("Failed to get image content from cclip".to_string())
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Err(format!("cclip get failed: {}", stderr))
+                }
+                Err(e) => Err(format!("Failed to execute cclip: {}", e))
             }
         } else {
-            Err("Invalid cclip format".to_string())
+            Err("Invalid cclip format - no tab separator found".to_string())
         }
     }
 
