@@ -6,11 +6,19 @@ use crossterm::{
 };
 use ratatui::layout::Rect;
 
-/// Track the currently displayed image area for proper cleanup
-static CURRENT_IMAGE_AREA: Mutex<Option<(Rect, String)>> = Mutex::new(None);
+/// Combined display state to eliminate race conditions
+#[derive(Debug, Clone, PartialEq)]
+enum DisplayState {
+    /// No content displayed
+    Empty,
+    /// Text content is displayed  
+    Text,
+    /// Image content is displayed with area and rowid
+    Image(Rect, String),
+}
 
-/// Track whether the current content is an image (to know when to clear)
-static CURRENT_CONTENT_IS_IMAGE: Mutex<bool> = Mutex::new(false);
+/// Single atomic state tracker to eliminate lock contention
+static DISPLAY_STATE: Mutex<DisplayState> = Mutex::new(DisplayState::Empty);
 
 /// Direct terminal graphics handler inspired by Yazi
 pub struct TerminalGraphics;
@@ -45,15 +53,16 @@ impl TerminalGraphics {
     
     /// Clear an area by overwriting with spaces (for image cleanup)
     pub fn clear_area(area: Rect) -> io::Result<()> {
-        // For Sixel, just clear a minimal area to avoid text corruption
-        let spaces = " ".repeat((area.width / 2) as usize); // Clear less area
-        
+        // Aggressively clear the ENTIRE content area and force refresh
         Self::write_at_position((area.x, area.y), |stderr| {
-            // Only clear a few lines to remove sixel graphics
-            for y in area.top()..(area.top() + 3).min(area.bottom()) {
+            // Clear the entire area
+            let spaces = " ".repeat(area.width as usize);
+            for y in area.top()..area.bottom() {
                 queue!(stderr, MoveTo(area.x, y))?;
                 write!(stderr, "{}", spaces)?;
             }
+            // Force terminal to refresh
+            stderr.flush()?;
             Ok(())
         })
     }
@@ -76,7 +85,7 @@ impl GraphicsAdapter {
         
         if term_program == "kitty" || term.contains("kitty") {
             Self::Kitty
-        } else if term.contains("foot") || term.contains("alacritty") || term.contains("xterm") {
+        } else if term.starts_with("foot") || term.contains("xterm") || term_program == "WezTerm" {
             Self::Sixel
         } else {
             Self::None
@@ -86,16 +95,25 @@ impl GraphicsAdapter {
     
     /// Display cclip image data at the given area
     pub async fn show_cclip_image(&self, rowid: &str, area: Rect) -> io::Result<()> {
-        // Only clear if we're showing a different image
-        // This prevents clearing the content area when switching to text items
-        if let Ok(current) = CURRENT_IMAGE_AREA.lock() {
-            if let Some((_, current_rowid)) = &*current {
-                if current_rowid != rowid {
-                    // Different image - clear the old one
-                    drop(current);
-                    self.clear_current_image()?;
-                }
+        // Check current state and only clear if showing different image
+        let should_clear = if let Ok(current_state) = DISPLAY_STATE.lock() {
+            match &*current_state {
+                DisplayState::Image(current_area, current_rowid) => {
+                    if current_rowid != rowid {
+                        Some(*current_area)
+                    } else {
+                        None
+                    }
+                },
+                _ => None,
             }
+        } else {
+            None
+        };
+        
+        if let Some(area_to_clear) = should_clear {
+            // Different image - clear the old one with minimal clearing
+            self.clear_image_minimal(area_to_clear)?;
         }
         
         // Show the new image
@@ -105,10 +123,10 @@ impl GraphicsAdapter {
             Self::None => Ok(()), // No graphics support
         };
         
-        // Track the current image for future clearing
+        // Update state to track the new image
         if result.is_ok() && *self != Self::None {
-            if let Ok(mut current) = CURRENT_IMAGE_AREA.lock() {
-                *current = Some((area, rowid.to_string()));
+            if let Ok(mut state) = DISPLAY_STATE.lock() {
+                *state = DisplayState::Image(area, rowid.to_string());
             }
         }
         
@@ -116,16 +134,11 @@ impl GraphicsAdapter {
     }
     
     /// Display cclip image only if it's different from the currently displayed one
-    /// This prevents flickering from redrawing the same image
+    /// Uses Yazi's approach: always hide current image before showing new one
     pub async fn show_cclip_image_if_different(&self, rowid: &str, area: Rect) -> io::Result<()> {
-        // Mark that we're showing image content
-        if let Ok(mut is_image) = CURRENT_CONTENT_IS_IMAGE.lock() {
-            *is_image = true;
-        }
-        
         // Check if we're already displaying this exact image at this area
-        if let Ok(current) = CURRENT_IMAGE_AREA.lock() {
-            if let Some((current_area, current_rowid)) = &*current {
+        if let Ok(current_state) = DISPLAY_STATE.lock() {
+            if let DisplayState::Image(current_area, current_rowid) = &*current_state {
                 if current_rowid == rowid && *current_area == area {
                     // Same image in same area - no need to redraw
                     return Ok(());
@@ -133,35 +146,50 @@ impl GraphicsAdapter {
             }
         }
         
-        // Different image or area - show it
+        // Yazi approach: hide any current image before showing new one
+        self.image_hide()?;
+        
+        // Show the new image
         self.show_cclip_image(rowid, area).await
     }
     
-    /// Handle transition to non-image content
-    /// This clears any displayed image when switching to text content
-    pub fn handle_non_image_content(&self) -> io::Result<()> {
-        // Only clear if we have an actual image displayed AND we're not in None mode
-        if let Ok(mut is_image) = CURRENT_CONTENT_IS_IMAGE.lock() {
-            if *is_image && *self != Self::None {
-                // Clear the image area before showing text
-                self.clear_current_image()?;
-                *is_image = false;
+    
+    /// Hide any currently displayed image (Yazi's approach)
+    pub fn image_hide(&self) -> io::Result<()> {
+        if let Ok(mut state) = DISPLAY_STATE.lock() {
+            if let DisplayState::Image(area, _) = &*state {
+                self.image_erase(*area)?;
+                *state = DisplayState::Empty;
             }
+        }
+        Ok(())
+    }
+    
+    /// Erase image from specific area (Yazi's approach)
+    pub fn image_erase(&self, area: Rect) -> io::Result<()> {
+        match self {
+            Self::Kitty => self.clear_kitty_graphics(area)?,
+            Self::Sixel | Self::None => {
+                // For Sixel: minimal clearing - just clear a few lines to break graphics sequences
+                // Let ratatui text naturally overwrite the rest to avoid timing issues
+                TerminalGraphics::write_at_position((area.x, area.y), |stderr| {
+                    let spaces = " ".repeat(area.width as usize);
+                    // Only clear first 3 lines to break Sixel sequences, not entire area
+                    for y in area.top()..(area.top() + 3).min(area.bottom()) {
+                        queue!(stderr, MoveTo(area.x, y))?;
+                        write!(stderr, "{}", spaces)?;
+                    }
+                    // Don't flush immediately - let it happen naturally
+                    Ok(())
+                })?;
+            },
         }
         Ok(())
     }
     
     /// Clear the currently displayed image
     pub fn clear_current_image(&self) -> io::Result<()> {
-        if let Ok(mut current) = CURRENT_IMAGE_AREA.lock() {
-            if let Some((area, _)) = current.take() {
-                match self {
-                    Self::Kitty => self.clear_kitty_graphics(area)?,
-                    Self::Sixel | Self::None => TerminalGraphics::clear_area(area)?,
-                }
-            }
-        }
-        Ok(())
+        self.image_hide()
     }
     
     /// Clear Kitty graphics using the graphics protocol
@@ -170,8 +198,34 @@ impl GraphicsAdapter {
         TerminalGraphics::write_at_position((area.x, area.y), |stderr| {
             // Delete all graphics using Kitty protocol
             write!(stderr, "\x1b_Ga=d,d=A\x1b\\")?;  // Delete all images
+            stderr.flush()?; // Force immediate execution
             Ok(())
         })
+    }
+    
+    /// Clear Sixel graphics more effectively
+    fn clear_sixel_graphics(&self, area: Rect) -> io::Result<()> {
+        // Use the same full area clearing as the general clear_area method
+        TerminalGraphics::clear_area(area)
+    }
+    
+    /// Minimal image clearing that doesn't destroy text content
+    fn clear_image_minimal(&self, area: Rect) -> io::Result<()> {
+        match self {
+            Self::Kitty => self.clear_kitty_graphics(area)?,
+            Self::Sixel | Self::None => {
+                // For sixel, only clear a small area at the top to remove graphics headers
+                TerminalGraphics::write_at_position((area.x, area.y), |stderr| {
+                    let spaces = " ".repeat(area.width.min(20) as usize);
+                    for y in area.top()..(area.top() + 1).min(area.bottom()) {
+                        queue!(stderr, MoveTo(area.x, y))?;
+                        write!(stderr, "{}", spaces)?;
+                    }
+                    Ok(())
+                })?;
+            },
+        }
+        Ok(())
     }
     
     
@@ -193,6 +247,7 @@ impl GraphicsAdapter {
                 // Position cursor at the target location
                 write!(stderr, "\x1b[{};{}H", area.y + 1, area.x + 1)?;
                 stderr.write_all(&graphics_data)?;
+                stderr.flush()?; // Force immediate display
                 Ok(())
             })?;
         }
@@ -218,6 +273,7 @@ impl GraphicsAdapter {
                 // Position cursor at the target location
                 write!(stderr, "\x1b[{};{}H", area.y + 1, area.x + 1)?;
                 stderr.write_all(&graphics_data)?;
+                stderr.flush()?; // Force immediate display
                 Ok(())
             })?;
         }

@@ -1,5 +1,6 @@
 use directories::ProjectDirs;
 use serde::Deserialize;
+use std::str::FromStr;
 use std::{env, fs, io, path, process};
 
 fn usage() -> ! {
@@ -70,6 +71,7 @@ pub struct Opts {
     /// Layout configuration
     pub title_panel_height_percent: u16,
     pub input_panel_height: u16,
+    pub title_panel_position: Option<PanelPosition>,
     /// Program name for direct launch (bypasses TUI)
     pub program: Option<String>,
     /// Search string to pre-populate in TUI
@@ -94,8 +96,9 @@ pub struct Opts {
     pub dmenu_items_text_color: Option<ratatui::style::Color>,
     pub dmenu_input_text_color: Option<ratatui::style::Color>,
     pub dmenu_header_title_color: Option<ratatui::style::Color>,
-    pub dmenu_content_panel_height_percent: Option<u16>,
+    pub dmenu_title_panel_height_percent: Option<u16>,
     pub dmenu_input_panel_height: Option<u16>,
+    pub dmenu_title_panel_position: Option<PanelPosition>,
     /// Cclip-specific colors and layout (inherit from dmenu, then regular mode)
     pub cclip_highlight_color: Option<ratatui::style::Color>,
     pub cclip_cursor: Option<String>,
@@ -108,8 +111,9 @@ pub struct Opts {
     pub cclip_items_text_color: Option<ratatui::style::Color>,
     pub cclip_input_text_color: Option<ratatui::style::Color>,
     pub cclip_header_title_color: Option<ratatui::style::Color>,
-    pub cclip_content_panel_height_percent: Option<u16>,
+    pub cclip_title_panel_height_percent: Option<u16>,
     pub cclip_input_panel_height: Option<u16>,
+    pub cclip_title_panel_position: Option<PanelPosition>,
     pub cclip_show_line_numbers: Option<bool>,
     pub cclip_wrap_long_lines: Option<bool>,
     pub cclip_image_preview: Option<bool>,
@@ -141,6 +145,7 @@ impl Default for Opts {
             header_title_color: ratatui::style::Color::White,
             title_panel_height_percent: 30,
             input_panel_height: 3,
+            title_panel_position: None,
             program: None,
             search_string: None,
             // Dmenu mode defaults
@@ -163,8 +168,9 @@ impl Default for Opts {
             dmenu_items_text_color: None,
             dmenu_input_text_color: None,
             dmenu_header_title_color: None,
-            dmenu_content_panel_height_percent: None,
+            dmenu_title_panel_height_percent: None,
             dmenu_input_panel_height: None,
+            dmenu_title_panel_position: None,
             // Cclip-specific styling (None means inherit from dmenu, then regular mode)
             cclip_highlight_color: None,
             cclip_cursor: None,
@@ -177,8 +183,9 @@ impl Default for Opts {
             cclip_items_text_color: None,
             cclip_input_text_color: None,
             cclip_header_title_color: None,
-            cclip_content_panel_height_percent: None,
+            cclip_title_panel_height_percent: None,
             cclip_input_panel_height: None,
+            cclip_title_panel_position: None,
             cclip_show_line_numbers: None,
             cclip_wrap_long_lines: None,
             cclip_image_preview: None,
@@ -275,7 +282,57 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 println!("{}", env!("CARGO_PKG_VERSION"));
                 std::process::exit(0);
             }
-            _ => return Err(arg.unexpected()),
+            _ => {
+                // Handle common misspellings and provide helpful error messages
+                let error_msg = match &arg {
+                    Long(name) => {
+                        match *name {
+                            "clip" => "Unknown option '--clip'. Did you mean '--cclip'?",
+                            "menu" => "Unknown option '--menu'. Did you mean '--dmenu'?",
+                            "dme" | "dmen" => "Unknown option. Did you mean '--dmenu'?",
+                            "cc" | "ccli" => "Unknown option. Did you mean '--cclip'?",
+                            "sway" => "Unknown option '--sway'. Sway integration is enabled by default when SWAYSOCK is set. Use '-s' or '--nosway' to disable it.",
+                            "help" => "Unknown option '--help'. Use '-h' or '--help'.",
+                            "version" => "Unknown option '--version'. Use '-V' or '--version'.",
+                            _ => "Unknown option. Use '-h' or '--help' to see available options."
+                        }
+                    }
+                    Short(c) => {
+                        match c {
+                            'C' => "Unknown option '-C'. Did you mean '-c' for --config?",
+                            'P' => "Unknown option '-P'. Did you mean '-p' for --program?",
+                            'S' => "Unknown option '-S'. Did you mean '-s' for --nosway?",
+                            'R' => "Unknown option '-R'. Did you mean '-r' for --replace?",
+                            'H' => "Unknown option '-H'. Did you mean '-h' for --help?",
+                            _ => "Unknown option. Use '-h' or '--help' to see available options."
+                        }
+                    }
+                    Value(_val) => {
+                        // This shouldn't happen with lexopt, but just in case
+                        return Err(arg.unexpected());
+                    }
+                };
+                
+                eprintln!("Error: {}", error_msg);
+                eprintln!();
+                eprintln!("Available options:");
+                eprintln!("  -s, --nosway           Disable Sway integration");
+                eprintln!("  -c, --config <file>    Specify config file");
+                eprintln!("  -r, --replace          Replace existing instance");
+                eprintln!("  -p, --program <name>   Launch program directly");
+                eprintln!("  -ss <search>           Pre-fill search (must be last)");
+                eprintln!("  -v, --verbose          Increase verbosity");
+                eprintln!("  -h, --help             Show help");
+                eprintln!("  -V, --version          Show version");
+                eprintln!("      --dmenu            Dmenu mode");
+                eprintln!("      --cclip            Clipboard history mode");
+                eprintln!("      --no-exec          Print command instead of running");
+                eprintln!("      --systemd-run      Use systemd-run");
+                eprintln!("      --uwsm             Use uwsm");
+                eprintln!();
+                eprintln!("For more details, use: gyr --help");
+                std::process::exit(1);
+            }
         }
     }
 
@@ -411,6 +468,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             eprintln!("Warning: input_panel_height must be between 1-10 lines, using default");
         }
     }
+    if let Some(position) = file_conf.title_panel_position {
+        default.title_panel_position = Some(position);
+    }
 
 
     // Load dmenu configuration if present
@@ -478,11 +538,11 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
         
         // Load dmenu layout
-        if let Some(height) = dmenu_conf.content_panel_height_percent {
+        if let Some(height) = dmenu_conf.title_panel_height_percent {
             if height >= 10 && height <= 70 {
-                default.dmenu_content_panel_height_percent = Some(height);
+                default.dmenu_title_panel_height_percent = Some(height);
             } else {
-                eprintln!("Warning: dmenu content_panel_height_percent must be between 10-70%, using default");
+                eprintln!("Warning: dmenu title_panel_height_percent must be between 10-70%, using default");
             }
         }
         if let Some(height) = dmenu_conf.input_panel_height {
@@ -491,6 +551,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             } else {
                 eprintln!("Warning: dmenu input_panel_height must be between 1-10 lines, using default");
             }
+        }
+        if let Some(position) = &dmenu_conf.title_panel_position {
+            default.dmenu_title_panel_position = Some(position.clone());
         }
         
         // Load other dmenu options
@@ -570,11 +633,11 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
         
         // Load cclip layout
-        if let Some(height) = cclip_conf.content_panel_height_percent {
+        if let Some(height) = cclip_conf.title_panel_height_percent {
             if height >= 10 && height <= 70 {
-                default.cclip_content_panel_height_percent = Some(height);
+                default.cclip_title_panel_height_percent = Some(height);
             } else {
-                eprintln!("Warning: cclip content_panel_height_percent must be between 10-70%, using default");
+                eprintln!("Warning: cclip title_panel_height_percent must be between 10-70%, using default");
             }
         }
         if let Some(height) = cclip_conf.input_panel_height {
@@ -583,6 +646,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             } else {
                 eprintln!("Warning: cclip input_panel_height must be between 1-10 lines, using default");
             }
+        }
+        if let Some(position) = &cclip_conf.title_panel_position {
+            default.cclip_title_panel_position = Some(position.clone());
         }
         
         // Load other cclip options
@@ -653,6 +719,37 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     Ok(default)
 }
 
+/// Position where the title/content/description panel should be displayed
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelPosition {
+    /// Panel at the top (default behavior)
+    Top,
+    /// Panel in the middle (where results/apps usually are)
+    Middle,
+    /// Panel at the bottom (above input field)
+    Bottom,
+}
+
+impl Default for PanelPosition {
+    fn default() -> Self {
+        PanelPosition::Top
+    }
+}
+
+impl FromStr for PanelPosition {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "top" => Ok(PanelPosition::Top),
+            "middle" => Ok(PanelPosition::Middle),
+            "bottom" => Ok(PanelPosition::Bottom),
+            _ => Err(format!("Invalid panel position: '{}'. Valid options: top, middle, bottom", s)),
+        }
+    }
+}
+
 /// File configuration, parsed with [serde]
 ///
 /// [serde]: serde
@@ -688,6 +785,8 @@ pub struct FileConf {
     pub title_panel_height_percent: Option<u16>,
     /// Input panel height in lines
     pub input_panel_height: Option<u16>,
+    /// Position of the title/content/description panel (top, middle, bottom)
+    pub title_panel_position: Option<PanelPosition>,
     /// Dmenu-specific configuration
     pub dmenu: Option<DmenuConf>,
     /// Cclip-specific configuration
@@ -716,8 +815,10 @@ pub struct DmenuConf {
     /// Color for panel header titles in dmenu
     pub header_title_color: Option<String>,
     /// Layout configuration for dmenu
-    pub content_panel_height_percent: Option<u16>,
+    pub title_panel_height_percent: Option<u16>,
     pub input_panel_height: Option<u16>,
+    /// Position of the content panel (top, middle, bottom)
+    pub title_panel_position: Option<PanelPosition>,
     /// Default delimiter for column parsing
     pub delimiter: Option<String>,
     /// Show line numbers in selection
@@ -748,8 +849,10 @@ pub struct CclipConf {
     /// Color for panel header titles in cclip
     pub header_title_color: Option<String>,
     /// Layout configuration for cclip
-    pub content_panel_height_percent: Option<u16>,
+    pub title_panel_height_percent: Option<u16>,
     pub input_panel_height: Option<u16>,
+    /// Position of the content preview panel (top, middle, bottom)
+    pub title_panel_position: Option<PanelPosition>,
     /// Show line numbers in selection
     pub show_line_numbers: Option<bool>,
     /// Wrap long lines in content display

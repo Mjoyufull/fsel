@@ -478,20 +478,44 @@ impl<'a> DmenuUI<'a> {
             let terminal_type = std::env::var("TERM").unwrap_or_default();
             let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
             
-            let format = if term_program == "kitty" || terminal_type.contains("kitty") {
-                "kitty"
+            // Try multiple formats for better compatibility
+            let formats = if term_program == "kitty" || terminal_type.contains("kitty") {
+                vec!["kitty", "sixels"]
+            } else if terminal_type.starts_with("foot") {
+                vec!["sixels"] // Foot specifically (includes foot-extra)
             } else {
-                "sixels"  // Default to sixels for foot, alacritty, xterm, etc.
+                vec!["sixels", "iterm2"] // Default for wezterm, xterm, etc.
             };
             
-            // Get image content from cclip and pipe directly to chafa
-            let result = std::process::Command::new("sh")
-                .arg("-c")
-                .arg(&format!(
-                    "cclip get {} | chafa --size 80x30 -f {} -", 
-                    rowid, format
-                ))
-                .status();
+            // Get terminal size for proper centering
+            let (term_width, term_height) = if let Ok((w, h)) = crossterm::terminal::size() {
+                (w as usize, h as usize)
+            } else {
+                (80, 24) // fallback
+            };
+            
+            // Use most of the terminal but leave some padding
+            let image_width = (term_width * 90 / 100).max(40); // 90% of width, minimum 40
+            let image_height = (term_height * 85 / 100).max(20); // 85% of height, minimum 20
+            
+            // Try multiple formats until one works
+            let mut result = Err(std::io::Error::new(std::io::ErrorKind::Other, "No formats worked"));
+            
+            for format in formats {
+                result = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(&format!(
+                        "clear; cclip get {} | chafa --size {}x{} --align center -f {} -", 
+                        rowid, image_width, image_height, format
+                    ))
+                    .status();
+                    
+                if let Ok(status) = &result {
+                    if status.success() {
+                        break; // Found a working format
+                    }
+                }
+            }
                 
             match result {
                 Ok(status) => status.success(),

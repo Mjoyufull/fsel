@@ -159,8 +159,12 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     
     // Check if terminal supports graphics and chafa is available
     let chafa_available = cclip::check_chafa_available();
-    let graphics_supported = cclip::check_graphics_support();
-    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available && graphics_supported);
+    
+    // Only enable inline preview for Kitty graphics protocol to avoid Sixel timing issues
+    let graphics_adapter = crate::graphics::GraphicsAdapter::detect();
+    let supports_kitty_protocol = matches!(graphics_adapter, crate::graphics::GraphicsAdapter::Kitty);
+    
+    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available && supports_kitty_protocol);
     
     // Get effective colors with cclip -> dmenu -> regular inheritance
     let get_cclip_color = |cclip_opt: Option<ratatui::style::Color>, dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
@@ -172,10 +176,13 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     let get_cclip_u16 = |cclip_opt: Option<u16>, dmenu_opt: Option<u16>, default: u16| {
         cclip_opt.or(dmenu_opt).unwrap_or(default)
     };
+    let get_cclip_panel_position = |cclip_opt: Option<crate::cli::PanelPosition>, dmenu_opt: Option<crate::cli::PanelPosition>, default: crate::cli::PanelPosition| {
+        cclip_opt.or(dmenu_opt).unwrap_or(default)
+    };
     
     // Update info with image support
     let content_panel_width = terminal.size()?.width.saturating_sub(2); // Account for borders
-    let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
+    let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
     let content_panel_height = content_panel_height.max(3).saturating_sub(2); // Account for borders
     
     // Get hide image message setting
@@ -192,6 +199,9 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // List state for ratatui
     let mut list_state = ListState::default();
     
+    // Track previous selection state to avoid unnecessary clearing
+    let mut previous_was_image = false;
+    
     // Get effective cursor string with inheritance
     let cursor = cli.cclip_cursor.as_ref()
         .or(cli.dmenu_cursor.as_ref())
@@ -201,7 +211,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     loop {
         // Update UI content BEFORE drawing to avoid race conditions with graphics clearing
         let content_panel_width = terminal.size()?.width.saturating_sub(2);
-        let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
+        let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
         let content_panel_height = content_panel_height.max(3).saturating_sub(2);
         
         ui.info_with_image_support(
@@ -211,6 +221,19 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             content_panel_width,
             content_panel_height
         );
+        
+        // Check what content type we should show for image handling
+        let mut current_is_image = false;
+        if image_preview_enabled {
+            if let Some(selected) = ui.selected {
+                if selected < ui.shown.len() {
+                    let item = &ui.shown[selected];
+                    if ui.get_cclip_rowid(item).is_some() {
+                        current_is_image = true;
+                    }
+                }
+            }
+        }
         
         terminal.draw(|f| {
             // Get effective colors and settings for cclip mode with inheritance
@@ -223,21 +246,55 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             let input_text_color = get_cclip_color(cli.cclip_input_text_color, cli.dmenu_input_text_color, cli.input_text_color);
             let header_title_color = get_cclip_color(cli.cclip_header_title_color, cli.dmenu_header_title_color, cli.header_title_color);
             let rounded_borders = get_cclip_bool(cli.cclip_rounded_borders, cli.dmenu_rounded_borders, cli.rounded_borders);
-            let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+            let content_panel_height = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
             let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
             
             // Layout calculation
             let total_height = f.size().height;
             let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
             
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(content_height.max(3)),
-                    Constraint::Min(1),
-                    Constraint::Length(input_panel_height),
-                ].as_ref())
-                .split(f.size());
+            // Get content panel position (defaults to Top if not set, with cclip -> dmenu -> regular inheritance)
+            let content_panel_position = get_cclip_panel_position(cli.cclip_title_panel_position, cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
+            
+            // Split the window into three parts based on content panel position
+            let (chunks, content_panel_index, items_panel_index, input_panel_index) = match content_panel_position {
+                crate::cli::PanelPosition::Top => {
+                    // Top: content, items, input (original layout)
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(content_height.max(3)),
+                            Constraint::Min(1),
+                            Constraint::Length(input_panel_height),
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 0, 1, 2)
+                },
+                crate::cli::PanelPosition::Middle => {
+                    // Middle: items, content, input
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(1),
+                            Constraint::Length(content_height.max(3)),
+                            Constraint::Length(input_panel_height),
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 1, 0, 2)
+                },
+                crate::cli::PanelPosition::Bottom => {
+                    // Bottom: items, input, content
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(1),                         // Items panel (remaining space)
+                            Constraint::Length(input_panel_height),     // Input panel
+                            Constraint::Length(content_height.max(3)),  // Content panel at bottom
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 2, 0, 1)
+                }
+            };
             
             // Border type
             let border_type = if rounded_borders {
@@ -263,7 +320,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 .alignment(Alignment::Left);
             
             // Items panel
-            let items_panel_height = chunks[1].height;
+            let items_panel_height = chunks[items_panel_index].height;
             let max_visible = items_panel_height.saturating_sub(2) as usize;
             
             let visible_items = ui.shown
@@ -329,48 +386,65 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: false });
             
-            // Render all components
-            f.render_widget(content_paragraph, chunks[0]);
-            f.render_stateful_widget(items_list, chunks[1], &mut list_state);
-            f.render_widget(input_paragraph, chunks[2]);
+            // Render all components in their dynamic positions
+            f.render_widget(content_paragraph, chunks[content_panel_index]);
+            f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
+            f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
         
-        // After ratatui draws, overlay inline image if needed (Yazi's approach!)
+        // After ratatui draws, handle image display/clearing
         if image_preview_enabled {
             let graphics = crate::graphics::GraphicsAdapter::detect();
-            let mut should_show_image = false;
             
-            if let Some(selected) = ui.selected {
-                if selected < ui.shown.len() {
-                    let item = &ui.shown[selected];
-                    if let Some(rowid) = ui.get_cclip_rowid(item) {
-                        // We have an image to show
-                        should_show_image = true;
-                        
-                        // Calculate content panel area coordinates
-                        let total_height = terminal.size()?.height;
-                        let content_panel_height_percent = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
-                        let content_height = (total_height as f32 * content_panel_height_percent as f32 / 100.0).round() as u16;
-                        let content_height = content_height.max(3);
-                        
-                        // Content area (inside the border)
-                        let content_area = ratatui::layout::Rect {
-                            x: 1, // Inside left border
-                            y: 1, // Inside top border  
-                            width: terminal.size()?.width.saturating_sub(2), // Account for borders
-                            height: content_height.saturating_sub(2), // Account for borders
-                        };
-                        
-                        // Only show image if it's different from the currently displayed one
-                        let _ = graphics.show_cclip_image_if_different(&rowid, content_area).await;
+            // Clear old image if transitioning from image to text
+            if previous_was_image && !current_is_image {
+                let _ = graphics.image_hide();
+            }
+            
+            // Show new image if current item is an image  
+            if current_is_image {
+                if let Some(selected) = ui.selected {
+                    if selected < ui.shown.len() {
+                        let item = &ui.shown[selected];
+                        if let Some(rowid) = ui.get_cclip_rowid(item) {
+                            // Calculate content panel area coordinates based on dynamic positioning
+                            let total_height = terminal.size()?.height;
+                            let content_panel_height_percent = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
+                            let content_height = (total_height as f32 * content_panel_height_percent as f32 / 100.0).round() as u16;
+                            let content_height = content_height.max(3);
+                            let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
+                            let content_panel_position = get_cclip_panel_position(cli.cclip_title_panel_position, cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
+                            
+                            // Calculate Y position based on panel position
+                            let content_y = match content_panel_position {
+                                crate::cli::PanelPosition::Top => 1, // Inside top border
+                                crate::cli::PanelPosition::Middle => {
+                                    // Middle: apps panel height + 1 for content panel top border
+                                    (total_height - content_height - input_panel_height) + 1
+                                },
+                                crate::cli::PanelPosition::Bottom => {
+                                    // Bottom: apps panel height + 1 for content panel top border
+                                    (total_height - content_height - input_panel_height) + 1
+                                }
+                            };
+                            
+                            // Content area (inside the border)
+                            let content_area = ratatui::layout::Rect {
+                                x: 1, // Inside left border
+                                y: content_y,
+                                width: terminal.size()?.width.saturating_sub(2), // Account for borders
+                                height: content_height.saturating_sub(2), // Account for borders
+                            };
+                            
+                            // Show image
+                            let _ = graphics.show_cclip_image_if_different(&rowid, content_area).await;
+                        }
                     }
                 }
             }
             
-            // Only clear if we were showing an image and now we're not
-            if !should_show_image {
-                let _ = graphics.handle_non_image_content();
-            }
+            // Update state for next iteration
+            previous_was_image = current_is_image;
         }
         
         // Handle input events with full navigation and clipboard copying
@@ -426,7 +500,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                                     // Image was displayed, wait for user input to continue
                                     use crossterm::event::read;
                                     let _ = read(); // Wait for any key press
-                                    // Refresh the terminal display
+                                    // Force ratatui to completely re-render after external terminal manipulation
                                     terminal.clear().wrap_err("Failed to clear terminal")?;
                                 }
                             }
@@ -457,7 +531,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             
                             // Scroll to show last item
                             let total_height = terminal.size()?.height;
-                            let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                            let content_panel_height = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                             let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
                             
                             // Use same calculation as rendering code
@@ -488,7 +562,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let content_panel_height = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                                 let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
                                 
                                 // Use same calculation as rendering code
@@ -523,7 +597,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let content_panel_height = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                                 let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
                                 
                                 // Use same calculation as rendering code
@@ -551,7 +625,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 // Mouse handling (similar to dmenu mode)
                 let mouse_row = mouse_event.row;
                 let total_height = terminal.size()?.height;
-                let content_panel_height = get_cclip_u16(cli.cclip_content_panel_height_percent, cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                let content_panel_height = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                 let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
                 
                 // Use same calculation as rendering code
@@ -559,8 +633,25 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 let content_height = content_height.max(3);
                 let items_panel_height = total_height - content_height - input_panel_height;
                 
-                // Cclip layout: Content -> Items -> Filter
-                let items_panel_start = content_height;
+                // Get content panel position to calculate items panel position
+                let content_panel_position = get_cclip_panel_position(cli.cclip_title_panel_position, cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
+                
+                // Calculate items panel coordinates based on layout
+                let (items_panel_start, items_panel_height) = match content_panel_position {
+                    crate::cli::PanelPosition::Top => {
+                        // Top: content, items, input - items start after content
+                        (content_height, items_panel_height)
+                    },
+                    crate::cli::PanelPosition::Middle => {
+                        // Middle: items, content, input - items start at top
+                        (0, items_panel_height)
+                    },
+                    crate::cli::PanelPosition::Bottom => {
+                        // Bottom: items, input, content - items start at top
+                        (0, items_panel_height)
+                    }
+                };
+                
                 let items_content_start = items_panel_start + 1; // +1 for top border
                 let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
                 let items_content_end = items_content_start + max_visible_rows;
@@ -721,6 +812,9 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     let get_dmenu_u16 = |dmenu_opt: Option<u16>, default: u16| {
         dmenu_opt.unwrap_or(default)
     };
+    let get_dmenu_panel_position = |dmenu_opt: Option<crate::cli::PanelPosition>, default: crate::cli::PanelPosition| {
+        dmenu_opt.unwrap_or(default)
+    };
     // Get effective cursor string
     let cursor = cli.dmenu_cursor.as_ref().unwrap_or(&cli.cursor);
 
@@ -737,21 +831,55 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
             let input_text_color = get_dmenu_color(cli.dmenu_input_text_color, cli.input_text_color);
             let header_title_color = get_dmenu_color(cli.dmenu_header_title_color, cli.header_title_color);
             let rounded_borders = get_dmenu_bool(cli.dmenu_rounded_borders, cli.rounded_borders);
-            let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+            let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
             let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
             
             // Layout calculation
             let total_height = f.size().height;
             let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
             
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(content_height.max(3)),
-                    Constraint::Min(1),
-                    Constraint::Length(input_panel_height),
-                ].as_ref())
-                .split(f.size());
+            // Get content panel position (defaults to Top if not set)
+            let content_panel_position = get_dmenu_panel_position(cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
+            
+            // Split the window into three parts based on content panel position
+            let (chunks, content_panel_index, items_panel_index, input_panel_index) = match content_panel_position {
+                crate::cli::PanelPosition::Top => {
+                    // Top: content, items, input (original layout)
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(content_height.max(3)),
+                            Constraint::Min(1),
+                            Constraint::Length(input_panel_height),
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 0, 1, 2)
+                },
+                crate::cli::PanelPosition::Middle => {
+                    // Middle: items, content, input
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(1),
+                            Constraint::Length(content_height.max(3)),
+                            Constraint::Length(input_panel_height),
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 1, 0, 2)
+                },
+                crate::cli::PanelPosition::Bottom => {
+                    // Bottom: items, input, content
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(1),                         // Items panel (remaining space)
+                            Constraint::Length(input_panel_height),     // Input panel
+                            Constraint::Length(content_height.max(3)),  // Content panel at bottom
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 2, 0, 1)
+                }
+            };
             
             // Border type
             let border_type = if rounded_borders {
@@ -777,7 +905,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 .alignment(Alignment::Left);
             
             // Items panel
-            let items_panel_height = chunks[1].height;
+            let items_panel_height = chunks[items_panel_index].height;
             let max_visible = items_panel_height.saturating_sub(2) as usize;
             
             let visible_items = ui.shown
@@ -843,10 +971,10 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: false });
             
-            // Render all components
-            f.render_widget(content_paragraph, chunks[0]);
-            f.render_stateful_widget(items_list, chunks[1], &mut list_state);
-            f.render_widget(input_paragraph, chunks[2]);
+            // Render all components in their dynamic positions
+            f.render_widget(content_paragraph, chunks[content_panel_index]);
+            f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
+            f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
         
         // Handle input events
@@ -903,7 +1031,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             
                             // Scroll to show last item
                             let total_height = terminal.size()?.height;
-                            let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                            let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                             let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                             
                             // Use same calculation as rendering code
@@ -933,7 +1061,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                                 let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                                 
                                 // Use same calculation as rendering code
@@ -968,7 +1096,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                                let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                                 let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                                 
                                 // Use same calculation as rendering code
@@ -999,7 +1127,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 // Dmenu-specific mouse handling with proper layout calculations
                 let mouse_row = mouse_event.row;
                 let total_height = terminal.size()?.height;
-                let content_panel_height = get_dmenu_u16(cli.dmenu_content_panel_height_percent, cli.title_panel_height_percent);
+                let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                 let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
                 
                 // Use same calculation as rendering code
@@ -1007,8 +1135,24 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 let content_height = content_height.max(3);
                 let items_panel_height = total_height - content_height - input_panel_height;
                 
-                // Dmenu layout: Content -> Items -> Filter
-                let items_panel_start = content_height;
+                // Get content panel position to calculate items panel position
+                let content_panel_position = get_dmenu_panel_position(cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
+                
+                // Calculate items panel coordinates based on layout
+                let (items_panel_start, items_panel_height) = match content_panel_position {
+                    crate::cli::PanelPosition::Top => {
+                        // Top: content, items, input - items start after content
+                        (content_height, items_panel_height)
+                    },
+                    crate::cli::PanelPosition::Middle => {
+                        // Middle: items, content, input - items start at top
+                        (0, items_panel_height)
+                    },
+                    crate::cli::PanelPosition::Bottom => {
+                        // Bottom: items, input, content - items start at top
+                        (0, items_panel_height)
+                    }
+                };
                 
                 let items_content_start = items_panel_start + 1; // +1 for top border
                 let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
@@ -1498,15 +1642,48 @@ fn real_main() -> eyre::Result<()> {
             let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
             let input_height = cli.input_panel_height;
             
-            // Split the window into three parts: title, apps, input
-            let window = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(title_height.max(3)),  // Title panel (min 3 lines)
-                    Constraint::Min(1),                       // Apps panel (remaining space, no borders)
-                    Constraint::Length(input_height),         // Input panel (configurable height)
-                ].as_ref())
-                .split(f.size());
+            // Get title panel position (defaults to Top if not set)
+            let title_panel_position = cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top);
+            
+            // Split the window into three parts based on title panel position
+            let (window, title_panel_index, apps_panel_index, input_panel_index) = match title_panel_position {
+                crate::cli::PanelPosition::Top => {
+                    // Top: title, apps, input (original layout)
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(title_height.max(3)),  // Title panel (min 3 lines)
+                            Constraint::Min(1),                       // Apps panel (remaining space)
+                            Constraint::Length(input_height),         // Input panel
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 0, 1, 2)
+                },
+                crate::cli::PanelPosition::Middle => {
+                    // Middle: apps, title, input
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(1),                       // Apps panel (remaining space)
+                            Constraint::Length(title_height.max(3)),  // Title panel
+                            Constraint::Length(input_height),         // Input panel
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 1, 0, 2)
+                },
+                crate::cli::PanelPosition::Bottom => {
+                    // Bottom: apps, input, title
+                    let layout = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Min(1),                       // Apps panel (remaining space)
+                            Constraint::Length(input_height),         // Input panel
+                            Constraint::Length(title_height.max(3)),  // Title panel at bottom
+                        ].as_ref())
+                        .split(f.size());
+                    (layout, 2, 0, 1)
+                }
+            };
 
             // Create blocks with configurable colors and borders
             let border_type = if cli.rounded_borders {
@@ -1570,7 +1747,7 @@ fn real_main() -> eyre::Result<()> {
                 .alignment(Alignment::Left);
 
             // Calculate apps panel height - account for borders (2 rows: top + bottom)
-            let apps_panel_height = window[1].height;
+            let apps_panel_height = window[apps_panel_index].height;
             let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for top/bottom borders
             
             // Get the visible slice of apps based on scroll offset
@@ -1644,12 +1821,10 @@ fn real_main() -> eyre::Result<()> {
             .alignment(Alignment::Left)
             .wrap(ratatui::widgets::Wrap { trim: false });
 
-            // Render description
-            f.render_widget(description, window[0]);
-            // Render app list (fills entire middle section)
-            f.render_stateful_widget(list, window[1], &mut app_state);
-            // Render query
-            f.render_widget(query, window[2]);
+            // Render panels in their dynamic positions
+            f.render_widget(description, window[title_panel_index]);
+            f.render_stateful_widget(list, window[apps_panel_index], &mut app_state);
+            f.render_widget(query, window[input_panel_index]);
         })?;
 
         // Handle user input
@@ -1758,14 +1933,27 @@ fn real_main() -> eyre::Result<()> {
             Event::Mouse(mouse_event) => {
                 let mouse_row = mouse_event.row;
                 
-                // Get the layout areas - apps panel starts right after title panel
+                // Calculate panel positions based on title_panel_position
                 let total_height = terminal.size()?.height;
                 let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
                 let input_height = cli.input_panel_height;
+                let title_panel_position = cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top);
                 
-                // Apps panel coordinates - account for borders
-                let apps_panel_start = title_height;
-                let apps_panel_height = total_height - title_height - input_height;
+                // Calculate apps panel coordinates based on layout
+                let (apps_panel_start, apps_panel_height) = match title_panel_position {
+                    crate::cli::PanelPosition::Top => {
+                        // Top: title, apps, input - apps start after title
+                        (title_height, total_height - title_height - input_height)
+                    },
+                    crate::cli::PanelPosition::Middle => {
+                        // Middle: apps, title, input - apps start at top
+                        (0, total_height - title_height - input_height)
+                    },
+                    crate::cli::PanelPosition::Bottom => {
+                        // Bottom: apps, input, title - apps start at top
+                        (0, total_height - title_height - input_height)
+                    }
+                };
                 
                 // List content area (inside the borders) - first item starts 1 row down from panel start
                 let list_content_start = apps_panel_start + 1; // +1 for top border

@@ -36,6 +36,9 @@ title_panel_height_percent = 30  # Height of top panel as percentage (10-70%)
 input_panel_height = 3           # Height of input panel in lines (1-10)
 # Note: Apps panel gets the remaining space automatically
 
+# Panel Position Configuration
+title_panel_position = "top"     # Position of title/description panel: "top", "middle", or "bottom"
+
 # ===== DMENU MODE CONFIGURATION =====
 # Settings specific to dmenu mode (--dmenu flag)
 # If not specified, regular mode settings are used as fallback
@@ -61,9 +64,12 @@ hard_stop = false                # Don't wrap around at list ends
 header_title_color = "LightBlue" # Color for panel titles
 
 # Dmenu layout (different from regular mode)
-content_panel_height_percent = 40  # Height of content panel as percentage (10-70%)
+title_panel_height_percent = 40    # Height of content panel as percentage (10-70%)
 input_panel_height = 3             # Height of filter panel in lines (1-10)
 # Note: Items panel gets the remaining space
+
+# Dmenu panel positioning
+title_panel_position = "top"       # Position of content panel: "top", "middle", or "bottom"
 
 # Dmenu parsing options
 delimiter = " "                  # Default column delimiter (can be overridden by --delimiter)
@@ -95,9 +101,12 @@ hard_stop = false                # Don't wrap around at list ends
 header_title_color = "LightBlue" # Color for panel titles
 
 # Cclip layout (different from regular and dmenu modes)
-content_panel_height_percent = 40  # Height of content preview panel as percentage (10-70%)
+title_panel_height_percent = 40    # Height of content preview panel as percentage (10-70%)
 input_panel_height = 3             # Height of filter panel in lines (1-10)
 # Note: Clipboard items panel gets the remaining space
+
+# Cclip panel positioning
+title_panel_position = "top"       # Position of content preview panel: "top", "middle", or "bottom"
 
 # Cclip display options
 show_line_numbers = true         # Show cclip rowid as line numbers next to items
