@@ -900,8 +900,8 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     
     // Validate dmenu mode conflicts
     if default.dmenu_mode {
-        if default.program.is_some() || default.search_string.is_some() {
-            eprintln!("Error: --dmenu cannot be used with -p/--program or -ss");
+        if default.program.is_some() {
+            eprintln!("Error: --dmenu cannot be used with -p/--program");
             eprintln!("Dmenu mode reads from stdin and outputs to stdout");
             std::process::exit(1);
         }
@@ -922,8 +922,8 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     
     // Validate cclip mode conflicts
     if default.cclip_mode {
-        if default.program.is_some() || default.search_string.is_some() {
-            eprintln!("Error: --cclip cannot be used with -p/--program or -ss");
+        if default.program.is_some() {
+            eprintln!("Error: --cclip cannot be used with -p/--program");
             eprintln!("Cclip mode browses clipboard history and copies selection");
             std::process::exit(1);
         }

@@ -168,7 +168,13 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // Create dmenu UI using cclip settings with inheritance  
     let wrap_long_lines = cli.cclip_wrap_long_lines.or(Some(cli.dmenu_wrap_long_lines)).unwrap_or(true);
     let mut ui = DmenuUI::new(items, wrap_long_lines, show_line_numbers);
-    ui.filter(); // Initial filter to show all items
+    
+    // Pre-fill search if -ss was provided
+    if let Some(ref search) = cli.search_string {
+        ui.query = search.clone();
+    }
+    
+    ui.filter(); // Initial filter to show all items (or filtered by search_string)
     
     // Ensure we have a valid selection if there are items
     if !ui.shown.is_empty() && ui.selected.is_none() {
@@ -1032,7 +1038,13 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     let mut ui = DmenuUI::new(items, cli.dmenu_wrap_long_lines, cli.dmenu_show_line_numbers);
     ui.set_match_mode(cli.match_mode);
     ui.set_match_nth(cli.dmenu_match_nth.clone());
-    ui.filter(); // Initial filter to show all items
+    
+    // Pre-fill search if -ss was provided
+    if let Some(ref search) = cli.search_string {
+        ui.query = search.clone();
+    }
+    
+    ui.filter(); // Initial filter to show all items (or filtered by search_string)
     
     // Handle pre-selection
     if let Some(ref select_str) = cli.dmenu_select {
