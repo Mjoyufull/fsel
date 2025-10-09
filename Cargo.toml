@@ -3,6 +3,7 @@ name = "fsel"
 version = "1.0.0-riceknife"
 authors = ["Namkhai B. <me@forkbomb9.ch>"]
 edition = "2021"
+rust-version = "1.70"
 
 description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD"
 

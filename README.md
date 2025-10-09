@@ -27,6 +27,24 @@
 
 **More Info:** [Detailed Usage Guide](./USAGE.md)
 
+## Requirements
+
+**Build Requirements:**
+- Rust 1.70+ **stable** (NOT nightly)
+  - Install: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+  - Verify: `rustc --version` (should show stable, not nightly)
+  - If using nightly: `rustup default stable`
+- Cargo (comes with Rust)
+
+**Runtime Requirements:**
+- GNU/Linux or *BSD
+- Terminal emulator
+
+**Optional:**
+- `cclip` - for clipboard history mode
+- `chafa` - for image previews in cclip mode
+- Kitty or Sixel-capable terminal - for best image support
+
 ## Quickstart
 
 Get up and running in 30 seconds:
