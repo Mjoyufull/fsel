@@ -1,6 +1,7 @@
 <div align="center">
 
   ![Logo](./assets/fsel.png)
+  
 *(fast select)*
   [![License](https://img.shields.io/crates/l/fsel?style=flat-square)](https://github.com/Mjoyufull/fsel/blob/main/LICENSE)
   ![written in Rust](https://img.shields.io/badge/language-rust-red.svg?style=flat-square)
