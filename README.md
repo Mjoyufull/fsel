@@ -429,6 +429,18 @@ Pull requests for bug fixes or requested features are accepted.
 
 Please use GitHub issues and pull requests for contributions.
 
+## Philosophy
+
+fsel is a **unified TUI workflow tool** built for terminal-centric setups. It combines app launching, dmenu functionality, and clipboard history into one scriptable interface with consistent keybinds and theming.
+
+**This means:**
+- It's built for my workflow first, but PRs for bug fixes and useful features are welcome as long as they fit in scope.
+- Older versions and the original gyr exist if you want something more minimal
+
+fsel is feature-complete at 1.0 and in maintenance mode. I'll fix what breaks in my daily use and consider community requests that fit the project's scope.
+
+---
+
 ## Troubleshooting
 
 **Apps not showing up?**
