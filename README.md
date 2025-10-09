@@ -102,7 +102,7 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 #### Option 3: Build from source
 
-* Install [Rust](https://www.rust-lang.org/learn/get-started)
+* Install [Rust](https://www.rust-lang.org/learn/get-started) stable
 * Build:
     ```sh
     $ git clone https://github.com/Mjoyufull/fsel && cd fsel
