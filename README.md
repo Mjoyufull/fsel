@@ -1,9 +1,8 @@
 <div align="center">
 
   ![Logo](./assets/fsel.png)
-
+*(fast select)*
   [![License](https://img.shields.io/crates/l/fsel?style=flat-square)](https://github.com/Mjoyufull/fsel/blob/main/LICENSE)
-  [![standard-readme compliant](https://img.shields.io/badge/readme%20style-standard-brightgreen.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
   ![written in Rust](https://img.shields.io/badge/language-rust-red.svg?style=flat-square)
 
   Fast TUI app launcher and fuzzy finder for GNU/Linux and \*BSD
