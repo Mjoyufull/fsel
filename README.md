@@ -92,7 +92,18 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
     }
     ```
 
-#### Option 2: Curl Install (Recommended for most users)
+#### Option 2: Cargo
+
+* Install from [crates.io](https://crates.io/crates/fsel):
+    ```sh
+    $ cargo install fsel
+    ```
+* To update later:
+    ```sh
+    $ cargo install fsel --force
+    ```
+
+#### Option 3: Curl Install (Recommended for most users)
 
 * Install directly from GitHub:
     ```sh
@@ -100,7 +111,7 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
     ```
 * To update later, run the same command
 
-#### Option 3: Build from source
+#### Option 4: Build from source
 
 * Install [Rust](https://www.rust-lang.org/learn/get-started) stable
 * Build:
