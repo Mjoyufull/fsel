@@ -12,7 +12,7 @@ fsel
 # Pin your favorite apps (Ctrl+Space in TUI)
 # Pinned apps always appear first with 📌 icon
 
-# Pre-fill search
+# Pre-fill search (works with app launcher, dmenu, and cclip modes)
 fsel -ss firefox
 
 # Direct launch (no UI)
@@ -99,6 +99,9 @@ echo -e "A\nB\nC" | fsel --dmenu --only-match
 
 ### Pre-selection
 ```sh
+# Pre-fill search query
+echo -e "firefox\nchrome\nfirefox-dev" | fsel --dmenu -ss fire
+
 # Pre-select by string
 git branch | fsel --dmenu --select main
 
@@ -124,6 +127,9 @@ cat empty.txt | fsel --dmenu --exit-if-empty
 ```sh
 # Browse clipboard history
 fsel --cclip
+
+# Pre-fill search to find specific content
+fsel --cclip -ss image
 
 # With image previews (requires Kitty/Sixel terminal + chafa)
 fsel --cclip  # Images show automatically if supported

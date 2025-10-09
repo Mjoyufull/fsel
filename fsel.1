@@ -26,7 +26,7 @@ Clear launch history database
 Launch program directly, bypassing TUI (requires at least 2 characters)
 .TP
 .BR \-ss " " \fISEARCH\fR
-Pre-fill search in TUI (must be last option)
+Pre-fill search in TUI (works with app launcher, dmenu, and cclip modes; must be last option)
 .TP
 .BR \-v ", " \-\-verbose
 Increase verbosity level (can be used multiple times: -v, -vv, -vvv)
@@ -127,10 +127,18 @@ rounded_borders = true
 main_border_color = "White"
 title_panel_height_percent = 30
 input_panel_height = 3
+title_panel_position = "top"  # or "middle" or "bottom"
+disable_mouse = false
+
+# pin system
+pin_icon = "📌"
+pin_color = "rgb(255,165,0)"
+
+# keybinds (see keybinds.toml for full customization)
 .RE
 .fi
 .PP
-See the example config file for all available options.
+See the example config file and keybinds.toml for all available options.
 .SH KEYBOARD SHORTCUTS
 .SS "Navigation"
 .TP
@@ -146,11 +154,14 @@ Launch selected application
 .BR "Ctrl-Space"
 Toggle pin/favorite for selected app (pinned apps appear first in search)
 .TP
-.BR "Esc" " or " "Ctrl-Q"
+.BR "Esc" " or " "Ctrl-Q" " or " "Ctrl-C"
 Exit
 .TP
 .B Backspace
 Remove characters from search
+.TP
+.B i
+(Cclip mode only) Open fullscreen image viewer for selected clipboard item
 .SS "Mouse Support"
 .TP
 .B Hover
@@ -161,6 +172,8 @@ Launch application
 .TP
 .B Scroll
 Navigate list
+.PP
+All keybinds can be customized via \fI~/.config/fsel/keybinds.toml\fR. See the example keybinds.toml file for configuration options.
 .SH LAUNCH METHODS
 .TP
 .B Default
@@ -204,6 +217,20 @@ Open TUI with "firefox" already searched:
 .nf
 .RS
 fsel -ss firefox
+.RE
+.fi
+.TP
+Pre-fill search in dmenu mode:
+.nf
+.RS
+echo -e "firefox\\nchrome\\nfirefox-dev" | fsel --dmenu -ss fire
+.RE
+.fi
+.TP
+Pre-fill search in cclip mode:
+.nf
+.RS
+fsel --cclip -ss image
 .RE
 .fi
 .SS "Dmenu Mode"
@@ -257,8 +284,11 @@ Used to detect Wayland vs X11 for clipboard operations
 .I ~/.config/fsel/config.toml
 User configuration file
 .TP
+.I ~/.config/fsel/keybinds.toml
+Keybind customization file
+.TP
 .I ~/.local/share/fsel/hist_db
-Launch history database
+Launch history and pinned apps database
 .TP
 .I ~/.local/share/fsel/lock
 Lock file for single instance

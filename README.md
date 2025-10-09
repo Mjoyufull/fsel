@@ -159,7 +159,7 @@ fsel --systemd-run -vv -p code
 
 ### Pre-filled Search Mode
 
-Open the TUI with a pre-filled search string:
+Open the TUI with a pre-filled search string. Works with app launcher, dmenu, and cclip modes:
 
 ```sh
 # Open TUI with "firefox" already searched
@@ -171,8 +171,11 @@ fsel -ss web browser
 # Combine with other options (must be last)
 fsel --uwsm -vv -r -ss text editor
 
-# Search for anything, even non-existent apps
-fsel -ss asdhaskdjahs
+# Works with dmenu mode
+echo -e "option1\noption2\noption3" | fsel --dmenu -ss opt
+
+# Works with cclip mode
+fsel --cclip -ss image
 ```
 
 ### Dmenu Mode
