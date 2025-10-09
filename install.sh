@@ -55,15 +55,44 @@ cp target/release/fsel "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/fsel"
 
 # Install man page
-MAN_DIR="$HOME/.local/share/man/man1"
 if [ -f "fsel.1" ]; then
     info "Installing man page"
-    mkdir -p "$MAN_DIR"
-    cp fsel.1 "$MAN_DIR/"
     
-    # Update man database if mandb is available
-    if command -v mandb >/dev/null 2>&1; then
-        mandb -q "$HOME/.local/share/man" 2>/dev/null || true
+    # Try system-wide first (requires sudo)
+    if [ -w "/usr/local/share/man/man1" ] 2>/dev/null; then
+        cp fsel.1 "/usr/local/share/man/man1/"
+        mandb -q 2>/dev/null || true
+    elif command -v sudo >/dev/null 2>&1; then
+        # Ask for sudo to install system-wide
+        if sudo -n true 2>/dev/null || sudo -v; then
+            sudo mkdir -p /usr/local/share/man/man1
+            sudo cp fsel.1 /usr/local/share/man/man1/
+            sudo mandb -q 2>/dev/null || true
+        else
+            # Fall back to user install
+            MAN_DIR="$HOME/.local/share/man/man1"
+            mkdir -p "$MAN_DIR"
+            cp fsel.1 "$MAN_DIR/"
+            
+            # Check if MANPATH is set
+            if ! echo "$MANPATH" | grep -q "$HOME/.local/share/man"; then
+                warn "Man page installed to $MAN_DIR"
+                warn "Add this to your shell config to use 'man fsel':"
+                warn "  export MANPATH=\"\$HOME/.local/share/man:\$MANPATH\""
+            fi
+        fi
+    else
+        # No sudo, install to user directory
+        MAN_DIR="$HOME/.local/share/man/man1"
+        mkdir -p "$MAN_DIR"
+        cp fsel.1 "$MAN_DIR/"
+        
+        # Check if MANPATH is set
+        if ! echo "$MANPATH" | grep -q "$HOME/.local/share/man"; then
+            warn "Man page installed to $MAN_DIR"
+            warn "Add this to your shell config to use 'man fsel':"
+            warn "  export MANPATH=\"\$HOME/.local/share/man:\$MANPATH\""
+        fi
     fi
 fi
 
