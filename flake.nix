@@ -41,18 +41,23 @@
       {
         packages = {
           default = pkgs.rustPlatform.buildRustPackage {
-            pname = "gyr";
-            version = "0.3.0-eggrind";
+            pname = "fsel";
+            version = "1.0.0-riceknife";
 
             src = ./.;
 
-            cargoHash = "sha256-7+QqhikU1Pt4VuWNxmcFPWnxU3rMNWRdmljIvyEfIAw=";
+            cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="; # Update after first build
 
             inherit buildInputs nativeBuildInputs;
 
+            # Install man page
+            postInstall = ''
+              install -Dm644 fsel.1 $out/share/man/man1/fsel.1
+            '';
+
             meta = with pkgs.lib; {
               description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD";
-              homepage = "https://github.com/Mjoyufull/gyr";
+              homepage = "https://github.com/Mjoyufull/fsel";
               license = licenses.bsd2;
               maintainers = with maintainers; [ "Mjoyufull" ];
               platforms = platforms.linux ++ platforms.darwin;

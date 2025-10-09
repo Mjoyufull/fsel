@@ -1,11 +1,11 @@
 #![deny(unsafe_code)]
 #![deny(missing_docs)]
 
-//! # Gyr
+//! # Fsel
 //!
 //! > _Blazing fast_ TUI launcher for GNU/Linux and *BSD
 //!
-//! For more info, check the [README](https://sr.ht/~f9/gyr)
+//! For more info, check the [README](https://github.com/Mjoyufull/fsel)
 
 /// CLI parser
 mod cli;
@@ -15,21 +15,25 @@ mod cclip;
 mod dmenu;
 /// Terminal graphics handling (inspired by Yazi)
 mod graphics;
+/// Helper functions
+mod helpers;
 /// Terminal input helpers
 mod input;
-/// Ui helpers
+/// Keybind configuration
+mod keybinds;
+/// UI helpers
 mod ui;
 /// XDG apps
 mod xdg;
 
-use input::{Event, Input};
+use input::Event;
 use ui::{UI, DmenuUI};
 use dmenu::{is_stdin_piped, read_stdin_lines, parse_stdin_to_items};
 
 use std::env;
 use std::fs;
 use std::io;
-use std::os::unix::process::CommandExt;
+
 use std::path;
 use std::process;
 use std::sync::mpsc;
@@ -52,21 +56,25 @@ use scopeguard::defer;
 
 fn main() {
     if let Err(error) = real_main() {
-        shutdown_terminal();
+        shutdown_terminal(false); // Use safe default - always cleanup mouse if enabled
         eprintln!("{error:?}");
         process::exit(1);
     }
 }
 
-fn setup_terminal() -> eyre::Result<()> {
+fn setup_terminal(disable_mouse: bool) -> eyre::Result<()> {
     enable_raw_mode().wrap_err("Failed to enable raw mode")?;
     io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
-    io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    if !disable_mouse {
+        io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    }
     Ok(())
 }
 
-fn shutdown_terminal() {
-    let _ = io::stderr().execute(DisableMouseCapture);
+fn shutdown_terminal(disable_mouse: bool) {
+    if !disable_mouse {
+        let _ = io::stderr().execute(DisableMouseCapture);
+    }
     let _ = io::stderr().execute(LeaveAlternateScreen);
     let _ = disable_raw_mode();
 }
@@ -129,11 +137,18 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // Setup terminal
     enable_raw_mode().wrap_err("Failed to enable raw mode")?;
     io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
-    io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    
+    // Get effective disable_mouse setting with cclip -> dmenu -> regular inheritance
+    let disable_mouse = cli.cclip_disable_mouse.or(cli.dmenu_disable_mouse).unwrap_or(cli.disable_mouse);
+    if !disable_mouse {
+        io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    }
     
     // Ensure cleanup on exit
     defer! {
-        let _ = io::stderr().execute(DisableMouseCapture);
+        if !disable_mouse {
+            let _ = io::stderr().execute(DisableMouseCapture);
+        }
         let _ = io::stderr().execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
@@ -145,7 +160,10 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Input handler
-    let input = Input::new();
+    let input = input::Config {
+        disable_mouse: disable_mouse,
+        ..input::Config::default()
+    }.init();
 
     // Create dmenu UI using cclip settings with inheritance  
     let wrap_long_lines = cli.cclip_wrap_long_lines.or(Some(cli.dmenu_wrap_long_lines)).unwrap_or(true);
@@ -160,11 +178,21 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // Check if terminal supports graphics and chafa is available
     let chafa_available = cclip::check_chafa_available();
     
-    // Only enable inline preview for Kitty graphics protocol to avoid Sixel timing issues
+    // enable inline preview for both Kitty and Sixel protocols
     let graphics_adapter = crate::graphics::GraphicsAdapter::detect();
-    let supports_kitty_protocol = matches!(graphics_adapter, crate::graphics::GraphicsAdapter::Kitty);
+    let supports_graphics = !matches!(graphics_adapter, crate::graphics::GraphicsAdapter::None);
     
-    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available && supports_kitty_protocol);
+    let image_preview_enabled = cli.cclip_image_preview.unwrap_or(chafa_available && supports_graphics);
+    
+    // warn if image preview is enabled but requirements aren't met
+    if image_preview_enabled && !chafa_available {
+        eprintln!("warning: image_preview is enabled but chafa is not installed");
+        eprintln!("install chafa for image previews: https://github.com/hpjansson/chafa");
+    }
+    if image_preview_enabled && !supports_graphics {
+        eprintln!("warning: image_preview is enabled but your terminal doesn't support graphics");
+        eprintln!("supported terminals: Kitty, Foot, WezTerm, xterm (with sixel support)");
+    }
     
     // Get effective colors with cclip -> dmenu -> regular inheritance
     let get_cclip_color = |cclip_opt: Option<ratatui::style::Color>, dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
@@ -222,7 +250,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             content_panel_height
         );
         
-        // Check what content type we should show for image handling
+        // Check if current item is an image
         let mut current_is_image = false;
         if image_preview_enabled {
             if let Some(selected) = ui.selected {
@@ -233,6 +261,12 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     }
                 }
             }
+        }
+        
+        // BEFORE drawing: Clear old image if transitioning from image to non-image
+        if image_preview_enabled && previous_was_image && !current_is_image {
+            let graphics = crate::graphics::GraphicsAdapter::detect();
+            let _ = graphics.image_hide();
         }
         
         terminal.draw(|f| {
@@ -392,60 +426,84 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
         
-        // After ratatui draws, handle image display/clearing
-        if image_preview_enabled {
+        // After ratatui draws, handle image display
+        if image_preview_enabled && current_is_image {
             let graphics = crate::graphics::GraphicsAdapter::detect();
             
-            // Clear old image if transitioning from image to text
-            if previous_was_image && !current_is_image {
-                let _ = graphics.image_hide();
-            }
-            
             // Show new image if current item is an image  
-            if current_is_image {
+            {
                 if let Some(selected) = ui.selected {
                     if selected < ui.shown.len() {
                         let item = &ui.shown[selected];
                         if let Some(rowid) = ui.get_cclip_rowid(item) {
-                            // Calculate content panel area coordinates based on dynamic positioning
-                            let total_height = terminal.size()?.height;
+                            // Get the content panel chunk position from the last draw
+                            // We need to recalculate the layout to get the correct chunk positions
+                            let term_size = terminal.size()?;
+                            let total_height = term_size.height;
                             let content_panel_height_percent = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                             let content_height = (total_height as f32 * content_panel_height_percent as f32 / 100.0).round() as u16;
                             let content_height = content_height.max(3);
                             let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
                             let content_panel_position = get_cclip_panel_position(cli.cclip_title_panel_position, cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
                             
-                            // Calculate Y position based on panel position
-                            let content_y = match content_panel_position {
-                                crate::cli::PanelPosition::Top => 1, // Inside top border
+                            // Recalculate layout to get chunk positions (same as in draw)
+                            let (chunks, content_panel_index, _, _) = match content_panel_position {
+                                crate::cli::PanelPosition::Top => {
+                                    let layout = Layout::default()
+                                        .direction(Direction::Vertical)
+                                        .constraints([
+                                            Constraint::Length(content_height),
+                                            Constraint::Min(1),
+                                            Constraint::Length(input_panel_height),
+                                        ].as_ref())
+                                        .split(term_size);
+                                    (layout, 0, 1, 2)
+                                },
                                 crate::cli::PanelPosition::Middle => {
-                                    // Middle: apps panel height + 1 for content panel top border
-                                    (total_height - content_height - input_panel_height) + 1
+                                    let layout = Layout::default()
+                                        .direction(Direction::Vertical)
+                                        .constraints([
+                                            Constraint::Min(1),
+                                            Constraint::Length(content_height),
+                                            Constraint::Length(input_panel_height),
+                                        ].as_ref())
+                                        .split(term_size);
+                                    (layout, 1, 0, 2)
                                 },
                                 crate::cli::PanelPosition::Bottom => {
-                                    // Bottom: apps panel height + 1 for content panel top border
-                                    (total_height - content_height - input_panel_height) + 1
+                                    let layout = Layout::default()
+                                        .direction(Direction::Vertical)
+                                        .constraints([
+                                            Constraint::Min(1),
+                                            Constraint::Length(input_panel_height),
+                                            Constraint::Length(content_height),
+                                        ].as_ref())
+                                        .split(term_size);
+                                    (layout, 2, 0, 1)
                                 }
                             };
                             
-                            // Content area (inside the border)
-                            let content_area = ratatui::layout::Rect {
-                                x: 1, // Inside left border
-                                y: content_y,
-                                width: terminal.size()?.width.saturating_sub(2), // Account for borders
-                                height: content_height.saturating_sub(2), // Account for borders
+                            // Get the content panel chunk
+                            let content_chunk = chunks[content_panel_index];
+                            
+                            // Calculate image area INSIDE the content panel borders
+                            let image_area = ratatui::layout::Rect {
+                                x: content_chunk.x + 1,  // Inside left border
+                                y: content_chunk.y + 1,  // Inside top border
+                                width: content_chunk.width.saturating_sub(2),  // Account for left+right borders
+                                height: content_chunk.height.saturating_sub(2),  // Account for top+bottom borders
                             };
                             
-                            // Show image
-                            let _ = graphics.show_cclip_image_if_different(&rowid, content_area).await;
+                            // Show image inside the content panel
+                            let _ = graphics.show_cclip_image_if_different(&rowid, image_area).await;
                         }
                     }
                 }
             }
-            
-            // Update state for next iteration
-            previous_was_image = current_is_image;
         }
+        
+        // Update state for next iteration
+        previous_was_image = current_is_image;
         
         // Handle input events with full navigation and clipboard copying
         match input.next()? {
@@ -459,31 +517,109 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
                         if let Some(selected) = ui.selected {
                             if selected < ui.shown.len() {
-                                // Parse the original cclip line to get rowid and mime_type
+                                // parse the original cclip line to get rowid and mime_type
                                 let original_line = &ui.shown[selected].original_line;
                                 let parts: Vec<&str> = original_line.splitn(3, '\t').collect();
                                 if parts.len() >= 2 {
                                     let rowid = parts[0];
                                     let mime_type = parts[1];
                                     
-                                    // Use cclip get | wl-copy to restore to clipboard
-                                    match std::process::Command::new("sh")
-                                        .arg("-c")
-                                        .arg(&format!("cclip get {} | wl-copy -t '{}'", rowid, mime_type))
-                                        .status() 
-                                    {
-                                        Ok(status) => {
-                                            if status.success() {
-                                                // Clean up terminal completely
-                                                terminal.show_cursor().wrap_err("Failed to show cursor")?;
-                                                drop(terminal);
-                                                let _ = io::stderr().execute(DisableMouseCapture);
-                                                let _ = io::stderr().execute(LeaveAlternateScreen);
-                                                let _ = disable_raw_mode();
-                                                return Ok(());
+                                    // copy to clipboard using proper piping (no shell injection)
+                                    let copy_result = if std::env::var("WAYLAND_DISPLAY").is_ok() {
+                                        // wayland
+                                        let cclip_child = std::process::Command::new("cclip")
+                                            .args(&["get", rowid])
+                                            .stdout(std::process::Stdio::piped())
+                                            .stderr(std::process::Stdio::null())
+                                            .spawn();
+                                        
+                                        if let Ok(mut cclip) = cclip_child {
+                                            if let Some(cclip_stdout) = cclip.stdout.take() {
+                                                let wl_copy = std::process::Command::new("wl-copy")
+                                                    .args(&["-t", mime_type])
+                                                    .stdin(std::process::Stdio::piped())
+                                                    .stdout(std::process::Stdio::null())
+                                                    .stderr(std::process::Stdio::null())
+                                                    .spawn();
+                                                
+                                                if let Ok(mut wl) = wl_copy {
+                                                    if let Some(wl_stdin) = wl.stdin.take() {
+                                                        std::thread::spawn(move || {
+                                                            let mut cclip_stdout = cclip_stdout;
+                                                            let mut wl_stdin = wl_stdin;
+                                                            std::io::copy(&mut cclip_stdout, &mut wl_stdin).ok();
+                                                        });
+                                                        
+                                                        let _ = cclip.wait();
+                                                        wl.wait().ok()
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        // X11 - try xclip first, then xsel
+                                        let x11_tools = [("xclip", vec!["-selection", "clipboard", "-t", mime_type]), 
+                                                        ("xsel", vec!["--clipboard", "--input"])];
+                                        
+                                        let mut result = None;
+                                        for (tool, args) in &x11_tools {
+                                            let cclip_child = std::process::Command::new("cclip")
+                                                .args(&["get", rowid])
+                                                .stdout(std::process::Stdio::piped())
+                                                .stderr(std::process::Stdio::null())
+                                                .spawn();
+                                            
+                                            if let Ok(mut cclip) = cclip_child {
+                                                if let Some(cclip_stdout) = cclip.stdout.take() {
+                                                    let x11_child = std::process::Command::new(tool)
+                                                        .args(args)
+                                                        .stdin(std::process::Stdio::piped())
+                                                        .stdout(std::process::Stdio::null())
+                                                        .stderr(std::process::Stdio::null())
+                                                        .spawn();
+                                                    
+                                                    if let Ok(mut x11) = x11_child {
+                                                        if let Some(x11_stdin) = x11.stdin.take() {
+                                                            std::thread::spawn(move || {
+                                                                let mut cclip_stdout = cclip_stdout;
+                                                                let mut x11_stdin = x11_stdin;
+                                                                std::io::copy(&mut cclip_stdout, &mut x11_stdin).ok();
+                                                            });
+                                                            
+                                                            let _ = cclip.wait();
+                                                            if let Ok(status) = x11.wait() {
+                                                                if status.success() {
+                                                                    result = Some(status);
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
-                                        Err(_) => {
+                                        result
+                                    };
+                                    
+                                    match copy_result {
+                                        Some(status) if status.success() => {
+                                            // clean up terminal completely
+                                            terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                            drop(terminal);
+                                            let _ = io::stderr().execute(DisableMouseCapture);
+                                            let _ = io::stderr().execute(LeaveAlternateScreen);
+                                            let _ = disable_raw_mode();
+                                            return Ok(());
+                                        }
+                                        _ => {
                                             // Ignore clipboard copy errors for now
                                         }
                                     }
@@ -491,25 +627,27 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             }
                         }
                     }
-                    // Display image in terminal (bypass TUI)
-                    (KeyCode::Char('i'), KeyModifiers::NONE) => {
-                        if let Some(selected) = ui.selected {
-                            if selected < ui.shown.len() {
-                                let item = &ui.shown[selected];
-                                if ui.display_image_to_terminal(item) {
-                                    // Image was displayed, wait for user input to continue
-                                    use crossterm::event::read;
-                                    let _ = read(); // Wait for any key press
-                                    // Force ratatui to completely re-render after external terminal manipulation
-                                    terminal.clear().wrap_err("Failed to clear terminal")?;
+                    // Add character to query
+                    (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+                        // Check if this is the image preview keybind
+                        if cli.keybinds.matches_image_preview(KeyCode::Char(c), KeyModifiers::NONE) {
+                            if let Some(selected) = ui.selected {
+                                if selected < ui.shown.len() {
+                                    let item = &ui.shown[selected];
+                                    if ui.display_image_to_terminal(item) {
+                                        // Image was displayed, wait for user input to continue
+                                        use crossterm::event::read;
+                                        let _ = read(); // Wait for any key press
+                                        // Force ratatui to completely re-render after external terminal manipulation
+                                        terminal.clear().wrap_err("Failed to clear terminal")?;
+                                    }
                                 }
                             }
+                        } else {
+                            // Regular character input
+                            ui.query.push(c);
+                            ui.filter();
                         }
-                    }
-                    // Add character to query (exclude 'i' as it's handled above)
-                    (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) if c != 'i' => {
-                        ui.query.push(c);
-                        ui.filter();
                     }
                     // Remove character from query
                     (KeyCode::Backspace, _) => {
@@ -677,32 +815,112 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             let clicked_item_index = ui.scroll_offset + row_in_content as usize;
                             
                             if clicked_item_index < ui.shown.len() {
-                                // Parse the original cclip line to get rowid and mime_type
+                                // parse the original cclip line to get rowid and mime_type
                                 let original_line = &ui.shown[clicked_item_index].original_line;
                                 let parts: Vec<&str> = original_line.splitn(3, '\t').collect();
                                 if parts.len() >= 2 {
                                     let rowid = parts[0];
                                     let mime_type = parts[1];
                                     
-                                    // Use cclip get | wl-copy to restore to clipboard
-                                    match std::process::Command::new("sh")
-                                        .arg("-c")
-                                        .arg(&format!("cclip get {} | wl-copy -t '{}'", rowid, mime_type))
-                                        .status() 
-                                    {
-                                        Ok(status) => {
-                                            if status.success() {
-                                                // Clean up terminal completely
-                                                terminal.show_cursor().wrap_err("Failed to show cursor")?;
-                                                drop(terminal);
-                                                let _ = io::stderr().execute(DisableMouseCapture);
-                                                let _ = io::stderr().execute(LeaveAlternateScreen);
-                                                let _ = disable_raw_mode();
-                                                return Ok(());
+                                    // copy to clipboard using proper piping (no shell injection)
+                                    let copy_result = if std::env::var("WAYLAND_DISPLAY").is_ok() {
+                                        // wayland
+                                        let cclip_child = std::process::Command::new("cclip")
+                                            .args(&["get", rowid])
+                                            .stdout(std::process::Stdio::piped())
+                                            .stderr(std::process::Stdio::null())
+                                            .spawn();
+                                        
+                                        if let Ok(mut cclip) = cclip_child {
+                                            if let Some(cclip_stdout) = cclip.stdout.take() {
+                                                let wl_copy = std::process::Command::new("wl-copy")
+                                                    .args(&["-t", mime_type])
+                                                    .stdin(std::process::Stdio::piped())
+                                                    .stdout(std::process::Stdio::null())
+                                                    .stderr(std::process::Stdio::null())
+                                                    .spawn();
+                                                
+                                                if let Ok(mut wl) = wl_copy {
+                                                    if let Some(wl_stdin) = wl.stdin.take() {
+                                                        std::thread::spawn(move || {
+                                                            let mut cclip_stdout = cclip_stdout;
+                                                            let mut wl_stdin = wl_stdin;
+                                                            std::io::copy(&mut cclip_stdout, &mut wl_stdin).ok();
+                                                        });
+                                                        
+                                                        let _ = cclip.wait();
+                                                        wl.wait().ok()
+                                                    } else {
+                                                        None
+                                                    }
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        // X11 - try xclip first, then xsel
+                                        let x11_tools = [("xclip", vec!["-selection", "clipboard", "-t", mime_type]), 
+                                                        ("xsel", vec!["--clipboard", "--input"])];
+                                        
+                                        let mut result = None;
+                                        for (tool, args) in &x11_tools {
+                                            let cclip_child = std::process::Command::new("cclip")
+                                                .args(&["get", rowid])
+                                                .stdout(std::process::Stdio::piped())
+                                                .stderr(std::process::Stdio::null())
+                                                .spawn();
+                                            
+                                            if let Ok(mut cclip) = cclip_child {
+                                                if let Some(cclip_stdout) = cclip.stdout.take() {
+                                                    let x11_child = std::process::Command::new(tool)
+                                                        .args(args)
+                                                        .stdin(std::process::Stdio::piped())
+                                                        .stdout(std::process::Stdio::null())
+                                                        .stderr(std::process::Stdio::null())
+                                                        .spawn();
+                                                    
+                                                    if let Ok(mut x11) = x11_child {
+                                                        if let Some(x11_stdin) = x11.stdin.take() {
+                                                            std::thread::spawn(move || {
+                                                                let mut cclip_stdout = cclip_stdout;
+                                                                let mut x11_stdin = x11_stdin;
+                                                                std::io::copy(&mut cclip_stdout, &mut x11_stdin).ok();
+                                                            });
+                                                            
+                                                            let _ = cclip.wait();
+                                                            if let Ok(status) = x11.wait() {
+                                                                if status.success() {
+                                                                    result = Some(status);
+                                                                    break;
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
-                                        Err(_) => {
-                                            // Ignore clipboard copy errors for now
+                                        result
+                                    };
+                                    
+                                    match copy_result {
+                                        Some(status) if status.success() => {
+                                            // clean up terminal completely
+                                            terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                            drop(terminal);
+                                            if !disable_mouse {
+                                                let _ = io::stderr().execute(DisableMouseCapture);
+                                            }
+                                            let _ = io::stderr().execute(LeaveAlternateScreen);
+                                            let _ = disable_raw_mode();
+                                            return Ok(());
+                                        }
+                                        _ => {
+                                            // ignore clipboard copy errors for now
                                         }
                                     }
                                 }
@@ -746,17 +964,29 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
     use ratatui::Terminal;
 
-    // Check if stdin is piped, if not in dmenu mode this is an error
-    if !is_stdin_piped() {
+    // Check if stdin is piped (unless prompt-only mode)
+    if !cli.dmenu_prompt_only && !is_stdin_piped() {
         return Err(eyre!("dmenu mode requires input from stdin"));
     }
 
     // Read stdin lines
-    let lines = read_stdin_lines()
-        .wrap_err("Failed to read from stdin")?;
+    let lines = if cli.dmenu_prompt_only {
+        vec![] // No input in prompt-only mode
+    } else if cli.dmenu_null_separated {
+        dmenu::read_stdin_null_separated()
+            .wrap_err("Failed to read from stdin")?
+    } else {
+        read_stdin_lines()
+            .wrap_err("Failed to read from stdin")?
+    };
     
-    if lines.is_empty() {
-        // No input, just exit cleanly
+    // Exit immediately if no input and exit_if_empty is set
+    if cli.dmenu_exit_if_empty && lines.is_empty() {
+        return Ok(());
+    }
+    
+    // Also check if lines only contain empty strings
+    if cli.dmenu_exit_if_empty && lines.iter().all(|l| l.trim().is_empty()) {
         return Ok(());
     }
 
@@ -770,11 +1000,18 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // Setup terminal
     enable_raw_mode().wrap_err("Failed to enable raw mode")?;
     io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
-    io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    
+    // Get effective disable_mouse setting with dmenu -> regular inheritance
+    let disable_mouse = cli.dmenu_disable_mouse.unwrap_or(cli.disable_mouse);
+    if !disable_mouse {
+        io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+    }
     
     // Ensure cleanup on exit
     defer! {
-        let _ = io::stderr().execute(DisableMouseCapture);
+        if !disable_mouse {
+            let _ = io::stderr().execute(DisableMouseCapture);
+        }
         let _ = io::stderr().execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
@@ -786,11 +1023,32 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Input handler
-    let input = Input::new();
+    let input = input::Config {
+        disable_mouse: disable_mouse,
+        ..input::Config::default()
+    }.init();
 
     // Create dmenu UI
     let mut ui = DmenuUI::new(items, cli.dmenu_wrap_long_lines, cli.dmenu_show_line_numbers);
+    ui.set_match_mode(cli.match_mode);
+    ui.set_match_nth(cli.dmenu_match_nth.clone());
     ui.filter(); // Initial filter to show all items
+    
+    // Handle pre-selection
+    if let Some(ref select_str) = cli.dmenu_select {
+        // Find first matching item (case-insensitive)
+        let select_lower = select_str.to_lowercase();
+        for (idx, item) in ui.shown.iter().enumerate() {
+            if item.display_text.to_lowercase().contains(&select_lower) {
+                ui.selected = Some(idx);
+                break;
+            }
+        }
+    } else if let Some(select_idx) = cli.dmenu_select_index {
+        if select_idx < ui.shown.len() {
+            ui.selected = Some(select_idx);
+        }
+    }
     
     // Ensure we have a valid selection if there are items
     if !ui.shown.is_empty() && ui.selected.is_none() {
@@ -802,7 +1060,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     // List state for ratatui
     let mut list_state = ListState::default();
     
-    // Helper function to get effective dmenu colors/options
+    // Get effective dmenu colors with fallback
     let get_dmenu_color = |dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
         dmenu_opt.unwrap_or(default)
     };
@@ -955,13 +1213,20 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                 Span::styled(") ", Style::default().fg(input_text_color)),
                 Span::styled(">", Style::default().fg(highlight_color)),
                 Span::styled("> ", Style::default().fg(input_text_color)),
-                Span::styled(&ui.query, Style::default().fg(input_text_color)),
+                Span::styled(
+                    if cli.dmenu_password_mode {
+                        cli.dmenu_password_character.repeat(ui.query.len())
+                    } else {
+                        ui.query.clone()
+                    },
+                    Style::default().fg(input_text_color)
+                ),
                 Span::styled(cursor, Style::default().fg(highlight_color)),
             ]))
             .block(Block::default()
                 .borders(Borders::ALL)
                 .title(Span::styled(
-                    " Filter ",
+                    if cli.dmenu_prompt_only { " Input " } else { " Filter " },
                     Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
                 ))
                 .border_type(border_type)
@@ -972,8 +1237,14 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
             .wrap(Wrap { trim: false });
             
             // Render all components in their dynamic positions
-            f.render_widget(content_paragraph, chunks[content_panel_index]);
-            f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
+            // Only render content panel if not hide_before_typing or query is not empty
+            if !cli.dmenu_hide_before_typing || !ui.query.is_empty() {
+                f.render_widget(content_paragraph, chunks[content_panel_index]);
+            }
+            // Only render items list if not in prompt-only mode and (not hide_before_typing or query is not empty)
+            if !cli.dmenu_prompt_only && (!cli.dmenu_hide_before_typing || !ui.query.is_empty()) {
+                f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
+            }
             f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
         
@@ -987,35 +1258,78 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     }
                     // Select item on Enter or Ctrl+Y
                     (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                        // Auto-select if only one match and auto_select is enabled
+                        if cli.dmenu_auto_select && ui.shown.len() == 1 {
+                            ui.selected = Some(0);
+                        }
+                        
                         // Store selection and exit loop to handle output outside TUI context
                         if let Some(selected) = ui.selected {
                             if selected < ui.shown.len() {
-                                // Store the original line as-is for dmenu output
-                                let selected_line = &ui.shown[selected].original_line;
+                                let output = if cli.dmenu_index_mode {
+                                    // Output index instead of text
+                                    selected.to_string()
+                                } else if let Some(ref accept_cols) = cli.dmenu_accept_nth {
+                                    // Output specific columns
+                                    ui.shown[selected].get_accept_nth_output(accept_cols)
+                                } else {
+                                    // Output original line
+                                    ui.shown[selected].original_line.clone()
+                                };
                                 
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
-                                drop(terminal); // Ensure terminal is fully cleaned up
-                                let _ = io::stderr().execute(DisableMouseCapture);
+                                drop(terminal);
+                                if !disable_mouse {
+                                    let _ = io::stderr().execute(DisableMouseCapture);
+                                }
                                 let _ = io::stderr().execute(LeaveAlternateScreen);
                                 let _ = disable_raw_mode();
                                 
-                                // Now print to stdout in a completely clean context
-                                println!("{}", selected_line);
+                                // Print to stdout
+                                println!("{}", output);
                                 return Ok(());
                             }
+                        } else if !cli.dmenu_only_match && !ui.query.is_empty() {
+                            // No selection but have query - output the query itself (unless only_match is set)
+                            terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                            drop(terminal);
+                            if !disable_mouse {
+                                let _ = io::stderr().execute(DisableMouseCapture);
+                            }
+                            let _ = io::stderr().execute(LeaveAlternateScreen);
+                            let _ = disable_raw_mode();
+                            
+                            println!("{}", ui.query);
+                            return Ok(());
                         }
+                        
+                        // only_match is set and no selection - don't exit
+                        if cli.dmenu_only_match {
+                            continue;
+                        }
+                        
                         return Ok(()); // Exit without selection
                     }
                     // Add character to query
                     (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                         ui.query.push(c);
                         ui.filter();
+                        
+                        // Auto-select if only one match
+                        if cli.dmenu_auto_select && ui.shown.len() == 1 {
+                            ui.selected = Some(0);
+                        }
                     }
                     // Remove character from query
                     (KeyCode::Backspace, _) => {
                         ui.query.pop();
                         ui.filter();
+                        
+                        // Auto-select if only one match
+                        if cli.dmenu_auto_select && ui.shown.len() == 1 {
+                            ui.selected = Some(0);
+                        }
                     }
                     // Navigation
                     (KeyCode::Left, _) => {
@@ -1185,7 +1499,9 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
                                 drop(terminal); // Ensure terminal is fully cleaned up
-                                let _ = io::stderr().execute(DisableMouseCapture);
+                                if !disable_mouse {
+                                    let _ = io::stderr().execute(DisableMouseCapture);
+                                }
                                 let _ = io::stderr().execute(LeaveAlternateScreen);
                                 let _ = disable_raw_mode();
                                 
@@ -1224,20 +1540,10 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
 }
 
 fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<()> {
-    use directories::ProjectDirs;
     use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
     
-    // Open database for history (same logic as in main)
-    let db = if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
-        let mut hist_db = project_dirs.data_local_dir().to_path_buf();
-        if !hist_db.exists() {
-            fs::create_dir_all(&hist_db).wrap_err("Error creating data dir")?;
-        }
-        hist_db.push("hist_db");
-        sled::open(hist_db).wrap_err("Failed to open database")?
-    } else {
-        return Err(eyre!("can't find data dir for {}", env!("CARGO_PKG_NAME")));
-    };
+    // open database for history
+    let (db, _data_dir) = helpers::open_history_db()?;
     
     // Get application directories (same logic as in main)
     let mut dirs: Vec<path::PathBuf> = vec![];
@@ -1267,10 +1573,19 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
             }
         }
     } else {
-        for data_dir in &mut [
+        // default paths for Linux and BSD
+        let mut default_paths = vec![
             path::PathBuf::from("/usr/local/share"),
             path::PathBuf::from("/usr/share"),
-        ] {
+        ];
+        
+        // add BSD-specific paths
+        #[cfg(target_os = "openbsd")]
+        {
+            default_paths.push(path::PathBuf::from("/usr/X11R6/share"));
+        }
+        
+        for data_dir in &mut default_paths {
             data_dir.push("applications");
             if data_dir.exists() {
                 dirs.push(data_dir.clone());
@@ -1278,8 +1593,8 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
         }
     }
     
-    // Read applications
-    let apps_receiver = xdg::read(dirs, &db);
+    // Read applications with filtering options
+    let apps_receiver = xdg::read_with_options(dirs, &db, cli.filter_desktop, cli.list_executables_in_path);
     
     // Collect all apps
     let mut all_apps = Vec::new();
@@ -1291,55 +1606,68 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
         return Err(eyre!("No applications found"));
     }
     
-    // Find the best match using fuzzy matching
+    // Find the best match using improved matching logic for -p
     let matcher = SkimMatcherV2::default();
     let mut best_app: Option<(xdg::App, i64)> = None;
+    let program_name_lower = program_name.to_lowercase();
     
     for app in all_apps {
-        // Try to match against name, generic name, keywords, and description
-        let mut best_score = None;
+        let app_name_lower = app.name.to_lowercase();
         
-        // Match against app name (highest priority)
-        if let Some(score) = matcher.fuzzy_match(&app.name, program_name) {
-            best_score = Some(score * 3);
-        }
+        // extract executable name from command
+        let exec_name = helpers::extract_exec_name(&app.command);
+        let exec_name_lower = exec_name.to_lowercase();
         
-        // Match against generic name
-        if let Some(ref generic_name) = app.generic_name {
-            if let Some(score) = matcher.fuzzy_match(generic_name, program_name) {
-                let boosted_score = score * 2;
-                best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
-            }
-        }
-        
-        // Match against keywords
-        for keyword in &app.keywords {
-            if let Some(score) = matcher.fuzzy_match(keyword, program_name) {
-                let boosted_score = score * 2;
-                best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
-            }
-        }
-        
-        // Match against description
-        if let Some(score) = matcher.fuzzy_match(&app.description, program_name) {
-            best_score = Some(best_score.map_or(score, |current| current.max(score)));
-        }
-        
-        if let Some(score) = best_score {
-            // Include history in scoring
-            let final_score = if app.history > 0 {
-                score * app.history as i64
-            } else {
-                score
-            };
+        // Prioritized matching: exact > prefix > fuzzy
+        let mut final_score = if app_name_lower == program_name_lower {
+            1_000_000 // Exact app name match
+        } else if exec_name_lower == program_name_lower {
+            900_000 // Exact executable name match
+        } else if exec_name_lower.starts_with(&program_name_lower) {
+            800_000 // Executable prefix match (e.g., "fo" matches "foot")
+        } else if app_name_lower.starts_with(&program_name_lower) {
+            700_000 // App name prefix match
+        } else {
+            // Fuzzy matching with priority for executable name
+            let name_score = matcher.fuzzy_match(&app.name, program_name).unwrap_or(0);
+            let exec_score = matcher.fuzzy_match(exec_name, program_name).unwrap_or(0);
             
-            if let Some((_, current_best_score)) = &best_app {
-                if final_score > *current_best_score {
-                    best_app = Some((app, final_score));
-                }
+            // Prioritize executable name matches (2x weight)
+            let best_score = std::cmp::max(name_score, exec_score * 2);
+            
+            if best_score == 0 {
+                continue; // No match at all
+            }
+            
+            best_score
+        };
+        
+        // apply pin boost (highest priority after exact matches)
+        if app.pinned {
+            if final_score < 700_000 {
+                final_score += 500_000; // boost fuzzy matches significantly
             } else {
+                final_score += 50_000; // boost exact matches slightly
+            }
+        }
+        
+        // include history in scoring (but don't let it dominate exact/prefix matches)
+        if app.history > 0 {
+            final_score = if final_score >= 700_000 {
+                // for exact/prefix matches, history is just a tiebreaker
+                final_score + app.history as i64
+            } else {
+                // for fuzzy matches, history multiplies the score
+                final_score * app.history as i64
+            };
+        }
+        
+        if let Some((_, current_best_score)) = &best_app {
+            if final_score > *current_best_score {
                 best_app = Some((app, final_score));
             }
+        } else {
+            best_app = Some((app, final_score));
         }
     }
     
@@ -1350,69 +1678,38 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
         }
     };
     
-    // Print what we're launching if verbose
+    // confirm first launch if enabled and app has no history
+    if cli.confirm_first_launch && app_to_run.history == 0 {
+        use std::io::{self, Write};
+        eprint!("Launch {} [Y/n]? ", app_to_run.name);
+        io::stderr().flush()?;
+        
+        let mut response = String::new();
+        io::stdin().read_line(&mut response)?;
+        let response = response.trim().to_lowercase();
+        
+        if response == "n" || response == "no" {
+            // user said no, drop into TUI with search pre-filled
+            // we need to return an error that signals to continue to TUI
+            // but we can't easily do that from here, so just exit
+            eprintln!("Cancelled. Use 'fsel -ss {}' to search in TUI.", program_name);
+            std::process::exit(0);
+        }
+    }
+    
+    // print what we're launching if verbose
     if cli.verbose.unwrap_or(0) > 0 {
         eprintln!("Launching: {} ({})", app_to_run.name, app_to_run.command);
     }
     
-    // Handle --no-exec: print command and exit cleanly
+    // handle --no-exec: print command and exit cleanly
     if cli.no_exec {
         println!("{}", app_to_run.command);
         return Ok(());
     }
     
-    // Launch the app (same logic as in main)
-    let commands = shell_words::split(&app_to_run.command)?;
-    
-    if let Some(path) = &app_to_run.path {
-        env::set_current_dir(path::PathBuf::from(path)).wrap_err_with(|| {
-            format!("Failed to switch to {path} when starting {app_to_run}")
-        })?;
-    }
-    
-    let mut runner: Vec<&str> = vec![];
-    
-    // Determine launch method based on flags
-    if cli.uwsm {
-        runner.extend_from_slice(&["uwsm", "app", "--"]);
-    } else if cli.systemd_run {
-        runner.extend_from_slice(&["systemd-run", "--user", "--scope", "--"]);
-    } else if cli.sway {
-        runner.extend_from_slice(&["swaymsg", "exec", "--"]);
-    }
-    
-    if app_to_run.is_terminal {
-        runner.extend_from_slice(&cli.terminal_launcher.split(' ').collect::<Vec<&str>>());
-    }
-    
-    runner.extend_from_slice(&commands.iter().map(AsRef::as_ref).collect::<Vec<&str>>());
-    
-    let mut exec = process::Command::new(runner[0]);
-    exec.args(&runner[1..]);
-    
-    #[allow(unsafe_code)]
-    unsafe {
-        exec.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    
-    if cli.verbose.unwrap_or(0) > 0 {
-        exec.stdin(process::Stdio::null())
-            .stdout(process::Stdio::null())
-            .stderr(process::Stdio::null())
-            .spawn()
-            .wrap_err_with(|| format!("Failed to run {exec:?}"))?;
-    } else {
-        exec.spawn()
-            .wrap_err_with(|| format!("Failed to run {exec:?}"))?;
-    }
-    
-    // Update history
-    let value = app_to_run.history + 1;
-    let packed = bytes::pack(value);
-    db.insert(app_to_run.name.as_bytes(), &packed).unwrap();
+    // launch the app
+    helpers::launch_app(&app_to_run, cli, &db)?;
     
     Ok(())
 }
@@ -1425,20 +1722,42 @@ fn real_main() -> eyre::Result<()> {
         return run_dmenu_mode(&cli);
     }
     
-    // Handle cclip mode
+    // handle cclip mode
     if cli.cclip_mode {
+        // check if cclip is available
+        if !cclip::check_cclip_available() {
+            eprintln!("error: cclip is not installed or not in PATH");
+            eprintln!("install cclip from: https://github.com/heather7283/cclip");
+            std::process::exit(1);
+        }
+        
+        // check if cclipd is running and has data
+        if let Err(e) = cclip::check_cclip_database() {
+            eprintln!("error: {}", e);
+            eprintln!("\nto use cclip mode, you need to:");
+            eprintln!("1. start cclipd daemon:");
+            eprintln!("   cclipd -s 2 -t \"image/png\" -t \"image/*\" -t \"text/plain;charset=utf-8\" -t \"text/*\" -t \"*\"");
+            eprintln!("2. copy some stuff to build up history");
+            eprintln!("\nfor more info: https://github.com/heather7283/cclip");
+            std::process::exit(1);
+        }
+        
         let rt = tokio::runtime::Runtime::new()?;
         return rt.block_on(run_cclip_mode(&cli));
     }
     
     // Handle direct launch mode (bypass TUI)
+    // Require at least 2 characters, otherwise just launch TUI
     if let Some(ref program_name) = cli.program {
-        return launch_program_directly(&cli, program_name);
+        if program_name.len() >= 2 {
+            return launch_program_directly(&cli, program_name);
+        }
+        // Less than 2 characters, ignore and continue to TUI
     }
     
-    setup_terminal()?;
+    setup_terminal(cli.disable_mouse)?;
     defer! {
-        shutdown_terminal();
+        shutdown_terminal(cli.disable_mouse);
     }
     let db: sled::Db;
     let lock_path: path::PathBuf;
@@ -1458,7 +1777,7 @@ fn real_main() -> eyre::Result<()> {
             }
         }
 
-        // Check if Gyr is already running
+        // Check if Fsel is already running
         {
             let mut lock = hist_db.clone();
             lock.push("lock");
@@ -1483,8 +1802,8 @@ fn real_main() -> eyre::Result<()> {
                     fs::remove_file(&lock_path)?;
                     std::thread::sleep(std::time::Duration::from_millis(200));
                 } else {
-                    // gyr is already running
-                    return Err(eyre!("Gyr is already running"));
+                    // fsel is already running
+                    return Err(eyre!("Fsel is already running"));
                 }
             }
 
@@ -1500,7 +1819,7 @@ fn real_main() -> eyre::Result<()> {
             lock_file.write_all(pid.to_string().as_bytes())?;
         }
 
-        // Create a guard that will clean up the lock file when dropped
+        // Lock file cleanup guard
         struct LockGuard(path::PathBuf);
         impl Drop for LockGuard {
             fn drop(&mut self) {
@@ -1518,8 +1837,7 @@ fn real_main() -> eyre::Result<()> {
             db.clear().wrap_err("Error clearing database")?;
             println!("Database cleared succesfully!");
             println!(
-                "Note: to completely remove all traces of the database,
-                remove {}.",
+                "To fully remove the database, delete {}",
                 project_dirs.data_local_dir().display()
             );
             // Lock file cleanup is handled by LockGuard when it goes out of scope
@@ -1536,7 +1854,7 @@ fn real_main() -> eyre::Result<()> {
     // Directories to look for applications (XDG Base Directory Specification)
     let mut dirs: Vec<path::PathBuf> = vec![];
     
-    // FIRST: Add user's data directory (XDG_DATA_HOME or ~/.local/share)
+    // User data directory (XDG_DATA_HOME or ~/.local/share)
     if let Some(xdg_data_home) = env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()) {
         let mut dir = path::PathBuf::from(xdg_data_home);
         dir.push("applications");
@@ -1551,7 +1869,7 @@ fn real_main() -> eyre::Result<()> {
         }
     }
     
-    // SECOND: Add system data directories (XDG_DATA_DIRS)
+    // System data directories (XDG_DATA_DIRS)
     if let Ok(res) = env::var("XDG_DATA_DIRS") {
         for data_dir in res.split(':').filter(|s| !s.is_empty()) {
             let mut dir = path::PathBuf::from(data_dir);
@@ -1561,11 +1879,19 @@ fn real_main() -> eyre::Result<()> {
             }
         }
     } else {
-        // XDG specification fallback directories
-        for data_dir in &mut [
+        // XDG specification fallback directories for Linux and BSD
+        let mut default_paths = vec![
             path::PathBuf::from("/usr/local/share"),
             path::PathBuf::from("/usr/share"),
-        ] {
+        ];
+        
+        // add BSD-specific paths
+        #[cfg(target_os = "openbsd")]
+        {
+            default_paths.push(path::PathBuf::from("/usr/X11R6/share"));
+        }
+        
+        for data_dir in &mut default_paths {
             data_dir.push("applications");
             if data_dir.exists() {
                 dirs.push(data_dir.clone());
@@ -1574,8 +1900,8 @@ fn real_main() -> eyre::Result<()> {
     }
 
 
-    // Read applications
-    let apps = xdg::read(dirs, &db);
+    // Read applications with filtering options
+    let apps = xdg::read_with_options(dirs, &db, cli.filter_desktop, cli.list_executables_in_path);
 
     // Initialize the terminal with crossterm backend using stderr
     let backend = CrosstermBackend::new(io::stderr());
@@ -1584,7 +1910,10 @@ fn real_main() -> eyre::Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Input handler
-    let input = Input::new();
+    let input = input::Config {
+        disable_mouse: cli.disable_mouse,
+        ..input::Config::default()
+    }.init();
 
     // App UI
     //
@@ -1618,12 +1947,12 @@ fn real_main() -> eyre::Result<()> {
                             mpsc::TryRecvError::Disconnected => {
                                 // Done loading, add apps to the UI
                                 app_loading_finished = true;
-                                ui.filter();
+                                ui.filter(cli.match_mode);
                                 ui.info(cli.highlight_color, cli.fancy_mode);
                                 
                                 // If we have a pre-filled search string, run filter again to apply it
                                 if cli.search_string.is_some() {
-                                    ui.filter();
+                                    ui.filter(cli.match_mode);
                                     ui.info(cli.highlight_color, cli.fancy_mode);
                                 }
                             }
@@ -1735,7 +2064,7 @@ fn real_main() -> eyre::Result<()> {
                 (selected_app.name.clone(), "Apps".to_string())
             } else {
                 // Normal mode: static titles
-                ("Gyr".to_string(), "Apps".to_string())
+                ("Fsel".to_string(), "Apps".to_string())
             };
             
             // Description of the current app
@@ -1750,12 +2079,24 @@ fn real_main() -> eyre::Result<()> {
             let apps_panel_height = window[apps_panel_index].height;
             let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for top/bottom borders
             
-            // Get the visible slice of apps based on scroll offset
+            // get the visible slice of apps based on scroll offset
             let visible_apps = ui.shown
                 .iter()
                 .skip(ui.scroll_offset)
                 .take(max_visible)
-                .map(ListItem::from)
+                .map(|app| {
+                    if app.pinned {
+                        // add pin icon with color
+                        let pin_span = Span::styled(
+                            format!("{} ", cli.pin_icon),
+                            Style::default().fg(cli.pin_color)
+                        );
+                        let name_span = Span::raw(&app.name);
+                        ListItem::new(Line::from(vec![pin_span, name_span]))
+                    } else {
+                        ListItem::new(app.name.clone())
+                    }
+                })
                 .collect::<Vec<ListItem>>();
 
             // App list (stateful widget) with borders
@@ -1800,9 +2141,7 @@ fn real_main() -> eyre::Result<()> {
 
             // Query
             let query = Paragraph::new(Line::from(vec![
-                // The resulting style will be:
-                // (10/51) >> filter
-                // With `10` and the first `>` colorized with the highlight color
+                // Format: (10/51) >> query
                 Span::styled("(", Style::default().fg(cli.input_text_color)),
                 Span::styled(
                     (ui.selected.map_or(0, |v| v + 1)).to_string(),
@@ -1823,49 +2162,46 @@ fn real_main() -> eyre::Result<()> {
 
             // Render panels in their dynamic positions
             f.render_widget(description, window[title_panel_index]);
-            f.render_stateful_widget(list, window[apps_panel_index], &mut app_state);
+            // Only render app list if not hide_before_typing or query is not empty
+            if !cli.hide_before_typing || !ui.query.is_empty() {
+                f.render_stateful_widget(list, window[apps_panel_index], &mut app_state);
+            }
             f.render_widget(query, window[input_panel_index]);
         })?;
 
         // Handle user input
         match input.next()? {
             Event::Input(key) => {
-            use crossterm::event::{KeyCode, KeyModifiers};
-            match (key.code, key.modifiers) {
-                // Exit on escape
-                (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::CONTROL) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                    ui.selected = None;
-                    break;
-                }
-                // Run app on enter
-                (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                    break;
-                }
-                // Add character to query
-                (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
-                    ui.query.push(c);
-                    ui.filter();
-                }
-                // Remove character from query
-                (KeyCode::Backspace, _) => {
-                    ui.query.pop();
-                    ui.filter();
-                }
-                // Go to top of list
-                (KeyCode::Left, _) => {
-                    if !ui.shown.is_empty() {
-                        ui.selected = Some(0);
+            use crossterm::event::KeyCode;
+            
+            // check keybinds
+            if cli.keybinds.matches_exit(key.code, key.modifiers) {
+                ui.selected = None;
+                break;
+            } else if cli.keybinds.matches_select(key.code, key.modifiers) {
+                break;
+            } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
+                if let Some(selected) = ui.selected {
+                    if selected < ui.shown.len() {
+                        let app = &mut ui.shown[selected];
+                        if let Ok(is_pinned) = helpers::toggle_pin(&db, &app.name) {
+                            app.pinned = is_pinned;
+                            ui.filter(cli.match_mode);
+                        }
                     }
                 }
-                // Go to end of list
-                (KeyCode::Right, _) => {
-                    if !ui.shown.is_empty() {
-                        ui.selected = Some(ui.shown.len() - 1);
-                    }
+            } else if cli.keybinds.matches_backspace(key.code, key.modifiers) {
+                ui.query.pop();
+                ui.filter(cli.match_mode);
+            } else if cli.keybinds.matches_left(key.code, key.modifiers) {
+                if !ui.shown.is_empty() {
+                    ui.selected = Some(0);
                 }
-                // Go down one item.
-                // If we're at the bottom, back to the top.
-                (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+            } else if cli.keybinds.matches_right(key.code, key.modifiers) {
+                if !ui.shown.is_empty() {
+                    ui.selected = Some(ui.shown.len() - 1);
+                }
+            } else if cli.keybinds.matches_down(key.code, key.modifiers) {
                     if let Some(selected) = ui.selected {
                         ui.selected = if selected < ui.shown.len() - 1 {
                             Some(selected + 1)
@@ -1893,11 +2229,8 @@ fn real_main() -> eyre::Result<()> {
                             }
                         }
                     }
-                }
-                // Go up one item.
-                // If we're at the top, go to the end.
-                (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                    if let Some(selected) = ui.selected {
+            } else if cli.keybinds.matches_up(key.code, key.modifiers) {
+                if let Some(selected) = ui.selected {
                         ui.selected = if selected > 0 {
                             Some(selected - 1)
                         } else if !cli.hard_stop {
@@ -1923,9 +2256,17 @@ fn real_main() -> eyre::Result<()> {
                                 ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
                             }
                         }
-                    }
                 }
-                _ => {}
+            } else {
+                // regular character input
+                match (key.code, key.modifiers) {
+                    (KeyCode::Char(c), crossterm::event::KeyModifiers::NONE) | 
+                    (KeyCode::Char(c), crossterm::event::KeyModifiers::SHIFT) => {
+                        ui.query.push(c);
+                        ui.filter(cli.match_mode);
+                    }
+                    _ => {}
+                }
             }
 
             ui.info(cli.highlight_color, cli.fancy_mode);
@@ -2030,71 +2371,8 @@ fn real_main() -> eyre::Result<()> {
             return Ok(());
         }
 
-        // Split command in a shell-parseable format.
-        let commands = shell_words::split(&app_to_run.command)?;
-
-        // Switch to path specified by app to be run
-        if let Some(path) = &app_to_run.path {
-            env::set_current_dir(path::PathBuf::from(path)).wrap_err_with(|| {
-                format!("Failed to switch to {path} when starting {app_to_run}")
-            })?;
-        }
-
-        // Actual commands being run
-        let mut runner: Vec<&str> = vec![];
-
-        // Determine launch method based on flags (priority: uwsm > systemd-run > sway > default)
-        if cli.uwsm {
-            // Use uwsm to launch the app
-            runner.extend_from_slice(&["uwsm", "app", "--"]);
-        } else if cli.systemd_run {
-            // Use systemd-run with user scope
-            runner.extend_from_slice(&["systemd-run", "--user", "--scope", "--"]);
-        } else if cli.sway {
-            // Use swaymsg to run the command (allows Sway to move app to current workspace)
-            runner.extend_from_slice(&["swaymsg", "exec", "--"]);
-        }
-
-        // Use terminal runner to run the app.
-        if app_to_run.is_terminal {
-            runner.extend_from_slice(&cli.terminal_launcher.split(' ').collect::<Vec<&str>>());
-        }
-
-        // Add app commands
-        runner.extend_from_slice(&commands.iter().map(AsRef::as_ref).collect::<Vec<&str>>());
-
-        let mut exec = process::Command::new(runner[0]);
-        exec.args(&runner[1..]);
-
-        // Set program as session leader.
-        // Otherwise the OS may kill the app after the Gyr exits.
-        //
-        // # Safety: pre_exec() isn't modifyng the memory and setsid() fails if the calling
-        // process is already a process group leader (which isn't)
-        #[allow(unsafe_code)]
-        unsafe {
-            exec.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
-
-        if cli.verbose.unwrap_or(0) > 0 {
-            exec.stdin(process::Stdio::null())
-                .stdout(process::Stdio::null())
-                .stderr(process::Stdio::null())
-                .spawn()
-                .wrap_err_with(|| format!("Failed to run {exec:?}"))?;
-        } else {
-            exec.spawn()
-                .wrap_err_with(|| format!("Failed to run {exec:?}"))?;
-        }
-
-        {
-            let value = app_to_run.history + 1;
-            let packed = bytes::pack(value);
-            db.insert(app_to_run.name.as_bytes(), &packed).unwrap();
-        }
+        // launch the app
+        helpers::launch_app(&app_to_run, &cli, &db)?;
     }
 
     // Lock file cleanup is handled by LockGuard

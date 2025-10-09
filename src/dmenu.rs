@@ -15,14 +15,27 @@ pub fn read_stdin_lines() -> io::Result<Vec<String>> {
     lines
 }
 
+/// Read null-separated input from stdin
+pub fn read_stdin_null_separated() -> io::Result<Vec<String>> {
+    use std::io::Read;
+    let mut buffer = String::new();
+    io::stdin().read_to_string(&mut buffer)?;
+    
+    let lines: Vec<String> = buffer
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+    
+    Ok(lines)
+}
+
 /// Represents a dmenu item with column parsing capabilities
 #[derive(Clone, Debug)]
 pub struct DmenuItem {
-    /// The original full line from stdin
     pub original_line: String,
-    /// The display text (after column filtering)
     pub display_text: String,
-    /// Parsed columns (split by delimiter)
+    /// Columns split by delimiter
     pub columns: Vec<String>,
     /// Matching score for fuzzy search
     pub score: i64,
@@ -78,7 +91,7 @@ impl DmenuItem {
             if delimiter == "\t" && columns.len() > 1 {
                 // For tab-separated content like cliphist, format nicely with padding
                 if columns[0].parse::<u64>().is_ok() {
-                    // First column is numeric (like cliphist ID), format with padding
+                    // Numeric first column (cliphist ID), add padding
                     format!("{:<6} {}", columns[0], columns[1..].join(" "))
                 } else {
                     // Non-numeric, just use regular spacing
@@ -125,6 +138,78 @@ impl DmenuItem {
         // Fallback to matching against original line
         matcher.fuzzy_match(&self.original_line, query)
     }
+    
+    /// Calculate exact match score against query
+    pub fn calculate_exact_score(&self, query: &str) -> Option<i64> {
+        if query.is_empty() {
+            return Some(0);
+        }
+        
+        let query_lower = query.to_lowercase();
+        let display_lower = self.display_text.to_lowercase();
+        
+        // Exact match
+        if display_lower == query_lower {
+            return Some(1000);
+        }
+        
+        // Starts with query
+        if display_lower.starts_with(&query_lower) {
+            return Some(500);
+        }
+        
+        // Contains query
+        if display_lower.contains(&query_lower) {
+            return Some(100);
+        }
+        
+        None
+    }
+    
+    /// Calculate match score based on match_nth columns
+    pub fn calculate_score_with_match_nth(
+        &self,
+        query: &str,
+        matcher: &SkimMatcherV2,
+        match_nth: &[usize],
+    ) -> Option<i64> {
+        if query.is_empty() {
+            return Some(0);
+        }
+        
+        let mut best_score = None;
+        
+        for &col_idx in match_nth {
+            if col_idx > 0 && col_idx <= self.columns.len() {
+                let col_text = &self.columns[col_idx - 1];
+                if let Some(score) = matcher.fuzzy_match(col_text, query) {
+                    best_score = Some(best_score.map_or(score, |current: i64| current.max(score)));
+                }
+            }
+        }
+        
+        best_score
+    }
+    
+    /// Get output based on accept_nth columns
+    pub fn get_accept_nth_output(&self, accept_nth: &[usize]) -> String {
+        let accepted_cols: Vec<String> = accept_nth
+            .iter()
+            .filter_map(|&col_idx| {
+                if col_idx > 0 && col_idx <= self.columns.len() {
+                    Some(self.columns[col_idx - 1].clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        if accepted_cols.is_empty() {
+            self.original_line.clone()
+        } else {
+            accepted_cols.join("\t")
+        }
+    }
 
     /// Update the score
     pub fn set_score(&mut self, score: i64) {
@@ -157,10 +242,10 @@ impl DmenuItem {
         if content.contains('\t') {
             let parts: Vec<&str> = content.split('\t').collect();
             if parts.len() >= 2 && parts[0].parse::<u64>().is_ok() {
-                // First part is numeric (like cliphist ID), format with padding
+                // Numeric ID, add padding
                 format!("{:<6} {}", parts[0], parts[1..].join("  "))
             } else {
-                // Replace tabs with double spaces for better readability
+                // Replace tabs with spaces
                 content.replace('\t', "  ")
             }
         } else {

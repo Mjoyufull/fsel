@@ -80,8 +80,8 @@ impl CclipItem {
         Ok(output.stdout)
     }
     
-    /// Copy this item back to the clipboard
-    pub fn copy_to_clipboard(&self) -> Result<()> {
+    /// Copy this item back to the clipboard (Wayland)
+    fn copy_to_clipboard_wayland(&self) -> Result<()> {
         let mut cclip_child = Command::new("cclip")
             .args(&["get", &self.rowid])
             .stdout(Stdio::piped())
@@ -95,7 +95,7 @@ impl CclipItem {
             .stderr(Stdio::null())
             .spawn()?;
         
-        // Pipe cclip output to wl-copy
+        // pipe cclip output to wl-copy
         if let (Some(cclip_stdout), Some(wl_copy_stdin)) = 
             (cclip_child.stdout.take(), wl_copy_child.stdin.take()) 
         {
@@ -118,6 +118,80 @@ impl CclipItem {
         }
         
         Ok(())
+    }
+    
+    /// Copy this item back to the clipboard (X11)
+    fn copy_to_clipboard_x11(&self) -> Result<()> {
+        // try xclip first, then xsel as fallback
+        let x11_tools = ["xclip", "xsel"];
+        
+        for tool in &x11_tools {
+            if !Command::new(tool)
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            
+            let mut cclip_child = Command::new("cclip")
+                .args(&["get", &self.rowid])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()?;
+            
+            let args = match *tool {
+                "xclip" => vec!["-selection", "clipboard", "-t", &self.mime_type],
+                "xsel" => vec!["--clipboard", "--input"],
+                _ => unreachable!(),
+            };
+            
+            let mut x11_child = Command::new(tool)
+                .args(&args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()?;
+            
+            // pipe cclip output to x11 tool
+            if let (Some(cclip_stdout), Some(x11_stdin)) = 
+                (cclip_child.stdout.take(), x11_child.stdin.take()) 
+            {
+                std::thread::spawn(move || {
+                    let mut cclip_stdout = cclip_stdout;
+                    let mut x11_stdin = x11_stdin;
+                    std::io::copy(&mut cclip_stdout, &mut x11_stdin).ok();
+                });
+            }
+            
+            let cclip_status = cclip_child.wait()?;
+            let x11_status = x11_child.wait()?;
+            
+            if !cclip_status.success() {
+                return Err(eyre!("cclip get failed"));
+            }
+            
+            if !x11_status.success() {
+                continue; // try next tool
+            }
+            
+            return Ok(());
+        }
+        
+        Err(eyre!("no X11 clipboard tool found (tried xclip, xsel)"))
+    }
+    
+    /// Copy this item back to the clipboard (auto-detect Wayland/X11)
+    pub fn copy_to_clipboard(&self) -> Result<()> {
+        // check if we're on wayland
+        if std::env::var("WAYLAND_DISPLAY").is_ok() {
+            self.copy_to_clipboard_wayland()
+        } else {
+            self.copy_to_clipboard_x11()
+        }
     }
 }
 
@@ -203,24 +277,3 @@ pub fn check_chafa_available() -> bool {
         .map(|status| status.success())
         .unwrap_or(false)
 }
-
-/// Check if current terminal supports graphics
-pub fn check_graphics_support() -> bool {
-    let term = std::env::var("TERM").unwrap_or_default();
-    let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
-    
-    // Kitty supports kitty protocol
-    if term_program == "kitty" || term.contains("kitty") {
-        return true;
-    }
-    
-    // Foot, alacritty, xterm support sixels
-    if term.contains("foot") || term.contains("alacritty") || term.contains("xterm") {
-        return true;
-    }
-    
-    // Default to false for unknown terminals
-    false
-}
-
-

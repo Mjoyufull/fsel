@@ -3,28 +3,62 @@ use serde::Deserialize;
 use std::str::FromStr;
 use std::{env, fs, io, path, process};
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MatchMode {
+    Exact,
+    Fuzzy,
+}
+
+impl Default for MatchMode {
+    fn default() -> Self {
+        MatchMode::Fuzzy
+    }
+}
+
 fn usage() -> ! {
     println!(
         "Usage: {} [options]
 
-  -s, --nosway           Disable Sway integration.
-  -c, --config <config>  Specify a config file.
-  -r, --replace          Replace existing gyr instances
-      --clear_history    Clear launch history.
-  -p, --program <name>   Launch program directly (bypass TUI).
-  -ss <search>           Pre-fill search in TUI (must be last option).
-  -v, --verbose          Increase verbosity level (multiple).
-      --no-exec          Print selected application to stdout instead of launching.
-      --systemd-run      Launch applications using systemd-run --user --scope.
-      --uwsm             Launch applications using uwsm app.
-      --dmenu            Dmenu mode: read from stdin, output selection to stdout.
-      --cclip            Clipboard history mode: browse cclip history with previews.
-      --with-nth <cols>  Display only specified columns (comma-separated, e.g., 1,3).
-      --delimiter <char> Column delimiter for --with-nth (default: space).
-  -h, --help             Show this help message.
-  -V, --version          Show the version number and quit.
+App Launcher Options:
+  -s, --nosway                  Disable Sway integration.
+  -c, --config <config>         Specify a config file.
+  -r, --replace                 Replace existing fsel instances
+      --clear_history           Clear launch history.
+  -p, --program <name>          Launch program directly (bypass TUI).
+  -ss <search>                  Pre-fill search in TUI (must be last option).
+  -v, --verbose                 Increase verbosity level (multiple).
+      --no-exec                 Print selected application to stdout instead of launching.
+      --systemd-run             Launch applications using systemd-run --user --scope.
+      --uwsm                    Launch applications using uwsm app.
+      --filter-desktop[=no]     Filter apps by OnlyShowIn/NotShowIn (default: yes).
+      --list-executables-in-path Include executables from $PATH.
+      --hide-before-typing      Hide list until first character typed.
+      --match-mode <mode>       Match mode: 'fuzzy' or 'exact' (default: fuzzy).
+
+Dmenu Mode Options:
+      --dmenu                   Dmenu mode: read from stdin, output selection to stdout.
+      --dmenu0                  Like --dmenu but null-separated input.
+      --password[=char]         Password mode: mask input (default char: *).
+      --index                   Output index instead of text.
+      --with-nth <cols>         Display only specified columns (comma-separated, e.g., 1,3).
+      --accept-nth <cols>       Output only specified columns.
+      --match-nth <cols>        Match against only specified columns.
+      --delimiter <char>        Column delimiter (default: space).
+      --only-match              Don't allow custom input, only return selected items.
+      --exit-if-empty           Exit immediately if stdin is empty.
+      --select <string>         Pre-select first matching entry.
+      --select-index <n>        Pre-select entry at index n.
+      --auto-select             Auto-select when only one match remains.
+      --prompt-only             Prompt-only mode: no list, just input.
+
+Clipboard Mode Options:
+      --cclip                   Clipboard history mode: browse cclip history with previews.
+
+General Options:
+  -h, --help                    Show this help message.
+  -V, --version                 Show the version number and quit.
 ",
-        &env::args().next().unwrap_or_else(|| "gyr".to_string())
+        &env::args().next().unwrap_or_else(|| "fsel".to_string())
     );
     std::process::exit(0);
 }
@@ -38,7 +72,7 @@ pub struct Opts {
     pub clear_history: bool,
     /// Command to run Terminal=true apps
     pub terminal_launcher: String,
-    /// Replace already running instance of Gyr
+    /// Replace already running instance of Fsel
     pub replace: bool,
     /// Enable Sway integration (default when `$SWAYSOCK` is not empty)
     pub sway: bool,
@@ -48,6 +82,8 @@ pub struct Opts {
     pub verbose: Option<u64>,
     /// Don't scroll past the last/first item
     pub hard_stop: bool,
+    /// Disable mouse input in all modes
+    pub disable_mouse: bool,
     /// Print selected application to stdout instead of launching
     pub no_exec: bool,
     /// Launch applications using systemd-run --user --scope
@@ -68,6 +104,12 @@ pub struct Opts {
     pub fancy_mode: bool,
     /// Color for panel header titles
     pub header_title_color: ratatui::style::Color,
+    /// Color for pin icon
+    pub pin_color: ratatui::style::Color,
+    /// Pin icon character
+    pub pin_icon: String,
+    /// Keybinds configuration
+    pub keybinds: crate::keybinds::Keybinds,
     /// Layout configuration
     pub title_panel_height_percent: u16,
     pub input_panel_height: u16,
@@ -76,14 +118,34 @@ pub struct Opts {
     pub program: Option<String>,
     /// Search string to pre-populate in TUI
     pub search_string: Option<String>,
+    /// Confirm before launching app with -p if it has no history
+    pub confirm_first_launch: bool,
     /// Dmenu mode settings
     pub dmenu_mode: bool,
     pub dmenu_with_nth: Option<Vec<usize>>,
     pub dmenu_delimiter: String,
     pub dmenu_show_line_numbers: bool,
     pub dmenu_wrap_long_lines: bool,
+    pub dmenu_null_separated: bool,
+    pub dmenu_password_mode: bool,
+    pub dmenu_password_character: String,
+    pub dmenu_index_mode: bool,
+    pub dmenu_accept_nth: Option<Vec<usize>>,
+    pub dmenu_match_nth: Option<Vec<usize>>,
+    pub dmenu_only_match: bool,
+    pub dmenu_exit_if_empty: bool,
+    pub dmenu_select: Option<String>,
+    pub dmenu_select_index: Option<usize>,
+    pub dmenu_auto_select: bool,
+    pub dmenu_prompt_only: bool,
+    pub dmenu_hide_before_typing: bool,
     /// Clipboard history mode settings
     pub cclip_mode: bool,
+    /// App launcher settings
+    pub filter_desktop: bool,
+    pub list_executables_in_path: bool,
+    pub hide_before_typing: bool,
+    pub match_mode: MatchMode,
     /// Dmenu-specific colors and layout (override regular mode when in dmenu)
     pub dmenu_highlight_color: Option<ratatui::style::Color>,
     pub dmenu_cursor: Option<String>,
@@ -118,6 +180,10 @@ pub struct Opts {
     pub cclip_wrap_long_lines: Option<bool>,
     pub cclip_image_preview: Option<bool>,
     pub cclip_hide_inline_image_message: Option<bool>,
+    /// Dmenu-specific disable mouse option
+    pub dmenu_disable_mouse: Option<bool>,
+    /// Cclip-specific disable mouse option
+    pub cclip_disable_mouse: Option<bool>,
 }
 
 impl Default for Opts {
@@ -131,6 +197,7 @@ impl Default for Opts {
             cursor: "█".to_string(),
             verbose: None,
             hard_stop: false,
+            disable_mouse: false,
             no_exec: false,
             systemd_run: false,
             uwsm: false,
@@ -143,19 +210,41 @@ impl Default for Opts {
             input_text_color: ratatui::style::Color::White,
             fancy_mode: false,
             header_title_color: ratatui::style::Color::White,
+            pin_color: ratatui::style::Color::Rgb(255, 165, 0), // orange
+            pin_icon: "📌".to_string(),
+            keybinds: crate::keybinds::Keybinds::default(),
             title_panel_height_percent: 30,
             input_panel_height: 3,
             title_panel_position: None,
             program: None,
             search_string: None,
+            confirm_first_launch: false,
             // Dmenu mode defaults
             dmenu_mode: false,
             dmenu_with_nth: None,
             dmenu_delimiter: " ".to_string(),
             dmenu_show_line_numbers: false,
             dmenu_wrap_long_lines: true,
+            dmenu_null_separated: false,
+            dmenu_password_mode: false,
+            dmenu_password_character: "*".to_string(),
+            dmenu_index_mode: false,
+            dmenu_accept_nth: None,
+            dmenu_match_nth: None,
+            dmenu_only_match: false,
+            dmenu_exit_if_empty: false,
+            dmenu_select: None,
+            dmenu_select_index: None,
+            dmenu_auto_select: false,
+            dmenu_prompt_only: false,
+            dmenu_hide_before_typing: false,
             // Cclip mode defaults
             cclip_mode: false,
+            // App launcher defaults
+            filter_desktop: true,
+            list_executables_in_path: false,
+            hide_before_typing: false,
+            match_mode: MatchMode::Fuzzy,
             // Dmenu-specific styling (None means use regular mode values)
             dmenu_highlight_color: None,
             dmenu_cursor: None,
@@ -190,6 +279,8 @@ impl Default for Opts {
             cclip_wrap_long_lines: None,
             cclip_image_preview: None,
             cclip_hide_inline_image_message: None,
+            dmenu_disable_mouse: None,
+            cclip_disable_mouse: None,
         }
     }
 }
@@ -203,6 +294,13 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     if let Ok(_socket) = env::var("SWAYSOCK") {
         default.sway = true;
+    }
+    
+    // Check if invoked as dmenu
+    if let Some(arg0) = env::args().next() {
+        if arg0.ends_with("dmenu") {
+            default.dmenu_mode = true;
+        }
     }
     
     // Check for -ss option first and handle it specially
@@ -254,6 +352,76 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
             Long("cclip") => {
                 default.cclip_mode = true;
+            }
+            Long("dmenu0") => {
+                default.dmenu_mode = true;
+                default.dmenu_null_separated = true;
+            }
+            Long("password") => {
+                let val = parser.optional_value();
+                default.dmenu_password_mode = true;
+                if let Some(v) = val {
+                    default.dmenu_password_character = v.into_string().map_err(|_| "Password character must be valid UTF-8")?;
+                }
+            }
+            Long("index") => {
+                default.dmenu_index_mode = true;
+            }
+            Long("accept-nth") => {
+                let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
+                let cols: Result<Vec<usize>, _> = cols_str.split(',')
+                    .map(|s| s.trim().parse::<usize>())
+                    .collect();
+                default.dmenu_accept_nth = Some(cols.map_err(|_| "Invalid column specification")?);
+            }
+            Long("match-nth") => {
+                let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
+                let cols: Result<Vec<usize>, _> = cols_str.split(',')
+                    .map(|s| s.trim().parse::<usize>())
+                    .collect();
+                default.dmenu_match_nth = Some(cols.map_err(|_| "Invalid column specification")?);
+            }
+            Long("only-match") => {
+                default.dmenu_only_match = true;
+            }
+            Long("exit-if-empty") => {
+                default.dmenu_exit_if_empty = true;
+            }
+            Long("select") => {
+                default.dmenu_select = Some(parser.value()?.into_string().map_err(|_| "Select string must be valid UTF-8")?);
+            }
+            Long("select-index") => {
+                let idx_str = parser.value()?.into_string().map_err(|_| "Index must be valid UTF-8")?;
+                default.dmenu_select_index = Some(idx_str.parse::<usize>().map_err(|_| "Invalid index")?);
+            }
+            Long("auto-select") => {
+                default.dmenu_auto_select = true;
+            }
+            Long("prompt-only") => {
+                default.dmenu_prompt_only = true;
+            }
+            Long("hide-before-typing") => {
+                default.hide_before_typing = true;
+            }
+            Long("filter-desktop") => {
+                let val = parser.optional_value();
+                if let Some(v) = val {
+                    let v_str = v.into_string().map_err(|_| "filter-desktop value must be valid UTF-8")?;
+                    default.filter_desktop = v_str != "no";
+                } else {
+                    default.filter_desktop = true;
+                }
+            }
+            Long("list-executables-in-path") => {
+                default.list_executables_in_path = true;
+            }
+            Long("match-mode") => {
+                let mode_str = parser.value()?.into_string().map_err(|_| "Match mode must be valid UTF-8")?;
+                default.match_mode = match mode_str.as_str() {
+                    "exact" => MatchMode::Exact,
+                    "fuzzy" => MatchMode::Fuzzy,
+                    _ => return Err("Invalid match mode. Use 'exact' or 'fuzzy'".into()),
+                };
             }
             Long("with-nth") => {
                 let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
@@ -308,7 +476,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                         }
                     }
                     Value(_val) => {
-                        // This shouldn't happen with lexopt, but just in case
+                        // Unexpected value
                         return Err(arg.unexpected());
                     }
                 };
@@ -319,7 +487,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 eprintln!("  -s, --nosway           Disable Sway integration");
                 eprintln!("  -c, --config <file>    Specify config file");
                 eprintln!("  -r, --replace          Replace existing instance");
-                eprintln!("  -p, --program <name>   Launch program directly");
+                eprintln!("  -p, --program [name]   Launch program directly (optional)");
                 eprintln!("  -ss <search>           Pre-fill search (must be last)");
                 eprintln!("  -v, --verbose          Increase verbosity");
                 eprintln!("  -h, --help             Show help");
@@ -330,7 +498,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 eprintln!("      --systemd-run      Use systemd-run");
                 eprintln!("      --uwsm             Use uwsm");
                 eprintln!();
-                eprintln!("For more details, use: gyr --help");
+                eprintln!("For more details, use: fsel --help");
                 std::process::exit(1);
             }
         }
@@ -401,6 +569,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     if let Some(rb) = file_conf.rounded_borders {
         default.rounded_borders = rb;
     }
+    
+    if let Some(dm) = file_conf.disable_mouse {
+        default.disable_mouse = dm;
+    }
 
     // Parse border colors
     if let Some(color) = file_conf.main_border_color {
@@ -451,6 +623,21 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             Ok(c) => default.header_title_color = c,
             Err(_) => eprintln!("Warning: Invalid header_title_color in config"),
         }
+    }
+    
+    if let Some(color) = file_conf.pin_color {
+        match string_to_color(color) {
+            Ok(c) => default.pin_color = c,
+            Err(_) => eprintln!("Warning: Invalid pin_color in config"),
+        }
+    }
+    
+    if let Some(icon) = file_conf.pin_icon {
+        default.pin_icon = icon;
+    }
+    
+    if let Some(keybinds) = file_conf.keybinds {
+        default.keybinds = keybinds;
     }
 
     // Parse layout configuration with validation
@@ -566,6 +753,41 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         if let Some(wrap_long_lines) = dmenu_conf.wrap_long_lines {
             default.dmenu_wrap_long_lines = wrap_long_lines;
         }
+        if let Some(disable_mouse) = dmenu_conf.disable_mouse {
+            default.dmenu_disable_mouse = Some(disable_mouse);
+        }
+        if let Some(password_char) = &dmenu_conf.password_character {
+            default.dmenu_password_character = password_char.clone();
+        }
+        if let Some(exit_if_empty) = dmenu_conf.exit_if_empty {
+            default.dmenu_exit_if_empty = exit_if_empty;
+        }
+    }
+    
+    // Load app launcher configuration if present
+    if let Some(app_conf) = &file_conf.app_launcher {
+        if let Some(filter_desktop) = app_conf.filter_desktop {
+            default.filter_desktop = filter_desktop;
+        }
+        if let Some(list_execs) = app_conf.list_executables_in_path {
+            default.list_executables_in_path = list_execs;
+        }
+        if let Some(hide_before) = app_conf.hide_before_typing {
+            default.hide_before_typing = hide_before;
+        }
+        if let Some(mode_str) = &app_conf.match_mode {
+            default.match_mode = match mode_str.as_str() {
+                "exact" => MatchMode::Exact,
+                "fuzzy" => MatchMode::Fuzzy,
+                _ => {
+                    eprintln!("Warning: Invalid match_mode in config, using default");
+                    MatchMode::Fuzzy
+                }
+            };
+        }
+        if let Some(confirm) = app_conf.confirm_first_launch {
+            default.confirm_first_launch = confirm;
+        }
     }
 
     // Load cclip configuration if present
@@ -664,6 +886,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         if let Some(hide_message) = cclip_conf.hide_inline_image_message {
             default.cclip_hide_inline_image_message = Some(hide_message);
         }
+        if let Some(disable_mouse) = cclip_conf.disable_mouse {
+            default.cclip_disable_mouse = Some(disable_mouse);
+        }
     }
 
     // Validate mutually exclusive options
@@ -682,6 +907,17 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
         // dmenu mode implies no-exec behavior
         default.no_exec = true;
+    }
+    
+    // Validate prompt-only conflicts
+    if default.dmenu_prompt_only && default.dmenu_mode {
+        default.dmenu_show_line_numbers = false;
+    }
+    
+    // Validate select conflicts
+    if default.dmenu_select.is_some() && default.dmenu_select_index.is_some() {
+        eprintln!("Error: Cannot use --select and --select-index together");
+        std::process::exit(1);
     }
     
     // Validate cclip mode conflicts
@@ -719,7 +955,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     Ok(default)
 }
 
-/// Position where the title/content/description panel should be displayed
+/// Title panel position
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum PanelPosition {
@@ -763,9 +999,11 @@ pub struct FileConf {
     pub cursor: Option<String>,
     /// Don't scroll past the last/first item
     pub hard_stop: Option<bool>,
+    /// Disable mouse input in all modes
+    pub disable_mouse: Option<bool>,
     /// Use rounded borders (default: true)
     pub rounded_borders: Option<bool>,
-    /// Border color for the main panel (Gyr)
+    /// Border color for the main panel (Fsel)
     pub main_border_color: Option<String>,
     /// Border color for the apps panel
     pub apps_border_color: Option<String>,
@@ -781,6 +1019,12 @@ pub struct FileConf {
     pub fancy_mode: Option<bool>,
     /// Color for panel header titles
     pub header_title_color: Option<String>,
+    /// Color for pin icon
+    pub pin_color: Option<String>,
+    /// Pin icon character
+    pub pin_icon: Option<String>,
+    /// Keybinds configuration
+    pub keybinds: Option<crate::keybinds::Keybinds>,
     /// Title panel height percentage (10-70%)
     pub title_panel_height_percent: Option<u16>,
     /// Input panel height in lines
@@ -791,6 +1035,8 @@ pub struct FileConf {
     pub dmenu: Option<DmenuConf>,
     /// Cclip-specific configuration
     pub cclip: Option<CclipConf>,
+    /// App launcher-specific configuration
+    pub app_launcher: Option<AppLauncherConf>,
 }
 
 /// Dmenu-specific configuration section
@@ -825,6 +1071,10 @@ pub struct DmenuConf {
     pub show_line_numbers: Option<bool>,
     /// Wrap long lines in content display
     pub wrap_long_lines: Option<bool>,
+    /// Disable mouse input in dmenu mode
+    pub disable_mouse: Option<bool>,
+    pub password_character: Option<String>,
+    pub exit_if_empty: Option<bool>,
 }
 
 /// Cclip-specific configuration section (inherits from dmenu, then regular mode)
@@ -861,6 +1111,18 @@ pub struct CclipConf {
     pub image_preview: Option<bool>,
     /// Hide the inline image preview message (show blank instead)
     pub hide_inline_image_message: Option<bool>,
+    /// Disable mouse input in cclip mode
+    pub disable_mouse: Option<bool>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AppLauncherConf {
+    pub filter_desktop: Option<bool>,
+    pub list_executables_in_path: Option<bool>,
+    pub hide_before_typing: Option<bool>,
+    pub match_mode: Option<String>,
+    pub confirm_first_launch: Option<bool>,
 }
 
 impl FileConf {

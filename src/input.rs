@@ -24,6 +24,7 @@ use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, MouseEv
 pub struct Config {
     pub exit_key: KeyCode,
     pub tick_rate: Duration,
+    pub disable_mouse: bool,
 }
 
 impl Default for Config {
@@ -31,6 +32,7 @@ impl Default for Config {
         Self {
             exit_key: KeyCode::Esc,
             tick_rate: Duration::from_millis(250),
+            disable_mouse: false,
         }
     }
 }
@@ -56,10 +58,6 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new() -> Self {
-        Config::default().init()
-    }
-
     pub fn with_config(config: Config) -> Self {
         let (tx, rx) = mpsc::channel();
 
@@ -79,8 +77,10 @@ impl Input {
                                 }
                             }
                             CrosstermEvent::Mouse(mouse) => {
-                                if tx.send(Event::Mouse(mouse)).is_err() {
-                                    return;
+                                if !config.disable_mouse {
+                                    if tx.send(Event::Mouse(mouse)).is_err() {
+                                        return;
+                                    }
                                 }
                             }
                             _ => {}

@@ -86,6 +86,11 @@ impl AppHistory {
             );
             app.history = unpacked;
         }
+        
+        // load pinned status
+        let pinned_apps = super::helpers::load_pinned_apps(&self.db);
+        app.pinned = pinned_apps.contains(&app.name);
+        
         app
     }
 
@@ -98,11 +103,25 @@ impl AppHistory {
 /// Updates history using the database
 ///
 /// [Receiver]: std::sync::mpsc::Receiver
-pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db) -> mpsc::Receiver<App> {
+pub fn read_with_options(
+    dirs: Vec<impl Into<path::PathBuf>>,
+    db: &sled::Db,
+    filter_desktop: bool,
+    list_executables: bool,
+) -> mpsc::Receiver<App> {
     let (sender, receiver) = mpsc::channel();
 
     let dirs: Vec<path::PathBuf> = dirs.into_iter().map(Into::into).collect();
     let db = AppHistory { db: db.clone() };
+    
+    // Get current desktop environment for filtering
+    let current_desktop = if filter_desktop {
+        env::var("XDG_CURRENT_DESKTOP")
+            .ok()
+            .map(|d| d.split(':').map(|s| s.to_string()).collect::<Vec<_>>())
+    } else {
+        None
+    };
 
     let _worker = thread::spawn(move || {
         // Collect all .desktop files first
@@ -122,7 +141,7 @@ pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db) -> mpsc::Receive
             }
         }
 
-        // Process files in batches for better performance
+        // Process desktop files
         for file_path in desktop_files {
             if let Ok(contents) = fs::read_to_string(&file_path) {
                 // Skip files without [Desktop Entry] section early
@@ -134,6 +153,27 @@ pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db) -> mpsc::Receive
                     // Set desktop ID from file path
                     if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
                         app.desktop_id = Some(file_name.to_string());
+                    }
+                    
+                    // Filter by OnlyShowIn/NotShowIn if enabled
+                    if let Some(ref desktops) = current_desktop {
+                        // Check NotShowIn first
+                        if !app.not_show_in.is_empty() {
+                            let should_hide = app.not_show_in.iter()
+                                .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                            if should_hide {
+                                continue;
+                            }
+                        }
+                        
+                        // Check OnlyShowIn
+                        if !app.only_show_in.is_empty() {
+                            let should_show = app.only_show_in.iter()
+                                .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                            if !should_show {
+                                continue;
+                            }
+                        }
                     }
                     
                     let app_with_history = db.get(app.clone());
@@ -161,6 +201,70 @@ pub fn read(dirs: Vec<impl Into<path::PathBuf>>, db: &sled::Db) -> mpsc::Receive
                 }
             }
         }
+        
+        // Add executables from PATH if requested
+        if list_executables {
+            if let Ok(path_var) = env::var("PATH") {
+                let mut seen_executables = std::collections::HashSet::new();
+                
+                for path_dir in path_var.split(':') {
+                    if let Ok(entries) = fs::read_dir(path_dir) {
+                        for entry in entries.filter_map(Result::ok) {
+                            let path = entry.path();
+                            
+                            // Check if it's an executable file
+                            if path.is_file() {
+                                #[cfg(unix)]
+                                {
+                                    use std::os::unix::fs::PermissionsExt;
+                                    if let Ok(metadata) = fs::metadata(&path) {
+                                        let permissions = metadata.permissions();
+                                        // Check if executable bit is set
+                                        if permissions.mode() & 0o111 != 0 {
+                                            if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                                                // Avoid duplicates
+                                                if seen_executables.insert(file_name.to_string()) {
+                                                    let app = App {
+                                                        name: file_name.to_string(),
+                                                        command: path.to_string_lossy().to_string(),
+                                                        description: format!("Executable: {}", file_name),
+                                                        generic_name: None,
+                                                        keywords: vec![],
+                                                        categories: vec!["Executable".to_string()],
+                                                        mime_types: vec![],
+                                                        icon: None,
+                                                        is_terminal: false,
+                                                        path: None,
+                                                        only_show_in: vec![],
+                                                        not_show_in: vec![],
+                                                        hidden: false,
+                                                        startup_notify: false,
+                                                        startup_wm_class: None,
+                                                        try_exec: None,
+                                                        entry_type: "Application".to_string(),
+                                                        actions: None,
+                                                        desktop_id: None,
+                                                        history: 0,
+                                                        score: 0,
+                                                        pinned: false,
+                                                    };
+                                                    
+                                                    let app_with_history = db.get(app);
+                                                    if sender.send(app_with_history).is_err() {
+                                                        return;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         drop(sender);
     });
 
@@ -186,13 +290,13 @@ pub struct App {
     pub mime_types: Vec<String>,
     /// Icon name or path (Icon field)
     pub icon: Option<String>,
-    /// Whether the app should be run in terminal (Terminal field)
+    /// Run in terminal (Terminal field)
     pub is_terminal: bool,
     /// Path from which to run the command (Path field)
     pub path: Option<String>,
-    /// Desktop environments where this should be shown (OnlyShowIn field)
+    /// Show only in these DEs (OnlyShowIn field)
     pub only_show_in: Vec<String>,
-    /// Desktop environments where this should NOT be shown (NotShowIn field)
+    /// Hide in these DEs (NotShowIn field)
     pub not_show_in: Vec<String>,
     /// Whether the app is hidden (Hidden field)
     pub hidden: bool,
@@ -202,7 +306,7 @@ pub struct App {
     pub startup_wm_class: Option<String>,
     /// Command to test if executable exists (TryExec field)
     pub try_exec: Option<String>,
-    /// Desktop Entry type (Type field) - should be "Application"
+    /// Desktop Entry type (usually "Application")
     pub entry_type: String,
     /// Desktop file ID for tracking
     pub desktop_id: Option<String>,
@@ -213,6 +317,9 @@ pub struct App {
     /// Number of times this app was run
     /// Not part of the specification  
     pub history: u64,
+    /// Whether this app is pinned/favorited
+    /// Not part of the specification
+    pub pinned: bool,
 
     // Private field for internal use only
     #[doc(hidden)]
@@ -235,11 +342,18 @@ impl App {
 // Custom Ord implementation, sorts by history then score then alphabetically
 impl Ord for App {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // Sort by score, highest to lowest
+        // pinned apps always come first
+        match (self.pinned, other.pinned) {
+            (true, false) => return std::cmp::Ordering::Less,
+            (false, true) => return std::cmp::Ordering::Greater,
+            _ => {}
+        }
+        
+        // then sort by score, highest to lowest
         self.corrected_score()
             .cmp(&other.corrected_score())
             .reverse()
-            // Then sort alphabetically
+            // then sort alphabetically
             .then(self.name.to_lowercase().cmp(&other.name.to_lowercase()))
     }
 }
@@ -257,7 +371,7 @@ impl fmt::Display for App {
     }
 }
 
-// Will be used to display `App`s in the list
+// Display apps in list
 impl AsRef<str> for App {
     fn as_ref(&self) -> &str {
         self.name.as_ref()
@@ -454,7 +568,7 @@ impl App {
         }
         let command = exec.unwrap();
 
-        // Check if app should be hidden
+        // Skip hidden apps
         if hidden || no_display {
             return Err(eyre!("Application is hidden"));
         }
@@ -483,6 +597,7 @@ impl App {
         Ok(App {
             score: 0,
             history: 0,
+            pinned: false,
             name,
             command,
             description: description.unwrap_or_default(),
@@ -500,7 +615,7 @@ impl App {
             startup_wm_class,
             try_exec,
             entry_type,
-            desktop_id: None, // Will be set by the caller
+            desktop_id: None,
             actions,
         })
     }
@@ -508,7 +623,7 @@ impl App {
 
 /// An app action
 ///
-/// In gyr every action is some app, with the action name in parentheses
+/// In fsel every action is some app, with the action name in parentheses
 #[derive(Default)]
 pub struct Action {
     /// Action name

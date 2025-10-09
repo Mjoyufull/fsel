@@ -1,21 +1,56 @@
-# Default values
+# ===== BASIC SETTINGS =====
+
+# Highlight color for selected items and cursor
 highlight_color = "LightBlue"
+
+# Keybinds (optional - uncomment to customize)
+# See keybinds.toml for examples
+# [keybinds]
+# up = ["up", { key = "p", modifiers = "ctrl" }]
+# down = ["down", { key = "n", modifiers = "ctrl" }]
+# select = ["enter"]
+# exit = ["esc"]
+# pin = [{ key = "space", modifiers = "ctrl" }]
+
+# Cursor character in search box
 cursor = "█"
-terminal_launcher = "alacritty -e"
+
+# Command to launch terminal apps (apps with Terminal=true)
+terminal_launcher = "kitty -e"
+
+# Don't wrap around at list ends (false = wrap around)
 hard_stop = false
 
-# UI Customization
+# Use rounded corners for panels
 rounded_borders = true
 
-# Border Colors (individual colors for each panel)
-# Color formats supported:
-#   - Named colors: "Red", "Blue", "Green", "Yellow", "Cyan", "Magenta", "White", "Black"
-#                   "LightRed", "LightBlue", "LightGreen", "LightYellow", "LightCyan", "LightMagenta"
-#                   "Gray"/"Grey", "DarkGray"/"DarkGrey", "Reset"
-#   - Hex colors: "#ff0000" (red), "#00ff00" (green), "#0000ff" (blue)
-#   - Short hex: "#f00" (red), "#0f0" (green), "#00f" (blue)
-#   - RGB colors: "rgb(255,0,0)" or "(255,0,0)"
-#   - 8-bit colors: "196" (bright red), "21" (bright blue), "46" (bright green)
+# ===== APP LAUNCHER =====
+[app_launcher]
+
+# Filter apps based on OnlyShowIn/NotShowIn and $XDG_CURRENT_DESKTOP
+# Hides apps not meant for your desktop environment
+filter_desktop = true
+
+# Include raw executables from $PATH (ls, grep, etc.)
+list_executables_in_path = false
+
+# Hide app list until you start typing
+hide_before_typing = false
+
+# Match mode: "fuzzy" or "exact"
+# fuzzy = fzf-style matching (fire matches Firefox)
+# exact = only exact/starts-with/contains matches
+match_mode = "fuzzy"
+
+# Confirm before launching with -p if app has never been launched before
+# Helps prevent accidental launches of wrong apps
+confirm_first_launch = false
+
+# ===== COLORS =====
+# Formats: Named ("Red", "LightBlue"), Hex ("#ff0000", "#f00"), 
+#          RGB ("rgb(255,0,0)"), 8-bit ("196")
+
+# Border colors for each panel
 main_border_color = "White"      # Border color for the main info panel (top)
 apps_border_color = "White"      # Border color for the apps list panel (middle)
 input_border_color = "White"     # Border color for the input panel (bottom)
@@ -25,94 +60,101 @@ main_text_color = "White"        # Text color for the main info panel
 apps_text_color = "White"        # Text color for the apps list
 input_text_color = "White"       # Text color for the input field
 
-# Fancy Mode - Show selected app info in panel titles
-fancy_mode = false               # When true: "Apps" becomes selected app name, "Gyr" becomes app description
+# Pin/Favorite Settings
+pin_color = "rgb(255,165,0)"     # Color for pin icon (default: orange)
+pin_icon = "📌"                   # Icon for pinned apps (use Ctrl+Space to pin/unpin)
 
-# Header title color (for panel border titles)
-header_title_color = "LightBlue" # Color for all panel header titles
+# Show selected app name in panel titles (instead of "Apps"/"Fsel")
+fancy_mode = false
 
-# Layout Configuration (percentages and sizes)
-title_panel_height_percent = 30  # Height of top panel as percentage (10-70%)
-input_panel_height = 3           # Height of input panel in lines (1-10)
-# Note: Apps panel gets the remaining space automatically
+# Panel title color
+header_title_color = "LightBlue"
 
-# Panel Position Configuration
-title_panel_position = "top"     # Position of title/description panel: "top", "middle", or "bottom"
+# ===== LAYOUT =====
 
-# ===== DMENU MODE CONFIGURATION =====
-# Settings specific to dmenu mode (--dmenu flag)
-# If not specified, regular mode settings are used as fallback
+# Top panel height as percentage (10-70%)
+title_panel_height_percent = 30
+
+# Input panel height in lines (1-10)
+input_panel_height = 3
+
+# Title panel position: "top", "middle", or "bottom"
+title_panel_position = "top"
+
+# ===== DMENU MODE =====
+# Override settings when using --dmenu flag
+# Inherits from main settings if not specified
+
 [dmenu]
 
-# Dmenu-specific colors (override regular mode when in dmenu)
-highlight_color = "LightBlue"     # Highlighted text and cursor color
-cursor = "█"                     # Cursor character in filter input
+# Colors (optional overrides)
+# highlight_color = "LightBlue"
+# cursor = "█"
 
-# Dmenu border colors (separate from regular mode)
-main_border_color = "White"      # Border color for content panel (top)
-items_border_color = "White"     # Border color for items list panel (middle)
-input_border_color = "White"     # Border color for filter panel (bottom)
+# Border colors
+# main_border_color = "White"
+# items_border_color = "White"
+# input_border_color = "White"
 
-# Dmenu text colors
-main_text_color = "White"        # Text color in content panel
-items_text_color = "White"       # Text color in items list
-input_text_color = "White"       # Text color in filter field
+# Text colors
+# main_text_color = "White"
+# items_text_color = "White"
+# input_text_color = "White"
 
-# Dmenu UI settings
-rounded_borders = true           # Use rounded borders in dmenu mode
-hard_stop = false                # Don't wrap around at list ends
-header_title_color = "LightBlue" # Color for panel titles
+# UI
+# rounded_borders = true
+# hard_stop = false
+# header_title_color = "LightBlue"
 
-# Dmenu layout (different from regular mode)
-title_panel_height_percent = 40    # Height of content panel as percentage (10-70%)
-input_panel_height = 3             # Height of filter panel in lines (1-10)
-# Note: Items panel gets the remaining space
+# Layout
+# title_panel_height_percent = 40
+# input_panel_height = 3
+# title_panel_position = "top"
 
-# Dmenu panel positioning
-title_panel_position = "top"       # Position of content panel: "top", "middle", or "bottom"
+# Parsing
+delimiter = " "                  # Column delimiter (override with --delimiter)
+show_line_numbers = true         # Show line numbers in content
+wrap_long_lines = true           # Wrap long lines
 
-# Dmenu parsing options
-delimiter = " "                  # Default column delimiter (can be overridden by --delimiter)
-show_line_numbers = true        # Show line numbers in content display
-wrap_long_lines = true           # Wrap long lines in content panel
+# Behavior
+password_character = "*"         # Character for --password mode
+exit_if_empty = false            # Exit if stdin is empty
 
-# ===== CCLIP MODE CONFIGURATION =====
-# Settings specific to clipboard history mode (--cclip flag)
-# Inherits from [dmenu] section first, then regular mode settings as fallback
+# ===== CLIPBOARD MODE =====
+# Override settings when using --cclip flag
+# Inherits from [dmenu] then main settings
+
 [cclip]
 
-# Cclip-specific colors (override dmenu and regular mode when in cclip)
-highlight_color = "LightBlue"     # Highlighted text and cursor color
-cursor = "█"                     # Cursor character in filter input
+# Colors (optional overrides)
+# highlight_color = "LightBlue"
+# cursor = "█"
 
-# Cclip border colors (separate from dmenu and regular mode)
-main_border_color = "White"      # Border color for content preview panel (top)
-items_border_color = "White"     # Border color for clipboard items list panel (middle)
-input_border_color = "White"     # Border color for filter panel (bottom)
+# Border colors
+# main_border_color = "White"
+# items_border_color = "White"
+# input_border_color = "White"
 
-# Cclip text colors
-main_text_color = "White"        # Text color in content preview panel
-items_text_color = "White"       # Text color in clipboard items list
-input_text_color = "White"       # Text color in filter field
+# Text colors
+# main_text_color = "White"
+# items_text_color = "White"
+# input_text_color = "White"
 
-# Cclip UI settings
-rounded_borders = true           # Use rounded borders in cclip mode
-hard_stop = false                # Don't wrap around at list ends
-header_title_color = "LightBlue" # Color for panel titles
+# UI
+# rounded_borders = true
+# hard_stop = false
+# header_title_color = "LightBlue"
 
-# Cclip layout (different from regular and dmenu modes)
-title_panel_height_percent = 40    # Height of content preview panel as percentage (10-70%)
-input_panel_height = 3             # Height of filter panel in lines (1-10)
-# Note: Clipboard items panel gets the remaining space
+# Layout
+# title_panel_height_percent = 40
+# input_panel_height = 3
+# title_panel_position = "top"
 
-# Cclip panel positioning
-title_panel_position = "top"       # Position of content preview panel: "top", "middle", or "bottom"
+# Display
+show_line_numbers = true         # Show cclip rowid
+wrap_long_lines = true           # Wrap long lines
 
-# Cclip display options
-show_line_numbers = true         # Show cclip rowid as line numbers next to items
-wrap_long_lines = true           # Wrap long lines in content preview panel
-
-# Cclip image support
-image_preview = true             # Enable inline image previews using chafa/terminal graphics
-hide_inline_image_message = false # Hide "[Inline Image Preview]" message (show blank instead)
+# Images (requires chafa + Kitty/Sixel terminal)
+image_preview = true             # Show inline image previews
+hide_inline_image_message = false # Hide "[Inline Image Preview]" text
 

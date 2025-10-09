@@ -228,6 +228,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "fsel"
+version = "1.0.0-riceknife"
+dependencies = [
+ "base64",
+ "bincode",
+ "crossterm 0.27.0",
+ "directories",
+ "dirs",
+ "eyre",
+ "fuzzy-matcher",
+ "is-terminal",
+ "lexopt",
+ "libc",
+ "ratatui",
+ "scopeguard",
+ "serde",
+ "shell-words",
+ "sled",
+ "strip-ansi-escapes",
+ "tokio",
+ "toml",
+ "walkdir",
+ "which",
+]
+
+[[package]]
 name = "fuzzy-matcher"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -261,32 +287,6 @@ name = "gimli"
 version = "0.32.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
-
-[[package]]
-name = "gyr"
-version = "0.3.0-eggrind"
-dependencies = [
- "base64",
- "bincode",
- "crossterm 0.27.0",
- "directories",
- "dirs",
- "eyre",
- "fuzzy-matcher",
- "is-terminal",
- "lexopt",
- "libc",
- "ratatui",
- "scopeguard",
- "serde",
- "shell-words",
- "sled",
- "strip-ansi-escapes",
- "tokio",
- "toml",
- "walkdir",
- "which",
-]
 
 [[package]]
 name = "hashbrown"

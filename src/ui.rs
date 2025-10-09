@@ -27,10 +27,7 @@ pub struct UI<'a> {
 }
 
 impl<'a> UI<'a> {
-    /// Creates a new UI from a `Vec` of [Apps]
-    ///
-    /// The new items are hidden by default, filter with `self.filter()`
-    /// [Apps]: `super::xdg::App`
+    /// Create UI from app list (items start hidden until filtered)
     pub fn new(items: Vec<xdg::App>) -> UI<'a> {
         UI {
             shown: vec![],
@@ -49,9 +46,7 @@ impl<'a> UI<'a> {
         self.verbose = b;
     }
 
-    /// Update `self.info` to current selection
-    ///
-    /// Should be called every time `self.selected` changes
+    /// Update info panel with current selection
     pub fn info(&mut self, color: Color, fancy_mode: bool) {
         if let Some(selected) = self.selected {
             // If there's some selection, update info
@@ -147,18 +142,16 @@ impl<'a> UI<'a> {
         }
     }
 
-    /// Updates shown and hidden apps with enhanced fuzzy matching
-    ///
-    /// Matches using [`fuzzy_matcher`] against name, generic name, keywords, and description
-    /// with pattern being `self.query`
-    ///
-    /// Should be called every time user adds/removes characters from `self.query`
-    pub fn filter(&mut self) {
+    /// Filter apps based on query string using fuzzy or exact matching
+    pub fn filter(&mut self, match_mode: crate::cli::MatchMode) {
         // Hide apps that do *not* match the current filter,
         // and update score for the ones that do
         let mut i = 0;
         while i != self.shown.len() {
-            let score = self.calculate_match_score(&self.shown[i]);
+            let score = match match_mode {
+                crate::cli::MatchMode::Exact => self.calculate_exact_match_score(&self.shown[i]),
+                crate::cli::MatchMode::Fuzzy => self.calculate_match_score(&self.shown[i]),
+            };
             match score {
                 // No match. Set score to 0 and move to self.hidden
                 None => {
@@ -176,7 +169,11 @@ impl<'a> UI<'a> {
         // Re-add hidden apps that *do* match the current filter, and update their score
         i = 0;
         while i != self.hidden.len() {
-            if let Some(score) = self.calculate_match_score(&self.hidden[i]) {
+            let score = match match_mode {
+                crate::cli::MatchMode::Exact => self.calculate_exact_match_score(&self.hidden[i]),
+                crate::cli::MatchMode::Fuzzy => self.calculate_match_score(&self.hidden[i]),
+            };
+            if let Some(score) = score {
                 self.hidden[i].score = score;
                 self.shown.push(self.hidden.remove(i));
             } else {
@@ -184,7 +181,7 @@ impl<'a> UI<'a> {
             }
         }
 
-        // Sort the vector (should use our custom Cmp)
+        // Sort by score
         self.shown.sort();
 
         // Reset selection to beginning and scroll offset
@@ -193,8 +190,7 @@ impl<'a> UI<'a> {
             self.selected = None;
             self.scroll_offset = 0;
         } else {
-            // The list changed, ensure we have a valid selection
-            // Try to keep current selection if it's still valid, otherwise go to first
+            // Keep selection valid after filtering
             if let Some(current_selected) = self.selected {
                 if current_selected >= self.shown.len() {
                     // Current selection is out of bounds, go to first item
@@ -212,22 +208,62 @@ impl<'a> UI<'a> {
         }
     }
     
-    /// Calculate match score against multiple app fields for better fuzzy matching
+    /// Calculate fuzzy match score across app fields
     fn calculate_match_score(&self, app: &xdg::App) -> Option<i64> {
         if self.query.is_empty() {
             return Some(0);
         }
         
+        let query_lower = self.query.to_lowercase();
         let mut best_score = None;
         
-        // Match against app name (highest priority)
-        if let Some(score) = self.matcher.fuzzy_match(&app.name, &self.query) {
-            best_score = Some(score * 3); // Boost name matches
+        // extract executable name from command
+        let exec_name = crate::helpers::extract_exec_name(&app.command);
+        let exec_name_lower = exec_name.to_lowercase();
+        
+        // check executable name first (highest priority for direct matching)
+        if !exec_name.is_empty() {
+            if exec_name_lower == query_lower {
+                // Exact executable match
+                best_score = Some(1_000_000);
+            } else if exec_name_lower.starts_with(&query_lower) {
+                // Executable prefix match
+                best_score = Some(900_000);
+            } else if let Some(score) = self.matcher.fuzzy_match(exec_name, &self.query) {
+                // Fuzzy executable match (high priority)
+                best_score = Some(score * 4);
+            }
+        }
+        
+        // Match against app name
+        let app_name_lower = app.name.to_lowercase();
+        if let Some(mut score) = self.matcher.fuzzy_match(&app.name, &self.query) {
+            // Exact match
+            if app_name_lower == query_lower {
+                score = 800_000;
+            }
+            // Prefix match
+            else if app_name_lower.starts_with(&query_lower) {
+                score += 10000;
+            }
+            // Word boundary matches (e.g., "fire" matches "Firefox")
+            else if app.name.to_lowercase().split_whitespace().any(|word| word.starts_with(&query_lower)) {
+                score += 5000;
+            }
+            
+            let boosted_score = score * 3;
+            best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
         }
         
         // Match against generic name
         if let Some(ref generic_name) = app.generic_name {
-            if let Some(score) = self.matcher.fuzzy_match(generic_name, &self.query) {
+            let generic_lower = generic_name.to_lowercase();
+            if let Some(mut score) = self.matcher.fuzzy_match(generic_name, &self.query) {
+                if generic_lower == query_lower {
+                    score = 700_000;
+                } else if generic_lower.starts_with(&query_lower) {
+                    score += 8000;
+                }
                 let boosted_score = score * 2;
                 best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
@@ -235,7 +271,13 @@ impl<'a> UI<'a> {
         
         // Match against keywords
         for keyword in &app.keywords {
-            if let Some(score) = self.matcher.fuzzy_match(keyword, &self.query) {
+            let keyword_lower = keyword.to_lowercase();
+            if let Some(mut score) = self.matcher.fuzzy_match(keyword, &self.query) {
+                if keyword_lower == query_lower {
+                    score = 600_000;
+                } else if keyword_lower.starts_with(&query_lower) {
+                    score += 6000;
+                }
                 let boosted_score = score * 2;
                 best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
@@ -253,7 +295,115 @@ impl<'a> UI<'a> {
             }
         }
         
+        // add pinned app boost (highest priority after exact matches)
+        if let Some(mut score) = best_score {
+            if app.pinned {
+                // pinned apps get massive boost, but not above exact matches
+                if score < 600_000 {
+                    score += 500_000; // boost fuzzy matches significantly
+                } else {
+                    score += 50_000; // boost exact matches slightly
+                }
+            }
+            
+            // add usage history boost (but don't let it dominate exact/prefix matches)
+            score = if score >= 600_000 {
+                // for exact/prefix matches, history is just a tiebreaker
+                score + (app.history as i64 * 10)
+            } else {
+                // for fuzzy matches, history adds significant boost
+                score + (app.history as i64 * 100)
+            };
+            
+            best_score = Some(score);
+        }
+        
         best_score
+    }
+    
+    /// Calculate exact match score (case-insensitive)
+    fn calculate_exact_match_score(&self, app: &xdg::App) -> Option<i64> {
+        if self.query.is_empty() {
+            return Some(0);
+        }
+        
+        let query_lower = self.query.to_lowercase();
+        
+        // extract executable name from command
+        let exec_name = crate::helpers::extract_exec_name(&app.command);
+        let exec_name_lower = exec_name.to_lowercase();
+        
+        let mut score = None;
+        
+        // exact match on executable (highest priority)
+        if !exec_name.is_empty() && exec_name_lower == query_lower {
+            score = Some(100000);
+        }
+        // exact match on name
+        else if app.name.to_lowercase() == query_lower {
+            score = Some(90000);
+        }
+        // exact match on generic name
+        else if let Some(ref generic_name) = app.generic_name {
+            if generic_name.to_lowercase() == query_lower {
+                score = Some(80000);
+            }
+        }
+        
+        // prefix match on executable
+        if score.is_none() && !exec_name.is_empty() && exec_name_lower.starts_with(&query_lower) {
+            score = Some(70000);
+        }
+        // prefix match on name
+        else if score.is_none() && app.name.to_lowercase().starts_with(&query_lower) {
+            score = Some(60000);
+        }
+        // prefix match on generic name
+        else if score.is_none() {
+            if let Some(ref generic_name) = app.generic_name {
+                if generic_name.to_lowercase().starts_with(&query_lower) {
+                    score = Some(50000);
+                }
+            }
+        }
+        
+        // contains query in executable
+        if score.is_none() && !exec_name.is_empty() && exec_name_lower.contains(&query_lower) {
+            score = Some(4000);
+        }
+        // contains query in name
+        else if score.is_none() && app.name.to_lowercase().contains(&query_lower) {
+            score = Some(3000);
+        }
+        
+        // check keywords
+        if score.is_none() {
+            for keyword in &app.keywords {
+                if keyword.to_lowercase() == query_lower {
+                    score = Some(2000);
+                    break;
+                }
+                if keyword.to_lowercase().contains(&query_lower) {
+                    score = Some(1000);
+                    break;
+                }
+            }
+        }
+        
+        // check description
+        if score.is_none() && app.description.to_lowercase().contains(&query_lower) {
+            score = Some(500);
+        }
+        
+        // apply pin boost
+        if let Some(mut s) = score {
+            if app.pinned {
+                s += 50000; // boost pinned apps
+            }
+            score = Some(s);
+        }
+        
+        score
     }
 }
 
@@ -275,6 +425,10 @@ pub struct DmenuUI<'a> {
     pub wrap_long_lines: bool,
     /// Show line numbers
     pub show_line_numbers: bool,
+    /// Match mode (exact or fuzzy)
+    pub match_mode: crate::cli::MatchMode,
+    /// Match against specific columns
+    pub match_nth: Option<Vec<usize>>,
     #[doc(hidden)]
     // Matching algorithm
     matcher: SkimMatcherV2,
@@ -292,8 +446,20 @@ impl<'a> DmenuUI<'a> {
             scroll_offset: 0,
             wrap_long_lines,
             show_line_numbers,
+            match_mode: crate::cli::MatchMode::Fuzzy,
+            match_nth: None,
             matcher: SkimMatcherV2::default(),
         }
+    }
+    
+    /// Set match mode
+    pub fn set_match_mode(&mut self, mode: crate::cli::MatchMode) {
+        self.match_mode = mode;
+    }
+    
+    /// Set match_nth columns
+    pub fn set_match_nth(&mut self, columns: Option<Vec<usize>>) {
+        self.match_nth = columns;
     }
 
     /// Update `self.text` to show content for current selection
@@ -313,7 +479,7 @@ impl<'a> DmenuUI<'a> {
                         // Show minimal or blank content for images
                         self.text = vec![Line::from(Span::raw("".to_string()))];
                     } else {
-                        // Show placeholder text - the actual image will be drawn after ratatui finishes
+                        // Placeholder text (image drawn after ratatui)
                         let image_info = self.get_image_info(item);
                         let info_lines = vec![
                             Line::from(Span::raw("  [INLINE IMAGE PREVIEW]".to_string())),
@@ -478,7 +644,7 @@ impl<'a> DmenuUI<'a> {
             let terminal_type = std::env::var("TERM").unwrap_or_default();
             let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
             
-            // Try multiple formats for better compatibility
+            // Try multiple image formats
             let formats = if term_program == "kitty" || terminal_type.contains("kitty") {
                 vec!["kitty", "sixels"]
             } else if terminal_type.starts_with("foot") {
@@ -498,41 +664,69 @@ impl<'a> DmenuUI<'a> {
             let image_width = (term_width * 90 / 100).max(40); // 90% of width, minimum 40
             let image_height = (term_height * 85 / 100).max(20); // 85% of height, minimum 20
             
-            // Try multiple formats until one works
-            let mut result = Err(std::io::Error::new(std::io::ErrorKind::Other, "No formats worked"));
+            // try multiple formats until one works
+            let mut success = false;
             
             for format in formats {
-                result = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(&format!(
-                        "clear; cclip get {} | chafa --size {}x{} --align center -f {} -", 
-                        rowid, image_width, image_height, format
-                    ))
+                // clear screen first (use TERM=xterm-256color to avoid foot-extra warning)
+                let clear_result = std::process::Command::new("clear")
+                    .env("TERM", "xterm-256color")
                     .status();
-                    
-                if let Ok(status) = &result {
-                    if status.success() {
-                        break; // Found a working format
+                
+                if clear_result.is_err() {
+                    continue;
+                }
+                
+                // pipe cclip output to chafa
+                let cclip_child = std::process::Command::new("cclip")
+                    .args(&["get", rowid])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+                
+                if let Ok(mut cclip) = cclip_child {
+                    if let Some(cclip_stdout) = cclip.stdout.take() {
+                        let size_arg = format!("{}x{}", image_width, image_height);
+                        let chafa_child = std::process::Command::new("chafa")
+                            .args(&["--size", &size_arg, "--align", "center", "-f", format, "-"])
+                            .stdin(std::process::Stdio::piped())
+                            .stdout(std::process::Stdio::inherit())
+                            .stderr(std::process::Stdio::null())
+                            .spawn();
+                        
+                        if let Ok(mut chafa) = chafa_child {
+                            if let Some(mut chafa_stdin) = chafa.stdin.take() {
+                                std::thread::spawn(move || {
+                                    let mut cclip_stdout = cclip_stdout;
+                                    std::io::copy(&mut cclip_stdout, &mut chafa_stdin).ok();
+                                });
+                                
+                                let _ = cclip.wait();
+                                if let Ok(status) = chafa.wait() {
+                                    if status.success() {
+                                        success = true;
+                                        break; // found a working format
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-                
-            match result {
-                Ok(status) => status.success(),
-                Err(_) => false,
-            }
+            
+            success
         } else {
             false
         }
     }
     
 
-    /// Updates shown and hidden items with fuzzy matching
+    /// Updates shown and hidden items with matching (fuzzy or exact)
     pub fn filter(&mut self) {
         // Hide items that don't match the current filter
         let mut i = 0;
         while i != self.shown.len() {
-            let score = self.shown[i].calculate_score(&self.query, &self.matcher);
+            let score = self.calculate_item_score(&self.shown[i]);
             match score {
                 None => {
                     self.shown[i].set_score(0);
@@ -548,7 +742,7 @@ impl<'a> DmenuUI<'a> {
         // Re-add hidden items that now match
         i = 0;
         while i != self.hidden.len() {
-            if let Some(score) = self.hidden[i].calculate_score(&self.query, &self.matcher) {
+            if let Some(score) = self.calculate_item_score(&self.hidden[i]) {
                 self.hidden[i].set_score(score);
                 self.shown.push(self.hidden.remove(i));
             } else {
@@ -574,6 +768,20 @@ impl<'a> DmenuUI<'a> {
             } else {
                 self.selected = Some(0);
                 self.scroll_offset = 0;
+            }
+        }
+    }
+    
+    /// Calculate score for an item based on match mode and match_nth
+    fn calculate_item_score(&self, item: &DmenuItem) -> Option<i64> {
+        if let Some(ref match_cols) = self.match_nth {
+            // Match against specific columns
+            item.calculate_score_with_match_nth(&self.query, &self.matcher, match_cols)
+        } else {
+            // Match against display text
+            match self.match_mode {
+                crate::cli::MatchMode::Exact => item.calculate_exact_score(&self.query),
+                crate::cli::MatchMode::Fuzzy => item.calculate_score(&self.query, &self.matcher),
             }
         }
     }

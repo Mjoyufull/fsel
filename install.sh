@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-# gyr installer
-REPO="Mjoyufull/gyr"
+# fsel installer
+REPO="Mjoyufull/fsel"
 INSTALL_DIR="$HOME/.local/bin"
-BIN_NAME="gyr"
+BIN_NAME="fsel"
 
 # Colors for output
 RED='\033[0;31m'
@@ -32,7 +32,7 @@ if [ -f "$INSTALL_DIR/$BIN_NAME" ]; then
     info "Updating existing installation"
     UPDATE=1
 else
-    info "Installing gyr"
+    info "Installing fsel"
     UPDATE=0
 fi
 
@@ -42,17 +42,30 @@ trap "rm -rf $TEMP_DIR" EXIT
 
 cd "$TEMP_DIR"
 info "Downloading source from github.com/$REPO"
-git clone --depth 1 "https://github.com/$REPO.git" gyr-src
-cd gyr-src
+git clone --depth 1 "https://github.com/$REPO.git" fsel-src
+cd fsel-src
 
 # Build release binary
-info "Building gyr (this may take a while)"
+info "Building fsel (this may take a while)"
 cargo build --release --quiet
 
 # Install binary
 info "Installing to $INSTALL_DIR"
-cp target/release/gyr "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/gyr"
+cp target/release/fsel "$INSTALL_DIR/"
+chmod +x "$INSTALL_DIR/fsel"
+
+# Install man page
+MAN_DIR="$HOME/.local/share/man/man1"
+if [ -f "fsel.1" ]; then
+    info "Installing man page"
+    mkdir -p "$MAN_DIR"
+    cp fsel.1 "$MAN_DIR/"
+    
+    # Update man database if mandb is available
+    if command -v mandb >/dev/null 2>&1; then
+        mandb -q "$HOME/.local/share/man" 2>/dev/null || true
+    fi
+fi
 
 # Check if in PATH
 if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
@@ -62,14 +75,14 @@ if ! echo "$PATH" | grep -q "$HOME/.local/bin"; then
 fi
 
 # Verify installation
-if "$INSTALL_DIR/gyr" --version >/dev/null 2>&1; then
-    VERSION=$("$INSTALL_DIR/gyr" --version)
+if "$INSTALL_DIR/fsel" --version >/dev/null 2>&1; then
+    VERSION=$("$INSTALL_DIR/fsel" --version)
     if [ $UPDATE -eq 1 ]; then
-        info "Updated gyr to $VERSION"
+        info "Updated fsel to $VERSION"
     else
-        info "Installed gyr $VERSION"
+        info "Installed fsel $VERSION"
     fi
-    info "Usage: gyr --help"
+    info "Usage: fsel --help"
 else
     error "Installation failed"
 fi
