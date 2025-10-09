@@ -135,6 +135,30 @@ fsel --cclip -ss image
 fsel --cclip  # Images show automatically if supported
 ```
 
+### Tagging Clipboard Items
+
+Organize clipboard items with tags:
+
+```sh
+# In cclip mode, press Ctrl+T on selected item
+# You'll be prompted for:
+#   1. Tag name (e.g., "prompt", "code", "important")
+#   2. Color (optional: hex, rgb, or named color)
+#   3. Emoji (optional: prefix like 📌 or 🔥)
+
+# Tags appear as [tagname] prefix in the list
+# Example: [prompt] Explain this like I'm 5
+
+# Filter by tag
+fsel --cclip --tag prompt
+
+# List all tags
+fsel --cclip --tag list
+
+# List items in specific tag (verbose shows details)
+fsel --cclip --tag list prompt -vv
+```
+
 ### Keybindings in cclip mode
 - `Enter` - Copy selection to clipboard
 - `i` - Display image fullscreen (bypass TUI)

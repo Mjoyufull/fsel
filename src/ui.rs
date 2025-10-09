@@ -429,9 +429,28 @@ pub struct DmenuUI<'a> {
     pub match_mode: crate::cli::MatchMode,
     /// Match against specific columns
     pub match_nth: Option<Vec<usize>>,
+    /// Tag mode state
+    /// DISABLED: Waiting for cclip maintainer to add tag support
+    #[allow(dead_code)]
+    pub tag_mode: TagMode,
     #[doc(hidden)]
     // Matching algorithm
     matcher: SkimMatcherV2,
+}
+
+/// Tag mode state for cclip
+/// DISABLED: Waiting for cclip maintainer to add tag support
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum TagMode {
+    /// Normal mode (not tagging)
+    Normal,
+    /// Prompting for tag name
+    PromptingTagName { input: String },
+    /// Prompting for tag color
+    PromptingTagColor { tag_name: String, input: String },
+    /// Prompting for tag emoji
+    PromptingTagEmoji { tag_name: String, color: Option<String>, input: String },
 }
 
 impl<'a> DmenuUI<'a> {
@@ -448,6 +467,7 @@ impl<'a> DmenuUI<'a> {
             show_line_numbers,
             match_mode: crate::cli::MatchMode::Fuzzy,
             match_nth: None,
+            tag_mode: TagMode::Normal,
             matcher: SkimMatcherV2::default(),
         }
     }
@@ -567,15 +587,14 @@ impl<'a> DmenuUI<'a> {
     /// Check if a DmenuItem is a cclip image item by parsing its original line
     fn is_cclip_image_item(&self, item: &crate::dmenu::DmenuItem) -> bool {
         // Parse the tab-separated cclip format to check mime type
-        // Add safety checks to prevent crashes
+        // Format: rowid\tmime_type\tpreview[\ttag]
         if item.original_line.trim().is_empty() {
             return false;
         }
         
-        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        let parts: Vec<&str> = item.original_line.splitn(4, '\t').collect();
         if parts.len() >= 2 {
             let mime_type = parts[1].trim();
-            // Additional safety check
             return !mime_type.is_empty() && mime_type.starts_with("image/");
         }
         false
@@ -583,7 +602,7 @@ impl<'a> DmenuUI<'a> {
     
     /// Get actual clipboard content for display (simplified fallback for now)
     fn get_cclip_content_for_display(&self, item: &crate::dmenu::DmenuItem) -> String {
-        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        let parts: Vec<&str> = item.original_line.splitn(4, '\t').collect();
         if parts.len() >= 3 {
             // For now, just show the preview part instead of doing blocking I/O
             let preview = parts[2].trim();
@@ -619,6 +638,18 @@ impl<'a> DmenuUI<'a> {
             return None;
         }
         
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        if parts.len() >= 1 {
+            Some(parts[0].trim().to_string())
+        } else {
+            None
+        }
+    }
+    
+    /// Get the rowid for ANY cclip item (for tagging, etc)
+    /// DISABLED: Waiting for cclip maintainer to add tag support
+    #[allow(dead_code)]
+    pub fn get_cclip_rowid_any(&self, item: &crate::dmenu::DmenuItem) -> Option<String> {
         let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
         if parts.len() >= 1 {
             Some(parts[0].trim().to_string())

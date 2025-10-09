@@ -257,6 +257,7 @@ fsel --cclip
 - **Content Preview**: Full text preview panel
 - **Fuzzy Search**: Filter clipboard history
 - **Smart Copy**: Auto-copies selection to clipboard
+- **Tagging**: Organize items with tags (Ctrl+T), filter by tag
 - Requires [cclip](https://github.com/heather7283/cclip)
 
 ### Quick Examples

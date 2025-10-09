@@ -98,6 +98,15 @@ Prompt-only mode: no list, just input
 .TP
 .B \-\-cclip
 Clipboard history mode: browse cclip history with previews (requires cclip)
+.TP
+.BR \-\-tag " " \fINAME\fR
+Filter clipboard items by tag (use with --cclip)
+.TP
+.B \-\-tag list
+List all tags (use with --cclip)
+.TP
+.BR \-\-tag " list " \fINAME\fR
+List items with specific tag (use with --cclip)
 .SS "General Options"
 .TP
 .BR \-h ", " \-\-help
@@ -160,8 +169,11 @@ Exit
 .B Backspace
 Remove characters from search
 .TP
-.B i
+.BR "Ctrl-I"
 (Cclip mode only) Open fullscreen image viewer for selected clipboard item
+.TP
+.BR "Ctrl-T"
+(Cclip mode only) Tag selected clipboard item
 .SS "Mouse Support"
 .TP
 .B Hover
@@ -261,6 +273,29 @@ Browse clipboard history (requires cclip):
 .nf
 .RS
 fsel --cclip
+.RE
+.fi
+.TP
+Tag clipboard item (press Ctrl-T in cclip mode):
+.nf
+.RS
+# Prompts for: tag name, color (optional), emoji (optional)
+# Tags appear as [tagname] prefix in list
+.RE
+.fi
+.TP
+Filter by tag:
+.nf
+.RS
+fsel --cclip --tag prompt
+.RE
+.fi
+.TP
+List all tags:
+.nf
+.RS
+fsel --cclip --tag list
+fsel --cclip --tag list prompt -vv  # verbose shows items
 .RE
 .fi
 .SH ENVIRONMENT

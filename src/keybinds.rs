@@ -23,6 +23,9 @@ pub struct Keybinds {
     pub backspace: Vec<KeyBind>,
     #[serde(default = "default_image_preview")]
     pub image_preview: Vec<KeyBind>,
+    #[serde(default = "default_tag")]
+    #[allow(dead_code)]
+    pub tag: Vec<KeyBind>,
 }
 
 impl Default for Keybinds {
@@ -37,6 +40,7 @@ impl Default for Keybinds {
             pin: default_pin(),
             backspace: default_backspace(),
             image_preview: default_image_preview(),
+            tag: default_tag(),
         }
     }
 }
@@ -156,7 +160,18 @@ fn default_backspace() -> Vec<KeyBind> {
 }
 
 fn default_image_preview() -> Vec<KeyBind> {
-    vec![KeyBind::Simple("i".to_string())]
+    // Note: Ctrl+I is the same as Tab in terminals, so we use Alt+I instead
+    vec![KeyBind::WithMod {
+        key: "i".to_string(),
+        modifiers: "alt".to_string(),
+    }]
+}
+
+fn default_tag() -> Vec<KeyBind> {
+    vec![KeyBind::WithMod {
+        key: "t".to_string(),
+        modifiers: "ctrl".to_string(),
+    }]
 }
 
 impl Keybinds {
@@ -194,5 +209,11 @@ impl Keybinds {
 
     pub fn matches_image_preview(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.image_preview.iter().any(|kb| kb.matches(code, mods))
+    }
+
+    /// DISABLED: Waiting for cclip maintainer to add tag support
+    #[allow(dead_code)]
+    pub fn matches_tag(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        self.tag.iter().any(|kb| kb.matches(code, mods))
     }
 }

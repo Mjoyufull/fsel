@@ -4,53 +4,33 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs = {
-        nixpkgs.follows = "nixpkgs";
-      };
-    };
+    naersk.url = "github:nix-community/naersk";
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, naersk }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        overlays = [ (import rust-overlay) ];
-        pkgs = import nixpkgs {
-          inherit system overlays;
-        };
-        
-        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-          extensions = [ "rust-src" ];
-        };
+        pkgs = import nixpkgs { inherit system; };
+        naersk' = pkgs.callPackage naersk {};
 
         buildInputs = with pkgs; [
-          # Required for termion
           pkg-config
         ] ++ lib.optionals stdenv.isDarwin [
-          # Darwin specific dependencies if needed
           darwin.apple_sdk.frameworks.Security
-        ];
-
-        nativeBuildInputs = with pkgs; [
-          rustToolchain
-          pkg-config
         ];
 
       in
       {
         packages = {
-          default = pkgs.rustPlatform.buildRustPackage {
+          default = naersk'.buildPackage {
             pname = "fsel";
-            version = "1.0.0-riceknife";
-
+            version = "1.0.1-riceknife";
             src = ./.;
 
-            cargoHash = "sha256-XwWH8uvmaD111wkCUJyQkuZSZUcFMwbGXk1MfQUn5oQ=";
+            nativeBuildInputs = with pkgs; [ pkg-config ];
+            inherit buildInputs;
 
-            inherit buildInputs nativeBuildInputs;
-
-            # Install man page
+            # install man page
             postInstall = ''
               install -Dm644 fsel.1 $out/share/man/man1/fsel.1
             '';
@@ -74,13 +54,13 @@
         devShells = {
           default = pkgs.mkShell {
             inherit buildInputs;
-            nativeBuildInputs = nativeBuildInputs ++ (with pkgs; [
-              # Development tools
+            nativeBuildInputs = with pkgs; [
+              rustc
+              cargo
+              pkg-config
               cargo-watch
               rust-analyzer
-            ]);
-
-            RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+            ];
           };
         };
       }

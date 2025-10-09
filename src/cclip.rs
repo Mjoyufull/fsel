@@ -10,28 +10,37 @@ pub struct CclipItem {
     pub mime_type: String,
     pub preview: String,
     pub original_line: String,
+    pub tag: Option<String>,
 }
 
 impl CclipItem {
     /// Create a new CclipItem from a tab-separated line from cclip list
+    /// Format: rowid\tmime_type\tpreview[\ttag]
     pub fn from_line(line: String) -> Result<Self> {
-        let parts: Vec<&str> = line.splitn(3, '\t').collect();
+        let parts: Vec<&str> = line.splitn(4, '\t').collect();
         
-        if parts.len() != 3 {
-            return Err(eyre!("Invalid cclip list format: expected 3 tab-separated fields"));
+        if parts.len() < 3 {
+            return Err(eyre!("Invalid cclip list format: expected at least 3 tab-separated fields"));
         }
+        
+        let tag = if parts.len() >= 4 && !parts[3].is_empty() {
+            Some(parts[3].to_string())
+        } else {
+            None
+        };
         
         Ok(CclipItem {
             rowid: parts[0].to_string(),
             mime_type: parts[1].to_string(),
             preview: parts[2].to_string(),
             original_line: line,
+            tag,
         })
     }
     
     /// Get a human-readable display name for this item
     pub fn get_display_name(&self) -> String {
-        match self.mime_type.as_str() {
+        let base_name = match self.mime_type.as_str() {
             mime if mime.starts_with("image/") => {
                 format!("{} ({})", 
                     self.preview.chars().take(50).collect::<String>(),
@@ -45,6 +54,13 @@ impl CclipItem {
                     self.preview.chars().take(50).collect::<String>(),
                     self.mime_type)
             }
+        };
+        
+        // Add tag prefix if present
+        if let Some(ref tag) = self.tag {
+            format!("[{}] {}", tag, base_name)
+        } else {
+            base_name
         }
     }
     
@@ -208,12 +224,31 @@ impl From<CclipItem> for DmenuItem {
 
 /// Get clipboard history from cclip
 pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
+    // Try with tag field first (newer cclip), fall back to without tag (older cclip)
     let output = Command::new("cclip")
-        .args(&["list", "rowid,mime_type,preview"])
+        .args(&["list", "rowid,mime_type,preview,tag"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?
         .wait_with_output()?;
+    
+    // If tag field not supported, try without it
+    let output = if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("invalid field: tag") {
+            // Older cclip version without tag support
+            Command::new("cclip")
+                .args(&["list", "rowid,mime_type,preview"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()?
+                .wait_with_output()?
+        } else {
+            output
+        }
+    } else {
+        output
+    };
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -276,4 +311,131 @@ pub fn check_chafa_available() -> bool {
         .status()
         .map(|status| status.success())
         .unwrap_or(false)
+}
+
+/// Tag metadata stored in fsel's database
+/// DISABLED: Waiting for cclip maintainer to add tag support
+#[allow(dead_code)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TagMetadata {
+    pub name: String,
+    pub color: Option<String>,  // Hex color or named color
+    pub emoji: Option<String>,  // Optional emoji prefix
+}
+
+#[allow(dead_code)]
+impl TagMetadata {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            color: None,
+            emoji: None,
+        }
+    }
+    
+    pub fn with_color(mut self, color: String) -> Self {
+        self.color = Some(color);
+        self
+    }
+    
+    pub fn with_emoji(mut self, emoji: String) -> Self {
+        self.emoji = Some(emoji);
+        self
+    }
+}
+
+/// Load tag metadata from fsel's database
+/// DISABLED: Waiting for cclip maintainer to add tag support
+#[allow(dead_code)]
+pub fn load_tag_metadata(db: &sled::Db) -> std::collections::HashMap<String, TagMetadata> {
+    let mut tags = std::collections::HashMap::new();
+    
+    if let Ok(Some(data)) = db.get(b"tag_metadata") {
+        if let Ok(metadata) = bincode::deserialize::<Vec<TagMetadata>>(&data) {
+            for tag in metadata {
+                tags.insert(tag.name.clone(), tag);
+            }
+        }
+    }
+    
+    tags
+}
+
+/// Save tag metadata to fsel's database
+/// DISABLED: Waiting for cclip maintainer to add tag support
+#[allow(dead_code)]
+pub fn save_tag_metadata(db: &sled::Db, tags: &std::collections::HashMap<String, TagMetadata>) -> Result<()> {
+    let metadata: Vec<TagMetadata> = tags.values().cloned().collect();
+    let data = bincode::serialize(&metadata)?;
+    db.insert(b"tag_metadata", data.as_slice())?;
+    Ok(())
+}
+
+/// Tag a cclip item using cclip's tag command
+/// DISABLED: Waiting for cclip maintainer to add tag support
+#[allow(dead_code)]
+pub fn tag_item(rowid: &str, tag: &str) -> Result<()> {
+    let output = Command::new("cclip")
+        .args(&["tag", rowid, tag])
+        .output()?;
+    
+    if !output.status.success() {
+        return Err(eyre!("Failed to tag item: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    Ok(())
+}
+
+/// Remove tag from a cclip item
+#[allow(dead_code)]
+pub fn untag_item(rowid: &str) -> Result<()> {
+    let output = Command::new("cclip")
+        .args(&["tag", "-d", rowid])
+        .output()?;
+    
+    if !output.status.success() {
+        return Err(eyre!("Failed to remove tag: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    Ok(())
+}
+
+/// Get all unique tags from cclip database
+pub fn get_all_tags() -> Result<Vec<String>> {
+    let output = Command::new("cclip")
+        .args(&["list", "-t", "tag"])
+        .output()?;
+    
+    if !output.status.success() {
+        return Err(eyre!("Failed to list tags: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    
+    let tags: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.trim().to_string())
+        .collect();
+    
+    Ok(tags)
+}
+
+/// Get clipboard items filtered by tag
+pub fn get_clipboard_history_by_tag(tag: &str) -> Result<Vec<CclipItem>> {
+    // Query cclip for items with specific tag
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(format!("cclip list -t rowid,mime_type,preview,tag | grep -F $'\\t{}$' || true", tag))
+        .output()?;
+    
+    if !output.status.success() {
+        return Err(eyre!("Failed to get clipboard history"));
+    }
+    
+    let items: Result<Vec<CclipItem>> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| CclipItem::from_line(line.to_string()))
+        .collect();
+    
+    items
 }

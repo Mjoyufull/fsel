@@ -53,6 +53,9 @@ Dmenu Mode Options:
 
 Clipboard Mode Options:
       --cclip                   Clipboard history mode: browse cclip history with previews.
+      --tag <name>              Filter clipboard items by tag (use with --cclip).
+      --tag list                List all tags (use with --cclip).
+      --tag list <name>         List items with specific tag (use with --cclip).
 
 General Options:
   -h, --help                    Show this help message.
@@ -141,6 +144,10 @@ pub struct Opts {
     pub dmenu_hide_before_typing: bool,
     /// Clipboard history mode settings
     pub cclip_mode: bool,
+    /// Tag filter for cclip mode
+    pub cclip_tag: Option<String>,
+    /// List tags mode
+    pub cclip_tag_list: bool,
     /// App launcher settings
     pub filter_desktop: bool,
     pub list_executables_in_path: bool,
@@ -240,6 +247,8 @@ impl Default for Opts {
             dmenu_hide_before_typing: false,
             // Cclip mode defaults
             cclip_mode: false,
+            cclip_tag: None,
+            cclip_tag_list: false,
             // App launcher defaults
             filter_desktop: true,
             list_executables_in_path: false,
@@ -352,6 +361,18 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
             Long("cclip") => {
                 default.cclip_mode = true;
+            }
+            Long("tag") => {
+                let tag_arg = parser.value()?.into_string().map_err(|_| "Tag argument must be valid UTF-8")?;
+                if tag_arg == "list" {
+                    default.cclip_tag_list = true;
+                    // Check if there's another argument for specific tag
+                    if let Ok(val) = parser.value() {
+                        default.cclip_tag = Some(val.into_string().map_err(|_| "Tag name must be valid UTF-8")?);
+                    }
+                } else {
+                    default.cclip_tag = Some(tag_arg);
+                }
             }
             Long("dmenu0") => {
                 default.dmenu_mode = true;
@@ -929,6 +950,14 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
         // cclip mode implies no-exec behavior
         default.no_exec = true;
+    }
+    
+    // Validate tag options require cclip mode
+    if (default.cclip_tag.is_some() || default.cclip_tag_list) && !default.cclip_mode {
+        eprintln!("Error: --tag requires --cclip mode");
+        eprintln!("Usage: fsel --cclip --tag <name>");
+        eprintln!("       fsel --cclip --tag list");
+        std::process::exit(1);
     }
     
     // Validate mutually exclusive special modes

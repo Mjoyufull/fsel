@@ -34,7 +34,8 @@ backspace = ["backspace"]
 # These keybinds only work in clipboard history mode (fsel --cclip)
 
 # Display large fullscreen image preview (bypasses TUI, press any key to return)
-image_preview = ["i"]
+# Note: Ctrl+I is the same as Tab in terminals, so we use Alt+I instead
+image_preview = [{ key = "i", modifiers = "alt" }]
 
 # ===== KEY REFERENCE =====
 # Available key names:

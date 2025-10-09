@@ -102,12 +102,67 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     cclip::check_cclip_database()
         .wrap_err("cclip database check failed")?;
 
-    // Get clipboard history from cclip
-    let cclip_items = cclip::get_clipboard_history()
-        .wrap_err("Failed to get clipboard history from cclip")?;
+    // Handle tag list mode
+    if cli.cclip_tag_list {
+        let tags = cclip::get_all_tags()
+            .wrap_err("Failed to get tags from cclip")?;
+        
+        if tags.is_empty() {
+            println!("No tags found");
+            return Ok(());
+        }
+        
+        // If specific tag requested, show items in that tag
+        if let Some(ref tag_name) = cli.cclip_tag {
+            println!("Items tagged with '{}':", tag_name);
+            let items = cclip::get_clipboard_history_by_tag(tag_name)
+                .wrap_err("Failed to get items by tag")?;
+            
+            if items.is_empty() {
+                println!("  (no items)");
+            } else {
+                for item in items {
+                    if cli.verbose.unwrap_or(0) >= 2 {
+                        // Verbose: show full details
+                        println!("  [{}] {} - {}", item.rowid, item.mime_type, item.preview);
+                    } else {
+                        // Normal: just preview
+                        println!("  {}", item.preview);
+                    }
+                }
+            }
+        } else {
+            // Just list tag names
+            println!("Available tags:");
+            for tag in tags {
+                if cli.verbose.unwrap_or(0) >= 2 {
+                    // Verbose: show item count
+                    let items = cclip::get_clipboard_history_by_tag(&tag)
+                        .unwrap_or_default();
+                    println!("  {} ({} items)", tag, items.len());
+                } else {
+                    println!("  {}", tag);
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // Get clipboard history from cclip (filtered by tag if specified)
+    let cclip_items = if let Some(ref tag_name) = cli.cclip_tag {
+        cclip::get_clipboard_history_by_tag(tag_name)
+            .wrap_err(format!("Failed to get clipboard history for tag '{}'", tag_name))?
+    } else {
+        cclip::get_clipboard_history()
+            .wrap_err("Failed to get clipboard history from cclip")?
+    };
     
     if cclip_items.is_empty() {
-        println!("No clipboard history available");
+        if cli.cclip_tag.is_some() {
+            println!("No clipboard items with tag '{}'", cli.cclip_tag.as_ref().unwrap());
+        } else {
+            println!("No clipboard history available");
+        }
         return Ok(());
     }
 
@@ -248,13 +303,64 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         let content_panel_height = (terminal.size()?.height as f32 * get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent) as f32 / 100.0).round() as u16;
         let content_panel_height = content_panel_height.max(3).saturating_sub(2);
         
-        ui.info_with_image_support(
-            get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
-            image_preview_enabled,
-            hide_image_message,
-            content_panel_width,
-            content_panel_height
-        );
+        // DISABLED: Tag mode UI (waiting for cclip maintainer to add tag support)
+        // match &ui.tag_mode {
+        //     ui::TagMode::PromptingTagName { .. } => {
+        //         ui.text = vec![
+        //             Line::from(vec![
+        //                 Span::styled("Tagging Mode", Style::default().add_modifier(Modifier::BOLD)),
+        //             ]),
+        //             Line::from(""),
+        //             Line::from("Enter a tag name for this clipboard item."),
+        //             Line::from(""),
+        //             Line::from("Examples: prompt, code, important, todo"),
+        //             Line::from(""),
+        //             Line::from("Press Enter to continue, Esc to cancel."),
+        //         ];
+        //     }
+        //     ui::TagMode::PromptingTagColor { tag_name, .. } => {
+        //         ui.text = vec![
+        //             Line::from(vec![
+        //                 Span::styled("Tag Color", Style::default().add_modifier(Modifier::BOLD)),
+        //             ]),
+        //             Line::from(""),
+        //             Line::from(format!("Tag: {}", tag_name)),
+        //             Line::from(""),
+        //             Line::from("Enter a color (optional):"),
+        //             Line::from("  - Hex: #ff0000 or #f00"),
+        //             Line::from("  - RGB: rgb(255,0,0)"),
+        //             Line::from("  - Named: red, blue, green, etc."),
+        //             Line::from("  - Leave blank for default"),
+        //             Line::from(""),
+        //             Line::from("Press Enter to continue, Esc to cancel."),
+        //         ];
+        //     }
+        //     ui::TagMode::PromptingTagEmoji { tag_name, color, .. } => {
+        //         ui.text = vec![
+        //             Line::from(vec![
+        //                 Span::styled("Tag Emoji", Style::default().add_modifier(Modifier::BOLD)),
+        //             ]),
+        //             Line::from(""),
+        //             Line::from(format!("Tag: {}", tag_name)),
+        //             Line::from(format!("Color: {}", color.as_ref().unwrap_or(&"default".to_string()))),
+        //             Line::from(""),
+        //             Line::from("Enter an emoji prefix (optional):"),
+        //             Line::from("  Examples: 📌 🔥 ⭐ 💡 📝"),
+        //             Line::from("  Leave blank for no emoji"),
+        //             Line::from(""),
+        //             Line::from("Press Enter to finish, Esc to cancel."),
+        //         ];
+        //     }
+        //     ui::TagMode::Normal => {
+                ui.info_with_image_support(
+                    get_cclip_color(cli.cclip_highlight_color, cli.dmenu_highlight_color, cli.highlight_color),
+                    image_preview_enabled,
+                    hide_image_message,
+                    content_panel_width,
+                    content_panel_height
+                );
+        //     }
+        // }
         
         // Check if current item is an image
         let mut current_is_image = false;
@@ -399,32 +505,62 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             list_state.select(visible_selection);
             
             // Input panel
-            let input_paragraph = Paragraph::new(Line::from(vec![
-                Span::styled("(", Style::default().fg(input_text_color)),
-                Span::styled(
-                    (ui.selected.map_or(0, |v| v + 1)).to_string(),
-                    Style::default().fg(highlight_color),
-                ),
-                Span::styled("/", Style::default().fg(input_text_color)),
-                Span::styled(ui.shown.len().to_string(), Style::default().fg(input_text_color)),
-                Span::styled(") ", Style::default().fg(input_text_color)),
-                Span::styled(">", Style::default().fg(highlight_color)),
-                Span::styled("> ", Style::default().fg(input_text_color)),
-                Span::styled(&ui.query, Style::default().fg(input_text_color)),
-                Span::styled(cursor, Style::default().fg(highlight_color)),
-            ]))
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title(Span::styled(
-                    " Filter ",
-                    Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
-                ))
-                .border_type(border_type)
-                .border_style(Style::default().fg(input_border_color))
-            )
-            .style(Style::default().fg(input_text_color))
-            .alignment(Alignment::Left)
-            .wrap(Wrap { trim: false });
+            // DISABLED: Tag mode input panel (waiting for cclip maintainer to add tag support)
+            // let (input_line, input_title) = match &ui.tag_mode {
+            //     ui::TagMode::PromptingTagName { input } => {
+            //         (Line::from(vec![
+            //             Span::styled("Tag: ", Style::default().fg(highlight_color)),
+            //             Span::styled(input, Style::default().fg(input_text_color)),
+            //             Span::styled(cursor, Style::default().fg(highlight_color)),
+            //         ]), " Tag Name ")
+            //     }
+            //     ui::TagMode::PromptingTagColor { input, .. } => {
+            //         (Line::from(vec![
+            //             Span::styled("Color: ", Style::default().fg(highlight_color)),
+            //             Span::styled(input, Style::default().fg(input_text_color)),
+            //             Span::styled(cursor, Style::default().fg(highlight_color)),
+            //             Span::styled(" (hex/name or blank)", Style::default().fg(input_text_color).add_modifier(Modifier::DIM)),
+            //         ]), " Tag Color ")
+            //     }
+            //     ui::TagMode::PromptingTagEmoji { input, .. } => {
+            //         (Line::from(vec![
+            //             Span::styled("Emoji: ", Style::default().fg(highlight_color)),
+            //             Span::styled(input, Style::default().fg(input_text_color)),
+            //             Span::styled(cursor, Style::default().fg(highlight_color)),
+            //             Span::styled(" (or blank)", Style::default().fg(input_text_color).add_modifier(Modifier::DIM)),
+            //         ]), " Tag Emoji ")
+            //     }
+            //     ui::TagMode::Normal => {
+                    let (input_line, input_title) = (Line::from(vec![
+                        Span::styled("(", Style::default().fg(input_text_color)),
+                        Span::styled(
+                            (ui.selected.map_or(0, |v| v + 1)).to_string(),
+                            Style::default().fg(highlight_color),
+                        ),
+                        Span::styled("/", Style::default().fg(input_text_color)),
+                        Span::styled(ui.shown.len().to_string(), Style::default().fg(input_text_color)),
+                        Span::styled(") ", Style::default().fg(input_text_color)),
+                        Span::styled(">", Style::default().fg(highlight_color)),
+                        Span::styled("> ", Style::default().fg(input_text_color)),
+                        Span::styled(&ui.query, Style::default().fg(input_text_color)),
+                        Span::styled(cursor, Style::default().fg(highlight_color)),
+                    ]), " Filter ");
+            //     }
+            // };
+            
+            let input_paragraph = Paragraph::new(input_line)
+                .block(Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        input_title,
+                        Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                    ))
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(input_border_color))
+                )
+                .style(Style::default().fg(input_text_color))
+                .alignment(Alignment::Left)
+                .wrap(Wrap { trim: false });
             
             // Render all components in their dynamic positions
             f.render_widget(content_paragraph, chunks[content_panel_index]);
@@ -515,12 +651,98 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         match input.next()? {
             Event::Input(key) => {
                 match (key.code, key.modifiers) {
+                    // Check for image preview keybind FIRST (before other Ctrl+key checks)
+                    (code, mods) if cli.keybinds.matches_image_preview(code, mods) => {
+                        if let Some(selected) = ui.selected {
+                            if selected < ui.shown.len() {
+                                let item = &ui.shown[selected];
+                                if ui.display_image_to_terminal(item) {
+                                    use crossterm::event::read;
+                                    let _ = read();
+                                    terminal.clear().wrap_err("Failed to clear terminal")?;
+                                }
+                            }
+                        }
+                    }
+                    // DISABLED: Tag keybind (waiting for cclip maintainer to add tag support)
+                    // (code, mods) if cli.keybinds.matches_tag(code, mods) => {
+                    //     if ui.selected.is_some() && !ui.shown.is_empty() {
+                    //         ui.tag_mode = ui::TagMode::PromptingTagName { input: String::new() };
+                    //     }
+                    // }
                     // Exit on escape or Ctrl+C/Q
                     (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::CONTROL) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                        return Ok(()); // Exit without copying
+                        // DISABLED: Tag mode cancellation (waiting for cclip maintainer to add tag support)
+                        // if ui.tag_mode != ui::TagMode::Normal {
+                        //     ui.tag_mode = ui::TagMode::Normal;
+                        // } else {
+                            return Ok(()); // Exit without copying
+                        // }
                     }
-                    // Copy selection to clipboard on Enter or Ctrl+Y
+                    // Handle Enter key (clipboard copy)
                     (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                        // DISABLED: Tag mode progression (waiting for cclip maintainer to add tag support)
+                        // match ui.tag_mode.clone() {
+                        //     ui::TagMode::PromptingTagName { input } => {
+                        //         if input.trim().is_empty() {
+                        //             ui.tag_mode = ui::TagMode::Normal;
+                        //         } else {
+                        //             ui.tag_mode = ui::TagMode::PromptingTagColor {
+                        //                 tag_name: input.trim().to_string(),
+                        //                 input: String::new(),
+                        //             };
+                        //         }
+                        //     }
+                        //     ui::TagMode::PromptingTagColor { tag_name, input } => {
+                        //         let color = if input.trim().is_empty() {
+                        //             None
+                        //         } else {
+                        //             Some(input.trim().to_string())
+                        //         };
+                        //         ui.tag_mode = ui::TagMode::PromptingTagEmoji {
+                        //             tag_name,
+                        //             color,
+                        //             input: String::new(),
+                        //         };
+                        //     }
+                        //     ui::TagMode::PromptingTagEmoji { tag_name, color, input } => {
+                        //         let emoji = if input.trim().is_empty() {
+                        //             None
+                        //         } else {
+                        //             Some(input.trim().to_string())
+                        //         };
+                        //         
+                        //         if let Some(selected) = ui.selected {
+                        //             if selected < ui.shown.len() {
+                        //                 let item = &ui.shown[selected];
+                        //                 if let Some(rowid) = ui.get_cclip_rowid_any(item) {
+                        //                     if let Err(e) = cclip::tag_item(&rowid, &tag_name) {
+                        //                         eprintln!("Failed to tag item: {}", e);
+                        //                     } else {
+                        //                         let (db, _) = helpers::open_history_db()?;
+                        //                         let mut tag_metadata = cclip::load_tag_metadata(&db);
+                        //                         let metadata = cclip::TagMetadata::new(tag_name.clone());
+                        //                         let metadata = if let Some(c) = color {
+                        //                             metadata.with_color(c)
+                        //                         } else {
+                        //                             metadata
+                        //                         };
+                        //                         let metadata = if let Some(e) = emoji {
+                        //                             metadata.with_emoji(e)
+                        //                         } else {
+                        //                             metadata
+                        //                         };
+                        //                         tag_metadata.insert(tag_name, metadata);
+                        //                         let _ = cclip::save_tag_metadata(&db, &tag_metadata);
+                        //                     }
+                        //                 }
+                        //             }
+                        //         }
+                        //         
+                        //         ui.tag_mode = ui::TagMode::Normal;
+                        //     }
+                        //     ui::TagMode::Normal => {
+                                // Normal mode: copy to clipboard
                         if let Some(selected) = ui.selected {
                             if selected < ui.shown.len() {
                                 // parse the original cclip line to get rowid and mime_type
@@ -633,32 +855,44 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             }
                         }
                     }
+
                     // Add character to query
                     (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
-                        // Check if this is the image preview keybind
-                        if cli.keybinds.matches_image_preview(KeyCode::Char(c), KeyModifiers::NONE) {
-                            if let Some(selected) = ui.selected {
-                                if selected < ui.shown.len() {
-                                    let item = &ui.shown[selected];
-                                    if ui.display_image_to_terminal(item) {
-                                        // Image was displayed, wait for user input to continue
-                                        use crossterm::event::read;
-                                        let _ = read(); // Wait for any key press
-                                        // Force ratatui to completely re-render after external terminal manipulation
-                                        terminal.clear().wrap_err("Failed to clear terminal")?;
-                                    }
-                                }
-                            }
-                        } else {
-                            // Regular character input
-                            ui.query.push(c);
-                            ui.filter();
-                        }
+                        // DISABLED: Tag mode input (waiting for cclip maintainer to add tag support)
+                        // match &mut ui.tag_mode {
+                        //     ui::TagMode::PromptingTagName { input } => {
+                        //         input.push(c);
+                        //     }
+                        //     ui::TagMode::PromptingTagColor { input, .. } => {
+                        //         input.push(c);
+                        //     }
+                        //     ui::TagMode::PromptingTagEmoji { input, .. } => {
+                        //         input.push(c);
+                        //     }
+                        //     ui::TagMode::Normal => {
+                                ui.query.push(c);
+                                ui.filter();
+                        //     }
+                        // }
                     }
                     // Remove character from query
                     (KeyCode::Backspace, _) => {
-                        ui.query.pop();
-                        ui.filter();
+                        // DISABLED: Tag mode input (waiting for cclip maintainer to add tag support)
+                        // match &mut ui.tag_mode {
+                        //     ui::TagMode::PromptingTagName { input } => {
+                        //         input.pop();
+                        //     }
+                        //     ui::TagMode::PromptingTagColor { input, .. } => {
+                        //         input.pop();
+                        //     }
+                        //     ui::TagMode::PromptingTagEmoji { input, .. } => {
+                        //         input.pop();
+                        //     }
+                        //     ui::TagMode::Normal => {
+                                ui.query.pop();
+                                ui.filter();
+                        //     }
+                        // }
                     }
                     // Navigation - Left: go to first item
                     (KeyCode::Left, _) => {
