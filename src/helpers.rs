@@ -6,18 +6,21 @@ use std::fs;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 
-/// extract executable name from a command string
-/// takes the first word and strips any path components
+/// Extract executable name from a command string
+/// Takes the first word and strips any path components
 /// 
-/// examples:
+/// Examples:
 /// - "/usr/bin/firefox" -> "firefox"
 /// - "firefox --new-window" -> "firefox"
 /// - "env FOO=bar firefox" -> "env"
+/// 
+/// Optimized to avoid unnecessary allocations
+#[inline]
 pub fn extract_exec_name(command: &str) -> &str {
     command
         .split_whitespace()
         .next()
-        .and_then(|cmd| cmd.split('/').last())
+        .and_then(|cmd| cmd.rsplit('/').next())
         .unwrap_or("")
 }
 

@@ -26,6 +26,10 @@ fsel --hide-before-typing
 
 # Exact matching only
 fsel --match-mode=exact
+
+# Cache management
+fsel --clear_cache      # Clear all caches (full rebuild)
+fsel --refresh_cache    # Refresh file list (pick up new apps)
 ```
 
 ### Launch Methods

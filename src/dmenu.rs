@@ -125,12 +125,14 @@ impl DmenuItem {
     }
 
     /// Calculate fuzzy match score against query
+    /// Optimized to check display text first with early return
+    #[inline]
     pub fn calculate_score(&self, query: &str, matcher: &SkimMatcherV2) -> Option<i64> {
         if query.is_empty() {
             return Some(0);
         }
 
-        // Try to match against display text first
+        // Try to match against display text first (most common case)
         if let Some(score) = matcher.fuzzy_match(&self.display_text, query) {
             return Some(score * 2); // Boost display text matches
         }
@@ -140,6 +142,8 @@ impl DmenuItem {
     }
     
     /// Calculate exact match score against query
+    /// Optimized with early returns
+    #[inline]
     pub fn calculate_exact_score(&self, query: &str) -> Option<i64> {
         if query.is_empty() {
             return Some(0);
@@ -148,12 +152,12 @@ impl DmenuItem {
         let query_lower = query.to_lowercase();
         let display_lower = self.display_text.to_lowercase();
         
-        // Exact match
+        // Exact match - early return
         if display_lower == query_lower {
             return Some(1000);
         }
         
-        // Starts with query
+        // Starts with query - early return
         if display_lower.starts_with(&query_lower) {
             return Some(500);
         }

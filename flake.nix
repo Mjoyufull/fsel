@@ -24,7 +24,7 @@
         packages = {
           default = naersk'.buildPackage {
             pname = "fsel";
-            version = "1.0.1-riceknife";
+            version = "1.1.0-riceknife";
             src = ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config ];

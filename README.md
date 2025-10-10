@@ -96,14 +96,19 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel
+    $ cargo install fsel@1.1.0-riceknife
     ```
 * To update later:
     ```sh
-    $ cargo install fsel --force
+    $ cargo install fsel@1.1.0-riceknife --force
+    ```
+* Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
+    ```sh
+    $ cargo search fsel  # See available versions
+    $ cargo install fsel@<version>
     ```
 
-#### Option 3: Curl Install (Recommended for most users)
+#### Option 3: Curl Install
 
 * Install directly from GitHub:
     ```sh
@@ -315,6 +320,8 @@ App Launcher Options:
   -c, --config <config>         Specify a config file
   -r, --replace                 Replace existing fsel instances
       --clear_history           Clear launch history
+      --clear_cache             Clear desktop file cache
+      --refresh_cache           Force refresh of desktop file list
   -p, --program [name]          Launch program directly (optional, min 2 chars)
   -ss <search>                  Pre-fill search in TUI (must be last option)
   -v, --verbose                 Increase verbosity level (multiple)

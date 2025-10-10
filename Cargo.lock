@@ -229,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "fsel"
-version = "1.0.1-riceknife"
+version = "1.1.0-riceknife"
 dependencies = [
  "base64",
  "bincode",

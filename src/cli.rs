@@ -24,6 +24,8 @@ App Launcher Options:
   -c, --config <config>         Specify a config file.
   -r, --replace                 Replace existing fsel instances
       --clear_history           Clear launch history.
+      --clear_cache             Clear desktop file cache.
+      --refresh_cache           Force refresh of desktop file list.
   -p, --program <name>          Launch program directly (bypass TUI).
   -ss <search>                  Pre-fill search in TUI (must be last option).
   -v, --verbose                 Increase verbosity level (multiple).
@@ -73,6 +75,10 @@ pub struct Opts {
     pub highlight_color: ratatui::style::Color,
     /// Clear the history database
     pub clear_history: bool,
+    /// Clear the desktop file cache
+    pub clear_cache: bool,
+    /// Force refresh of desktop file list
+    pub refresh_cache: bool,
     /// Command to run Terminal=true apps
     pub terminal_launcher: String,
     /// Replace already running instance of Fsel
@@ -198,6 +204,8 @@ impl Default for Opts {
         Self {
             highlight_color: ratatui::style::Color::LightBlue,
             clear_history: false,
+            clear_cache: false,
+            refresh_cache: false,
             terminal_launcher: "alacritty -e".to_string(),
             replace: false,
             sway: false,
@@ -346,6 +354,12 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
             Long("clear_history") => {
                 default.clear_history = true;
+            }
+            Long("clear_cache") => {
+                default.clear_cache = true;
+            }
+            Long("refresh_cache") => {
+                default.refresh_cache = true;
             }
             Long("no-exec") => {
                 default.no_exec = true;

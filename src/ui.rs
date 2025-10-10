@@ -209,25 +209,34 @@ impl<'a> UI<'a> {
     }
     
     /// Calculate fuzzy match score across app fields
+    /// Optimized to check high-priority fields first and exit early
     fn calculate_match_score(&self, app: &xdg::App) -> Option<i64> {
         if self.query.is_empty() {
             return Some(0);
         }
         
+        // Reuse query_lower if already computed
         let query_lower = self.query.to_lowercase();
         let mut best_score = None;
         
-        // extract executable name from command
+        // Extract executable name from command
         let exec_name = crate::helpers::extract_exec_name(&app.command);
-        let exec_name_lower = exec_name.to_lowercase();
         
-        // check executable name first (highest priority for direct matching)
+        // Only lowercase if we need to check it
         if !exec_name.is_empty() {
+            let exec_name_lower = exec_name.to_lowercase();
+        
+            // Check executable name first (highest priority for direct matching)
             if exec_name_lower == query_lower {
-                // Exact executable match
-                best_score = Some(1_000_000);
+                // Exact executable match - apply boosts and return early
+                let mut score = 1_000_000;
+                if app.pinned {
+                    score += 50_000;
+                }
+                score += app.history as i64 * 10;
+                return Some(score);
             } else if exec_name_lower.starts_with(&query_lower) {
-                // Executable prefix match
+                // Executable prefix match - very high priority
                 best_score = Some(900_000);
             } else if let Some(score) = self.matcher.fuzzy_match(exec_name, &self.query) {
                 // Fuzzy executable match (high priority)
@@ -237,17 +246,21 @@ impl<'a> UI<'a> {
         
         // Match against app name
         let app_name_lower = app.name.to_lowercase();
-        if let Some(mut score) = self.matcher.fuzzy_match(&app.name, &self.query) {
-            // Exact match
-            if app_name_lower == query_lower {
-                score = 800_000;
+        if app_name_lower == query_lower {
+            // Exact name match - apply boosts and return early
+            let mut score = 800_000;
+            if app.pinned {
+                score += 50_000;
             }
-            // Prefix match
-            else if app_name_lower.starts_with(&query_lower) {
-                score += 10000;
-            }
+            score += app.history as i64 * 10;
+            return Some(score);
+        } else if app_name_lower.starts_with(&query_lower) {
+            // Prefix match - high priority
+            let score = 700_000 + 10000;
+            best_score = Some(best_score.map_or(score, |current| current.max(score)));
+        } else if let Some(mut score) = self.matcher.fuzzy_match(&app.name, &self.query) {
             // Word boundary matches (e.g., "fire" matches "Firefox")
-            else if app.name.to_lowercase().split_whitespace().any(|word| word.starts_with(&query_lower)) {
+            if app_name_lower.split_whitespace().any(|word| word.starts_with(&query_lower)) {
                 score += 5000;
             }
             
@@ -322,6 +335,7 @@ impl<'a> UI<'a> {
     }
     
     /// Calculate exact match score (case-insensitive)
+    /// Optimized to minimize string allocations and exit early
     fn calculate_exact_match_score(&self, app: &xdg::App) -> Option<i64> {
         if self.query.is_empty() {
             return Some(0);
@@ -329,76 +343,91 @@ impl<'a> UI<'a> {
         
         let query_lower = self.query.to_lowercase();
         
-        // extract executable name from command
+        // Extract executable name from command
         let exec_name = crate::helpers::extract_exec_name(&app.command);
         let exec_name_lower = exec_name.to_lowercase();
         
+        // Exact match on executable (highest priority) - early return
+        if !exec_name.is_empty() && exec_name_lower == query_lower {
+            let mut score = 100000;
+            if app.pinned {
+                score += 50000;
+            }
+            return Some(score);
+        }
+        
+        // Exact match on name - early return
+        let app_name_lower = app.name.to_lowercase();
+        if app_name_lower == query_lower {
+            let mut score = 90000;
+            if app.pinned {
+                score += 50000;
+            }
+            return Some(score);
+        }
+        
+        // Exact match on generic name - early return
+        if let Some(ref generic_name) = app.generic_name {
+            let generic_lower = generic_name.to_lowercase();
+            if generic_lower == query_lower {
+                let mut score = 80000;
+                if app.pinned {
+                    score += 50000;
+                }
+                return Some(score);
+            }
+        }
+        
         let mut score = None;
         
-        // exact match on executable (highest priority)
-        if !exec_name.is_empty() && exec_name_lower == query_lower {
-            score = Some(100000);
-        }
-        // exact match on name
-        else if app.name.to_lowercase() == query_lower {
-            score = Some(90000);
-        }
-        // exact match on generic name
-        else if let Some(ref generic_name) = app.generic_name {
-            if generic_name.to_lowercase() == query_lower {
-                score = Some(80000);
-            }
-        }
-        
-        // prefix match on executable
-        if score.is_none() && !exec_name.is_empty() && exec_name_lower.starts_with(&query_lower) {
+        // Prefix match on executable
+        if !exec_name.is_empty() && exec_name_lower.starts_with(&query_lower) {
             score = Some(70000);
         }
-        // prefix match on name
-        else if score.is_none() && app.name.to_lowercase().starts_with(&query_lower) {
+        // Prefix match on name
+        else if app_name_lower.starts_with(&query_lower) {
             score = Some(60000);
         }
-        // prefix match on generic name
-        else if score.is_none() {
-            if let Some(ref generic_name) = app.generic_name {
-                if generic_name.to_lowercase().starts_with(&query_lower) {
-                    score = Some(50000);
-                }
+        // Prefix match on generic name
+        else if let Some(ref generic_name) = app.generic_name {
+            if generic_name.to_lowercase().starts_with(&query_lower) {
+                score = Some(50000);
             }
         }
         
-        // contains query in executable
+        // Contains query in executable
         if score.is_none() && !exec_name.is_empty() && exec_name_lower.contains(&query_lower) {
             score = Some(4000);
         }
-        // contains query in name
-        else if score.is_none() && app.name.to_lowercase().contains(&query_lower) {
+        // Contains query in name
+        else if score.is_none() && app_name_lower.contains(&query_lower) {
             score = Some(3000);
         }
         
-        // check keywords
-        if score.is_none() {
+        // Check keywords (only if no match yet)
+        if score.is_none() && !app.keywords.is_empty() {
             for keyword in &app.keywords {
-                if keyword.to_lowercase() == query_lower {
+                let keyword_lower = keyword.to_lowercase();
+                if keyword_lower == query_lower {
                     score = Some(2000);
                     break;
                 }
-                if keyword.to_lowercase().contains(&query_lower) {
+                if keyword_lower.contains(&query_lower) {
                     score = Some(1000);
                     break;
                 }
             }
         }
         
-        // check description
+        // Check description (only if no match yet)
         if score.is_none() && app.description.to_lowercase().contains(&query_lower) {
             score = Some(500);
         }
         
-        // apply pin boost
+        // Apply pin boost
         if let Some(mut s) = score {
             if app.pinned {
-                s += 50000; // boost pinned apps
+                s += 50000;
             }
             score = Some(s);
         }

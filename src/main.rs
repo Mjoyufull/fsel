@@ -9,6 +9,8 @@
 
 /// CLI parser
 mod cli;
+/// Desktop file and history cache
+mod cache;
 /// Clipboard history integration
 mod cclip;
 /// Dmenu functionality
@@ -36,7 +38,7 @@ use std::io;
 
 use std::path;
 use std::process;
-use std::sync::mpsc;
+
 
 use directories::ProjectDirs;
 use eyre::eyre;
@@ -176,6 +178,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         .map(|(idx, cclip_item)| {
             // Use numbered display name if show_line_numbers is enabled
             let display_name = if show_line_numbers {
+                // Use database rowid (shows actual DB ID)
                 cclip_item.get_display_name_with_number()
             } else {
                 cclip_item.get_display_name()
@@ -1785,13 +1788,43 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
     }
 }
 
-fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<()> {
-    use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+/// Fast app lookup by exact name - uses name index for instant lookup
+fn find_app_by_name_fast(db: &sled::Db, app_name: &str, cli: &cli::Opts) -> eyre::Result<Option<xdg::App>> {
+    let desktop_cache = cache::DesktopCache::new(db.clone());
+    let history_cache = cache::HistoryCache::load(db);
     
-    // open database for history
-    let (db, _data_dir) = helpers::open_history_db()?;
+    // Try the name index first - this is instant if the app is cached
+    if let Ok(Some(app)) = desktop_cache.get_by_name(app_name) {
+        // Apply filtering if needed
+        if cli.filter_desktop {
+            if let Ok(current_desktop) = env::var("XDG_CURRENT_DESKTOP") {
+                let desktops: Vec<String> = current_desktop.split(':').map(|s| s.to_string()).collect();
+                
+                if !app.not_show_in.is_empty() {
+                    let should_hide = app.not_show_in.iter()
+                        .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                    if should_hide {
+                        return Ok(None);
+                    }
+                }
+                
+                if !app.only_show_in.is_empty() {
+                    let should_show = app.only_show_in.iter()
+                        .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                    if !should_show {
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+        
+        // Found in cache! Apply history and return
+        return Ok(Some(history_cache.apply_to_app(app)));
+    }
     
-    // Get application directories (same logic as in main)
+    // Not in cache - need to search for it
+    use walkdir::WalkDir;
+    
     let mut dirs: Vec<path::PathBuf> = vec![];
     
     // Add user's data directory
@@ -1819,13 +1852,175 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
             }
         }
     } else {
-        // default paths for Linux and BSD
         let mut default_paths = vec![
             path::PathBuf::from("/usr/local/share"),
             path::PathBuf::from("/usr/share"),
         ];
         
-        // add BSD-specific paths
+        #[cfg(target_os = "openbsd")]
+        {
+            default_paths.push(path::PathBuf::from("/usr/X11R6/share"));
+        }
+        
+        for data_dir in &mut default_paths {
+            data_dir.push("applications");
+            if data_dir.exists() {
+                dirs.push(data_dir.clone());
+            }
+        }
+    }
+    
+    let desktop_cache = cache::DesktopCache::new(db.clone());
+    let history_cache = cache::HistoryCache::load(db);
+    
+    // Search for the specific app
+    for dir in &dirs {
+        for entry in WalkDir::new(dir)
+            .min_depth(1)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                !entry.file_type().is_dir() && 
+                entry.path().extension().and_then(|s| s.to_str()) == Some("desktop")
+            })
+        {
+            let file_path = entry.path();
+            
+            // Try cache first
+            let app_result: Result<xdg::App, eyre::Report> = if let Ok(Some(cached_app)) = desktop_cache.get(file_path) {
+                Ok(cached_app)
+            } else {
+                // Parse the file
+                match fs::read_to_string(file_path) {
+                    Ok(contents) => {
+                        if !contents.contains("[Desktop Entry]") {
+                            continue;
+                        }
+                        
+                        match xdg::App::parse(&contents, None) {
+                            Ok(mut app) => {
+                                if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
+                                    app.desktop_id = Some(file_name.to_string());
+                                }
+                                let _ = desktop_cache.set(file_path, app.clone());
+                                Ok(app)
+                            }
+                            Err(_) => continue,
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            };
+            
+            if let Ok(app) = app_result {
+                // Check if this is the app we're looking for
+                if app.name == app_name {
+                    // Apply filtering if needed
+                    if cli.filter_desktop {
+                        if let Ok(current_desktop) = env::var("XDG_CURRENT_DESKTOP") {
+                            let desktops: Vec<String> = current_desktop.split(':').map(|s| s.to_string()).collect();
+                            
+                            if !app.not_show_in.is_empty() {
+                                let should_hide = app.not_show_in.iter()
+                                    .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                                if should_hide {
+                                    continue;
+                                }
+                            }
+                            
+                            if !app.only_show_in.is_empty() {
+                                let should_show = app.only_show_in.iter()
+                                    .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                                if !should_show {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Found it! Apply history and return
+                    return Ok(Some(history_cache.apply_to_app(app)));
+                }
+            }
+        }
+    }
+    
+    Ok(None)
+}
+
+fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<()> {
+    use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+    
+    // Open database for history
+    let (db, _data_dir) = helpers::open_history_db()?;
+    
+    let program_name_lower = program_name.to_lowercase();
+    
+    // FAST PATH: Check history for exact or prefix match
+    // This avoids loading any desktop files for common cases
+    let history_cache = cache::HistoryCache::load(&db);
+    
+    // First try exact match in history
+    for (app_name, _count) in history_cache.history.iter() {
+        if app_name.to_lowercase() == program_name_lower {
+            // Found exact match in history - try to find and launch it quickly
+            if let Some(app) = find_app_by_name_fast(&db, app_name, cli)? {
+                if cli.no_exec {
+                    println!("{}", app.command);
+                    return Ok(());
+                }
+                return helpers::launch_app(&app, cli, &db);
+            }
+        }
+    }
+    
+    // Try prefix match in history (e.g., "fire" -> "Firefox")
+    if let Some((app_name, _)) = history_cache.get_best_match(program_name) {
+        if let Some(app) = find_app_by_name_fast(&db, app_name, cli)? {
+            if cli.no_exec {
+                println!("{}", app.command);
+                return Ok(());
+            }
+            return helpers::launch_app(&app, cli, &db);
+        }
+    }
+    
+    // SLOW PATH: No exact match in history, need to load all apps
+    let mut dirs: Vec<path::PathBuf> = vec![];
+    
+    // Add user's data directory
+    if let Some(xdg_data_home) = env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()) {
+        let mut dir = path::PathBuf::from(xdg_data_home);
+        dir.push("applications");
+        if dir.exists() {
+            dirs.push(dir);
+        }
+    } else if let Some(home_dir) = dirs::home_dir() {
+        let mut dir = home_dir;
+        dir.push(".local/share/applications");
+        if dir.exists() {
+            dirs.push(dir);
+        }
+    }
+    
+    // Add system data directories
+    if let Ok(res) = env::var("XDG_DATA_DIRS") {
+        for data_dir in res.split(':').filter(|s| !s.is_empty()) {
+            let mut dir = path::PathBuf::from(data_dir);
+            dir.push("applications");
+            if dir.exists() {
+                dirs.push(dir);
+            }
+        }
+    } else {
+        // Default paths for Linux and BSD
+        let mut default_paths = vec![
+            path::PathBuf::from("/usr/local/share"),
+            path::PathBuf::from("/usr/share"),
+        ];
+        
+        // Add BSD-specific paths
         #[cfg(target_os = "openbsd")]
         {
             default_paths.push(path::PathBuf::from("/usr/X11R6/share"));
@@ -1855,7 +2050,6 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
     // Find the best match using improved matching logic for -p
     let matcher = SkimMatcherV2::default();
     let mut best_app: Option<(xdg::App, i64)> = None;
-    let program_name_lower = program_name.to_lowercase();
     
     for app in all_apps {
         let app_name_lower = app.name.to_lowercase();
@@ -2089,6 +2283,21 @@ fn real_main() -> eyre::Result<()> {
             // Lock file cleanup is handled by LockGuard when it goes out of scope
             return Ok(());
         }
+        
+        if cli.clear_cache {
+            let cache = crate::cache::DesktopCache::new(db.clone());
+            cache.clear().wrap_err("Error clearing cache")?;
+            println!("Desktop file cache cleared successfully!");
+            return Ok(());
+        }
+        
+        if cli.refresh_cache {
+            let cache = crate::cache::DesktopCache::new(db.clone());
+            // Just clear the file list, parsed apps stay cached
+            cache.clear_file_list().wrap_err("Error refreshing cache")?;
+            println!("Desktop file list refreshed - will rescan on next launch!");
+            return Ok(());
+        }
 
     } else {
         return Err(eyre!(
@@ -2161,10 +2370,14 @@ fn real_main() -> eyre::Result<()> {
         ..input::Config::default()
     }.init();
 
+    // Collect all apps before showing UI (blocking but fast with cache)
+    let mut all_apps = Vec::new();
+    while let Ok(app) = apps.recv() {
+        all_apps.push(app);
+    }
+    
     // App UI
-    //
-    // Get one app to initialize the UI
-    let mut ui = UI::new(vec![apps.recv()?]);
+    let mut ui = UI::new(all_apps);
 
     // Set user-defined verbosity level
     if let Some(level) = cli.verbose {
@@ -2175,40 +2388,15 @@ fn real_main() -> eyre::Result<()> {
     if let Some(ref search_str) = cli.search_string {
         ui.query = search_str.clone();
     }
+    
+    // Initial filter
+    ui.filter(cli.match_mode);
+    ui.info(cli.highlight_color, cli.fancy_mode);
 
     // App list
     let mut app_state = ListState::default();
 
-    let mut app_loading_finished = false;
-
     loop {
-        if !app_loading_finished {
-            loop {
-                match apps.try_recv() {
-                    Ok(app) => {
-                        ui.hidden.push(app);
-                    }
-                    Err(e) => {
-                        match e {
-                            mpsc::TryRecvError::Disconnected => {
-                                // Done loading, add apps to the UI
-                                app_loading_finished = true;
-                                ui.filter(cli.match_mode);
-                                ui.info(cli.highlight_color, cli.fancy_mode);
-                                
-                                // If we have a pre-filled search string, run filter again to apply it
-                                if cli.search_string.is_some() {
-                                    ui.filter(cli.match_mode);
-                                    ui.info(cli.highlight_color, cli.fancy_mode);
-                                }
-                            }
-                            mpsc::TryRecvError::Empty => (),
-                        }
-                        break;
-                    }
-                }
-            }
-        }
 
         // Draw UI
         terminal.draw(|f| {

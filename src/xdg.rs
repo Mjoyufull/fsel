@@ -1,7 +1,7 @@
-use std::convert::{AsRef, TryInto};
+use std::convert::AsRef;
 use std::fmt;
 use std::fs;
-use std::path;
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
 use std::env;
@@ -10,31 +10,38 @@ use eyre::eyre;
 use ratatui::widgets::ListItem;
 use walkdir::WalkDir;
 
-/// Get the current locale for desktop entry localization
-fn get_locale() -> Vec<String> {
-    let mut locales = Vec::new();
-    
-    // Check LC_MESSAGES first, then LANG, then LC_ALL
-    let locale_var = env::var("LC_MESSAGES")
-        .or_else(|_| env::var("LANG"))
-        .or_else(|_| env::var("LC_ALL"))
-        .unwrap_or_else(|_| "C".to_string());
-    
-    if locale_var != "C" && locale_var != "POSIX" {
-        let base_locale = locale_var.split('.').next().unwrap_or(&locale_var);
+use crate::cache::{DesktopCache, HistoryCache};
+
+/// Cached locale to avoid repeated environment variable lookups
+static LOCALE_CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+
+/// Get the current locale for desktop entry localization (cached)
+fn get_locale() -> &'static [String] {
+    LOCALE_CACHE.get_or_init(|| {
+        let mut locales = Vec::new();
         
-        // Add full locale (e.g., "en_US")
-        locales.push(base_locale.to_string());
+        // Check LC_MESSAGES first, then LANG, then LC_ALL
+        let locale_var = env::var("LC_MESSAGES")
+            .or_else(|_| env::var("LANG"))
+            .or_else(|_| env::var("LC_ALL"))
+            .unwrap_or_else(|_| "C".to_string());
         
-        // Add language only (e.g., "en")
-        if let Some(lang) = base_locale.split('_').next() {
-            if lang != base_locale {
-                locales.push(lang.to_string());
+        if locale_var != "C" && locale_var != "POSIX" {
+            let base_locale = locale_var.split('.').next().unwrap_or(&locale_var);
+            
+            // Add full locale (e.g., "en_US")
+            locales.push(base_locale.to_string());
+            
+            // Add language only (e.g., "en")
+            if let Some(lang) = base_locale.split('_').next() {
+                if lang != base_locale {
+                    locales.push(lang.to_string());
+                }
             }
         }
-    }
-    
-    locales
+        
+        locales
+    })
 }
 
 /// Parse a semicolon-separated list into a vector
@@ -70,51 +77,27 @@ fn get_localized_value(key: &str, value: &str, existing_value: &Option<String>, 
 }
 
 
-pub struct AppHistory {
-    pub db: sled::Db,
-}
+// Removed AppHistory struct - now using HistoryCache from cache module
 
-impl AppHistory {
-    pub fn get(&self, app: App) -> App {
-        let mut app = app;
-        if let Some(packed) = self.db.get(app.name.as_bytes()).unwrap() {
-            let unpacked = super::bytes::unpack(
-                packed
-                    .as_ref()
-                    .try_into()
-                    .expect("Invalid data stored in database"),
-            );
-            app.history = unpacked;
-        }
-        
-        // load pinned status
-        let pinned_apps = super::helpers::load_pinned_apps(&self.db);
-        app.pinned = pinned_apps.contains(&app.name);
-        
-        app
-    }
-
-}
-
-/// Find XDG applications in `dirs` (recursive).
+/// Find XDG applications in `dirs` (recursive) with caching.
 ///
 /// Spawns a new thread and sends apps via a mpsc [Receiver]
 ///
-/// Updates history using the database
+/// Uses cache to avoid re-parsing unchanged desktop files
 ///
 /// [Receiver]: std::sync::mpsc::Receiver
 pub fn read_with_options(
-    dirs: Vec<impl Into<path::PathBuf>>,
+    dirs: Vec<impl Into<PathBuf>>,
     db: &sled::Db,
     filter_desktop: bool,
     list_executables: bool,
 ) -> mpsc::Receiver<App> {
     let (sender, receiver) = mpsc::channel();
 
-    let dirs: Vec<path::PathBuf> = dirs.into_iter().map(Into::into).collect();
-    let db = AppHistory { db: db.clone() };
+    let dirs: Vec<PathBuf> = dirs.into_iter().map(Into::into).collect();
+    let db_clone = db.clone();
     
-    // Get current desktop environment for filtering
+    // Get current desktop environment for filtering (cached)
     let current_desktop = if filter_desktop {
         env::var("XDG_CURRENT_DESKTOP")
             .ok()
@@ -124,62 +107,97 @@ pub fn read_with_options(
     };
 
     let _worker = thread::spawn(move || {
-        // Collect all .desktop files first
-        let mut desktop_files = Vec::new();
-        for dir in &dirs {
-            for entry in WalkDir::new(dir)
-                .min_depth(1)
-                .max_depth(3) // Limit depth to avoid deep recursion
-                .into_iter()
-                .filter_map(Result::ok)
-                .filter(|entry| {
-                    !entry.file_type().is_dir() && 
-                    entry.path().extension().and_then(|s| s.to_str()) == Some("desktop")
-                })
-            {
-                desktop_files.push(entry.path().to_path_buf());
-            }
-        }
-
-        // Process desktop files
-        for file_path in desktop_files {
-            if let Ok(contents) = fs::read_to_string(&file_path) {
-                // Skip files without [Desktop Entry] section early
-                if !contents.contains("[Desktop Entry]") {
-                    continue;
+        // Load all history and pinned data at once
+        let history_cache = HistoryCache::load(&db_clone);
+        let desktop_cache = DesktopCache::new(db_clone.clone());
+        
+        // Try to get cached file list first (avoids directory walk)
+        let desktop_files = if let Ok(Some(cached_paths)) = desktop_cache.get_file_list() {
+            // Use cached list - super fast!
+            cached_paths
+        } else {
+            // Cache miss - need to walk directories
+            let mut desktop_files = Vec::new();
+            for dir in &dirs {
+                for entry in WalkDir::new(dir)
+                    .min_depth(1)
+                    .max_depth(3)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter(|entry| {
+                        !entry.file_type().is_dir() && 
+                        entry.path().extension().and_then(|s| s.to_str()) == Some("desktop")
+                    })
+                {
+                    desktop_files.push(entry.path().to_path_buf());
                 }
-                
-                if let Ok(mut app) = App::parse(&contents, None) {
-                    // Set desktop ID from file path
-                    if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
-                        app.desktop_id = Some(file_name.to_string());
-                    }
-                    
-                    // Filter by OnlyShowIn/NotShowIn if enabled
-                    if let Some(ref desktops) = current_desktop {
-                        // Check NotShowIn first
-                        if !app.not_show_in.is_empty() {
-                            let should_hide = app.not_show_in.iter()
-                                .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                            if should_hide {
-                                continue;
-                            }
+            }
+            
+            // Cache the file list for next time
+            let _ = desktop_cache.set_file_list(desktop_files.clone());
+            desktop_files
+        };
+
+        // Process desktop files with caching
+        for file_path in desktop_files {
+            // Try to get from cache first
+            let app_result = if let Ok(Some(cached_app)) = desktop_cache.get(&file_path) {
+                Ok(cached_app)
+            } else {
+                // Cache miss - parse the file
+                match fs::read_to_string(&file_path) {
+                    Ok(contents) => {
+                        // Skip files without [Desktop Entry] section early
+                        if !contents.contains("[Desktop Entry]") {
+                            continue;
                         }
                         
-                        // Check OnlyShowIn
-                        if !app.only_show_in.is_empty() {
-                            let should_show = app.only_show_in.iter()
-                                .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                            if !should_show {
-                                continue;
+                        match App::parse(&contents, None) {
+                            Ok(mut app) => {
+                                // Set desktop ID from file path
+                                if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
+                                    app.desktop_id = Some(file_name.to_string());
+                                }
+                                
+                                // Cache the parsed app
+                                let _ = desktop_cache.set(&file_path, app.clone());
+                                Ok(app)
                             }
+                            Err(e) => Err(e)
+                        }
+                    }
+                    Err(_) => continue,
+                }
+            };
+            
+            if let Ok(app) = app_result {
+                // Filter by OnlyShowIn/NotShowIn if enabled
+                if let Some(ref desktops) = current_desktop {
+                    // Check NotShowIn first
+                    if !app.not_show_in.is_empty() {
+                        let should_hide = app.not_show_in.iter()
+                            .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                        if should_hide {
+                            continue;
                         }
                     }
                     
-                    let app_with_history = db.get(app.clone());
-                    
-                    // Handle actions
-                    if let Some(actions) = &app.actions {
+                    // Check OnlyShowIn
+                    if !app.only_show_in.is_empty() {
+                        let should_show = app.only_show_in.iter()
+                            .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                        if !should_show {
+                            continue;
+                        }
+                    }
+                }
+                
+                // Apply history and pinned status
+                let app_with_history = history_cache.apply_to_app(app.clone());
+                
+                // Handle actions
+                if let Some(actions) = &app.actions {
+                    if let Ok(contents) = fs::read_to_string(&file_path) {
                         for action in actions {
                             let ac = Action::default().name(action).from(app.name.clone());
                             if let Ok(mut a) = App::parse(&contents, Some(&ac)) {
@@ -187,17 +205,17 @@ pub fn read_with_options(
                                 if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
                                     a.desktop_id = Some(format!("{}#{}", file_name, action));
                                 }
-                                let action_app = db.get(a);
+                                let action_app = history_cache.apply_to_app(a);
                                 if sender.send(action_app).is_err() {
                                     return; // Receiver dropped
                                 }
                             }
                         }
                     }
+                }
 
-                    if sender.send(app_with_history).is_err() {
-                        return; // Receiver dropped
-                    }
+                if sender.send(app_with_history).is_err() {
+                    return; // Receiver dropped
                 }
             }
         }
@@ -249,7 +267,7 @@ pub fn read_with_options(
                                                         pinned: false,
                                                     };
                                                     
-                                                    let app_with_history = db.get(app);
+                                                    let app_with_history = history_cache.apply_to_app(app);
                                                     if sender.send(app_with_history).is_err() {
                                                         return;
                                                     }
@@ -393,6 +411,7 @@ impl<'a> From<&'a App> for ListItem<'a> {
 impl App {
     /// Parse an application with full XDG Desktop Entry specification support
     /// Includes localization, all standard fields, and proper validation
+    /// Optimized to stop parsing after finding the needed section
     pub fn parse<T: AsRef<str>>(contents: T, action: Option<&Action>) -> eyre::Result<App> {
         let contents: &str = contents.as_ref();
         let locales = get_locale();
