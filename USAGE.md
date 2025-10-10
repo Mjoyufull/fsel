@@ -237,7 +237,7 @@ exec_cmd = "sh -c"
 [[modules]]
 description = "search apps with fsel"
 prefix = "search"
-cmd = "fsel --uwsm -vv -r -ss \"{}\""
+cmd = "fsel -vv -r -ss \"{}\""
 with_argument = true
 unbind_proc = true
 
@@ -245,7 +245,7 @@ unbind_proc = true
 [[modules]]
 description = "launch apps instantly"
 prefix = "app"
-cmd = "fsel --uwsm -vv -r -p \"{}\""
+cmd = "fsel -vv -r -p \"{}\""
 with_argument = true
 unbind_proc = true
 ```
@@ -256,6 +256,18 @@ unbind_proc = true
 firefox          # Opens fsel with "firefox" pre-searched
 app firefox      # Instantly launches Firefox (no TUI)
 app code         # Instantly launches VS Code
+```
+
+**Optional: Add launch method flags if needed:**
+```toml
+# With uwsm (requires uwsm installed)
+cmd = "fsel --uwsm -vv -r -p \"{}\""
+
+# With systemd-run (requires systemd)
+cmd = "fsel --systemd-run -vv -r -p \"{}\""
+
+# With Sway (auto-detected if $SWAYSOCK is set)
+cmd = "fsel -vv -r -p \"{}\""
 ```
 
 ### Performance with Large Lists
