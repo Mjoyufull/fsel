@@ -56,7 +56,7 @@ nix run github:Mjoyufull/fsel
 # Or the Aur 
 $ yay -S fsel-git
  # or
- $ paru -S fsel-git
+$ paru -S fsel-git
 
 # Or build from source
 git clone https://github.com/Mjoyufull/fsel && cd fsel
