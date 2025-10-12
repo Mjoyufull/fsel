@@ -23,9 +23,9 @@ App Launcher Options:
   -s, --nosway                  Disable Sway integration.
   -c, --config <config>         Specify a config file.
   -r, --replace                 Replace existing fsel instances
-      --clear_history           Clear launch history.
-      --clear_cache             Clear desktop file cache.
-      --refresh_cache           Force refresh of desktop file list.
+      --clear-history           Clear launch history.
+      --clear-cache             Clear desktop file cache.
+      --refresh-cache           Force refresh of desktop file list.
   -p, --program <name>          Launch program directly (bypass TUI).
   -ss <search>                  Pre-fill search in TUI (must be last option).
   -v, --verbose                 Increase verbosity level (multiple).
@@ -352,13 +352,13 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             Short('c') | Long("config") => {
                 config_file = Some(path::PathBuf::from(parser.value()?));
             }
-            Long("clear_history") => {
+            Long("clear-history") => {
                 default.clear_history = true;
             }
-            Long("clear_cache") => {
+            Long("clear-cache") => {
                 default.clear_cache = true;
             }
-            Long("refresh_cache") => {
+            Long("refresh-cache") => {
                 default.refresh_cache = true;
             }
             Long("no-exec") => {

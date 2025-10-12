@@ -1,7 +1,7 @@
 [package]
 name = "fsel"
-version = "1.1.0-riceknife"
-authors = ["Namkhai B. <me@forkbomb9.ch>"]
+version = "2.0.0-seedclay"
+authors = ["Mjoyufull <https://github.com/Mjoyufull>"]
 edition = "2021"
 rust-version = "1.70"
 
@@ -10,8 +10,8 @@ description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD"
 homepage = "https://github.com/Mjoyufull/fsel"
 repository = "https://github.com/Mjoyufull/fsel"
 readme = "README.md"
-keywords = ["tui", "tools"]
-categories = ["os"]
+keywords = ["tui", "launcher", "fuzzy-finder", "dmenu"]
+categories = ["command-line-utilities"]
 license = "BSD-2-Clause"
 
 [profile.release]
@@ -27,17 +27,17 @@ eyre = "0.6"
 lexopt = "0.3"
 directories = "5.0"
 dirs = "5.0"
-fuzzy-matcher = "0.3"
+nucleo-matcher = "0.3"
 libc = "0.2"
 serde = { version = "1.0", features = ["derive"] }
-shell-words = "1.0"
-sled = { version = "0.34", default-features = false }
-crossterm = "0.27"
-scopeguard = "1.1"
-toml = "0.7"
-ratatui = { version = "0.22.0", default-features = false, features = ["crossterm"]}
-walkdir = "2.3"
-which = "4.4"
+shell-words = "1.1"
+redb = "3.1"
+crossterm = "0.29"
+scopeguard = "1.2"
+toml = "0.9"
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"]}
+walkdir = "2.5"
+which = "8.0"
 is-terminal = "0.4"
 strip-ansi-escapes = "0.2"
 base64 = "0.22"

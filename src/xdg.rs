@@ -10,7 +10,7 @@ use eyre::eyre;
 use ratatui::widgets::ListItem;
 use walkdir::WalkDir;
 
-use crate::cache::{DesktopCache, HistoryCache};
+use crate::cache::HistoryCache;
 
 /// Cached locale to avoid repeated environment variable lookups
 static LOCALE_CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -45,11 +45,22 @@ fn get_locale() -> &'static [String] {
 }
 
 /// Parse a semicolon-separated list into a vector
+/// Optimized to skip empty values early
+#[inline]
 fn parse_semicolon_list(value: &str) -> Vec<String> {
+    if value.is_empty() {
+        return Vec::new();
+    }
+    
     value.split(';')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .filter_map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
         .collect()
 }
 
@@ -88,14 +99,14 @@ fn get_localized_value(key: &str, value: &str, existing_value: &Option<String>, 
 /// [Receiver]: std::sync::mpsc::Receiver
 pub fn read_with_options(
     dirs: Vec<impl Into<PathBuf>>,
-    db: &sled::Db,
+    db: &std::sync::Arc<redb::Database>,
     filter_desktop: bool,
     list_executables: bool,
 ) -> mpsc::Receiver<App> {
     let (sender, receiver) = mpsc::channel();
 
     let dirs: Vec<PathBuf> = dirs.into_iter().map(Into::into).collect();
-    let db_clone = db.clone();
+    let db_clone = std::sync::Arc::clone(db);
     
     // Get current desktop environment for filtering (cached)
     let current_desktop = if filter_desktop {
@@ -107,16 +118,40 @@ pub fn read_with_options(
     };
 
     let _worker = thread::spawn(move || {
-        // Load all history and pinned data at once
-        let history_cache = HistoryCache::load(&db_clone);
-        let desktop_cache = DesktopCache::new(db_clone.clone());
+        // Load history/pinned data
+        let history_cache = HistoryCache::load(&db_clone).unwrap_or_else(|_| {
+            HistoryCache { history: std::collections::HashMap::new(), pinned: std::collections::HashSet::new() }
+        });
         
-        // Try to get cached file list first (avoids directory walk)
-        let desktop_files = if let Ok(Some(cached_paths)) = desktop_cache.get_file_list() {
-            // Use cached list - super fast!
-            cached_paths
+        let desktop_cache = crate::cache::DesktopCache::new(db_clone.clone()).ok();
+        
+        // Try to get cached file list first (instant on subsequent runs)
+        let desktop_files = if let Some(ref cache) = desktop_cache {
+            if let Ok(Some(cached_paths)) = cache.get_file_list() {
+                cached_paths
+            } else {
+                // Cache miss - walk directories
+                let mut desktop_files = Vec::new();
+                for dir in &dirs {
+                    for entry in WalkDir::new(dir)
+                        .min_depth(1)
+                        .max_depth(3)
+                        .into_iter()
+                        .filter_map(Result::ok)
+                        .filter(|entry| {
+                            !entry.file_type().is_dir() && 
+                            entry.path().extension().and_then(|s| s.to_str()) == Some("desktop")
+                        })
+                    {
+                        desktop_files.push(entry.path().to_path_buf());
+                    }
+                }
+                // Cache file list for next time
+                let _ = cache.set_file_list(desktop_files.clone());
+                desktop_files
+            }
         } else {
-            // Cache miss - need to walk directories
+            // No cache - walk directories
             let mut desktop_files = Vec::new();
             for dir in &dirs {
                 for entry in WalkDir::new(dir)
@@ -132,91 +167,117 @@ pub fn read_with_options(
                     desktop_files.push(entry.path().to_path_buf());
                 }
             }
-            
-            // Cache the file list for next time
-            let _ = desktop_cache.set_file_list(desktop_files.clone());
             desktop_files
         };
-
-        // Process desktop files with caching
+        
+        // Collect apps to cache in batch
+        let mut apps_to_cache = Vec::new();
+        
+        // Process each file sequentially
         for file_path in desktop_files {
-            // Try to get from cache first
-            let app_result = if let Ok(Some(cached_app)) = desktop_cache.get(&file_path) {
-                Ok(cached_app)
+            let file_path_ref = file_path.as_path();
+            
+            // Try cache first, store file contents if we need to parse
+            let (app, file_contents) = if let Some(ref cache) = desktop_cache {
+                if let Ok(Some(cached_app)) = cache.get(file_path_ref) {
+                    (cached_app, None)
+                } else {
+                    // Cache miss - read and parse
+                    match fs::read_to_string(file_path_ref) {
+                        Ok(contents) => {
+                            if !contents.contains("[Desktop Entry]") {
+                                continue;
+                            }
+                            
+                            match App::parse(&contents, None) {
+                                Ok(mut app) => {
+                                    if let Some(file_name) = file_path_ref.file_name().and_then(|n| n.to_str()) {
+                                        app.desktop_id = Some(file_name.to_string());
+                                    }
+                                    apps_to_cache.push((file_path.clone(), app.clone()));
+                                    (app, Some(contents))
+                                }
+                                Err(_) => continue,
+                            }
+                        }
+                        Err(_) => continue,
+                    }
+                }
             } else {
-                // Cache miss - parse the file
-                match fs::read_to_string(&file_path) {
+                // No cache - read and parse
+                match fs::read_to_string(file_path_ref) {
                     Ok(contents) => {
-                        // Skip files without [Desktop Entry] section early
                         if !contents.contains("[Desktop Entry]") {
                             continue;
                         }
                         
                         match App::parse(&contents, None) {
                             Ok(mut app) => {
-                                // Set desktop ID from file path
-                                if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
+                                if let Some(file_name) = file_path_ref.file_name().and_then(|n| n.to_str()) {
                                     app.desktop_id = Some(file_name.to_string());
                                 }
-                                
-                                // Cache the parsed app
-                                let _ = desktop_cache.set(&file_path, app.clone());
-                                Ok(app)
+                                (app, Some(contents))
                             }
-                            Err(e) => Err(e)
+                            Err(_) => continue,
                         }
                     }
                     Err(_) => continue,
                 }
             };
-            
-            if let Ok(app) = app_result {
-                // Filter by OnlyShowIn/NotShowIn if enabled
-                if let Some(ref desktops) = current_desktop {
-                    // Check NotShowIn first
-                    if !app.not_show_in.is_empty() {
-                        let should_hide = app.not_show_in.iter()
-                            .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                        if should_hide {
-                            continue;
-                        }
-                    }
-                    
-                    // Check OnlyShowIn
-                    if !app.only_show_in.is_empty() {
-                        let should_show = app.only_show_in.iter()
-                            .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                        if !should_show {
-                            continue;
-                        }
+            // Filter by OnlyShowIn/NotShowIn if enabled
+            if let Some(ref desktops) = current_desktop {
+                if !app.not_show_in.is_empty() {
+                    let should_hide = app.not_show_in.iter()
+                        .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                    if should_hide {
+                        continue;
                     }
                 }
                 
-                // Apply history and pinned status
-                let app_with_history = history_cache.apply_to_app(app.clone());
+                if !app.only_show_in.is_empty() {
+                    let should_show = app.only_show_in.iter()
+                        .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                    if !should_show {
+                        continue;
+                    }
+                }
+            }
+            
+            let app_with_history = history_cache.apply_to_app(app.clone());
+            
+            // Handle actions (reuse file contents if we have them)
+            if let Some(actions) = &app.actions {
+                let contents = if let Some(ref cached_contents) = file_contents {
+                    Some(cached_contents.clone())
+                } else {
+                    fs::read_to_string(file_path_ref).ok()
+                };
                 
-                // Handle actions
-                if let Some(actions) = &app.actions {
-                    if let Ok(contents) = fs::read_to_string(&file_path) {
-                        for action in actions {
-                            let ac = Action::default().name(action).from(app.name.clone());
-                            if let Ok(mut a) = App::parse(&contents, Some(&ac)) {
-                                // Set desktop ID for action too
-                                if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
-                                    a.desktop_id = Some(format!("{}#{}", file_name, action));
-                                }
-                                let action_app = history_cache.apply_to_app(a);
-                                if sender.send(action_app).is_err() {
-                                    return; // Receiver dropped
-                                }
+                if let Some(contents) = contents {
+                    for action in actions {
+                        let ac = Action::default().name(action).from(app.name.clone());
+                        if let Ok(mut a) = App::parse(&contents, Some(&ac)) {
+                            if let Some(file_name) = file_path_ref.file_name().and_then(|n| n.to_str()) {
+                                a.desktop_id = Some(format!("{}#{}", file_name, action));
+                            }
+                            let action_app = history_cache.apply_to_app(a);
+                            if sender.send(action_app).is_err() {
+                                return;
                             }
                         }
                     }
                 }
-
-                if sender.send(app_with_history).is_err() {
-                    return; // Receiver dropped
-                }
+            }
+            
+            if sender.send(app_with_history).is_err() {
+                return;
+            }
+        }
+        
+        // Batch cache all newly parsed apps in ONE transaction (fast!)
+        if !apps_to_cache.is_empty() {
+            if let Some(ref cache) = desktop_cache {
+                let _ = cache.batch_set(apps_to_cache);
             }
         }
         
@@ -425,19 +486,19 @@ impl App {
             "[Desktop Entry]".to_string()
         };
 
-        // Initialize all fields
+        // Initialize all fields with pre-allocated capacity
         let mut name = None;
         let mut generic_name = None;
         let mut exec = None;
         let mut description = None;
-        let mut keywords = Vec::new();
-        let mut categories = Vec::new();
-        let mut mime_types = Vec::new();
+        let mut keywords = Vec::with_capacity(4); // Most apps have 0-4 keywords
+        let mut categories = Vec::with_capacity(2); // Most apps have 1-2 categories
+        let mut mime_types = Vec::with_capacity(0); // Most apps have no MIME types
         let mut icon = None;
         let mut terminal_exec = false;
         let mut path = None;
-        let mut only_show_in = Vec::new();
-        let mut not_show_in = Vec::new();
+        let mut only_show_in = Vec::with_capacity(0); // Rarely used
+        let mut not_show_in = Vec::with_capacity(0); // Rarely used
         let mut hidden = false;
         let mut no_display = false;
         let mut startup_notify = false;
@@ -587,31 +648,24 @@ impl App {
         }
         let command = exec.unwrap();
 
-        // Skip hidden apps
+        // Skip hidden apps (always skip these per XDG spec)
         if hidden || no_display {
             return Err(eyre!("Application is hidden"));
         }
 
-        // Check desktop environment filtering
-        let current_desktop = env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
-        if !only_show_in.is_empty() {
-            if !current_desktop.is_empty() && 
-               !only_show_in.iter().any(|de| current_desktop.contains(de)) {
-                return Err(eyre!("Application not shown in current desktop environment"));
-            }
-        }
-        if !not_show_in.is_empty() && !current_desktop.is_empty() {
-            if not_show_in.iter().any(|de| current_desktop.contains(de)) {
-                return Err(eyre!("Application explicitly hidden in current desktop environment"));
-            }
-        }
+        // NOTE: Desktop environment filtering (OnlyShowIn/NotShowIn) is now handled
+        // by the caller based on filter_desktop flag, not here in parse()
+        // This allows the caller to control whether filtering is applied
 
-        // Validate TryExec if present
-        if let Some(ref try_exec_cmd) = try_exec {
-            if which::which(try_exec_cmd).is_err() {
-                return Err(eyre!("TryExec command not found: {}", try_exec_cmd));
-            }
-        }
+        // Validate TryExec if present (optional - some apps have invalid TryExec)
+        // NOTE: We skip TryExec validation to avoid filtering out apps with missing executables
+        // The app will fail to launch if the executable is truly missing, but at least
+        // the user can see it in the list
+        // if let Some(ref try_exec_cmd) = try_exec {
+        //     if which::which(try_exec_cmd).is_err() {
+        //         return Err(eyre!("TryExec command not found: {}", try_exec_cmd));
+        //     }
+        // }
 
         Ok(App {
             score: 0,

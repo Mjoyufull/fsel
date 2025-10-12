@@ -1,5 +1,6 @@
 use std::process::{Command, Stdio};
 use eyre::{Result, eyre};
+use redb::ReadableDatabase;
 
 use crate::dmenu::DmenuItem;
 
@@ -345,15 +346,21 @@ impl TagMetadata {
 }
 
 /// Load tag metadata from fsel's database
+const TAG_METADATA_TABLE: redb::TableDefinition<&str, &[u8]> = redb::TableDefinition::new("tag_metadata");
+
 /// DISABLED: Waiting for cclip maintainer to add tag support
 #[allow(dead_code)]
-pub fn load_tag_metadata(db: &sled::Db) -> std::collections::HashMap<String, TagMetadata> {
+pub fn load_tag_metadata(db: &std::sync::Arc<redb::Database>) -> std::collections::HashMap<String, TagMetadata> {
     let mut tags = std::collections::HashMap::new();
     
-    if let Ok(Some(data)) = db.get(b"tag_metadata") {
-        if let Ok(metadata) = bincode::deserialize::<Vec<TagMetadata>>(&data) {
-            for tag in metadata {
-                tags.insert(tag.name.clone(), tag);
+    if let Ok(read_txn) = db.begin_read() {
+        if let Ok(table) = read_txn.open_table(TAG_METADATA_TABLE) {
+            if let Ok(Some(data)) = table.get("tag_metadata") {
+                if let Ok(metadata) = bincode::deserialize::<Vec<TagMetadata>>(data.value()) {
+                    for tag in metadata {
+                        tags.insert(tag.name.clone(), tag);
+                    }
+                }
             }
         }
     }
@@ -364,10 +371,16 @@ pub fn load_tag_metadata(db: &sled::Db) -> std::collections::HashMap<String, Tag
 /// Save tag metadata to fsel's database
 /// DISABLED: Waiting for cclip maintainer to add tag support
 #[allow(dead_code)]
-pub fn save_tag_metadata(db: &sled::Db, tags: &std::collections::HashMap<String, TagMetadata>) -> Result<()> {
+pub fn save_tag_metadata(db: &std::sync::Arc<redb::Database>, tags: &std::collections::HashMap<String, TagMetadata>) -> Result<()> {
     let metadata: Vec<TagMetadata> = tags.values().cloned().collect();
     let data = bincode::serialize(&metadata)?;
-    db.insert(b"tag_metadata", data.as_slice())?;
+    
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(TAG_METADATA_TABLE)?;
+        table.insert("tag_metadata", data.as_slice())?;
+    }
+    write_txn.commit()?;
     Ok(())
 }
 

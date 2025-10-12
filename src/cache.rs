@@ -5,8 +5,16 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use eyre::Result;
 use serde::{Deserialize, Serialize};
+use redb::{Database, ReadableTable, ReadableDatabase, TableDefinition};
 
 use crate::xdg::App;
+
+// Table definitions - centralized for consistency
+pub const DESKTOP_CACHE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("desktop_cache");
+pub const NAME_INDEX_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("app_name_index");
+pub const FILE_LIST_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("file_list_cache");
+pub const HISTORY_TABLE: TableDefinition<&str, u64> = TableDefinition::new("history");
+pub const PINNED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("pinned_apps");
 
 /// Cache entry for a desktop file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,12 +29,11 @@ struct CacheEntry {
 
 /// Desktop file cache
 pub struct DesktopCache {
-    tree: sled::Tree,
-    name_index: sled::Tree,
-    file_list: sled::Tree,
+    db: std::sync::Arc<Database>,
 }
 
 /// Cached directory listing
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileListCache {
     /// List of all desktop file paths
@@ -37,21 +44,30 @@ struct FileListCache {
 
 impl DesktopCache {
     /// Create a new cache with the given database
-    /// Trees are opened once and reused
-    pub fn new(db: sled::Db) -> Self {
-        let tree = db.open_tree(b"desktop_cache").expect("Failed to open cache tree");
-        let name_index = db.open_tree(b"app_name_index").expect("Failed to open name index tree");
-        let file_list = db.open_tree(b"file_list_cache").expect("Failed to open file list tree");
-        Self { tree, name_index, file_list }
+    pub fn new(db: std::sync::Arc<Database>) -> Result<Self> {
+        // Create all tables if they don't exist
+        let write_txn = db.begin_write()?;
+        {
+            let _ = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
+            let _ = write_txn.open_table(NAME_INDEX_TABLE)?;
+            let _ = write_txn.open_table(FILE_LIST_TABLE)?;
+            let _ = write_txn.open_table(HISTORY_TABLE)?;
+            let _ = write_txn.open_table(PINNED_TABLE)?;
+        }
+        write_txn.commit()?;
+        
+        Ok(Self { db })
     }
-    
-
     
     /// Get cached file list (avoids directory walk)
     /// Returns None if cache is stale (older than 5 minutes)
+    #[allow(dead_code)]
     pub fn get_file_list(&self) -> Result<Option<Vec<PathBuf>>> {
-        if let Some(data) = self.file_list.get(b"paths")? {
-            if let Ok(cache) = bincode::deserialize::<FileListCache>(&data) {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(FILE_LIST_TABLE)?;
+        
+        if let Some(data) = table.get("paths")? {
+            if let Ok(cache) = bincode::deserialize::<FileListCache>(data.value()) {
                 // Check if cache is fresh (less than 5 minutes old)
                 if let Ok(elapsed) = SystemTime::now().duration_since(cache.last_scan) {
                     if elapsed.as_secs() < 300 {  // 5 minutes
@@ -63,22 +79,92 @@ impl DesktopCache {
         Ok(None)
     }
     
+    /// Batch get multiple apps from cache
+    /// Returns HashMap of path -> app for cache hits
+    #[allow(dead_code)]
+    pub fn batch_get(&self, paths: &[PathBuf]) -> Result<std::collections::HashMap<PathBuf, App>> {
+        let mut result = std::collections::HashMap::new();
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(DESKTOP_CACHE_TABLE)?;
+        
+        for path in paths {
+            let path_key = path.to_string_lossy();
+            if let Some(data) = table.get(path_key.as_ref())? {
+                if let Ok(entry) = bincode::deserialize::<CacheEntry>(data.value()) {
+                    // Check if file has been modified
+                    if let Ok(metadata) = fs::metadata(path) {
+                        if let Ok(mtime) = metadata.modified() {
+                            if mtime == entry.mtime {
+                                result.insert(path.clone(), entry.app);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(result)
+    }
+    
+    /// Batch set multiple apps in cache
+    /// Much faster than individual sets - uses single transaction
+    #[allow(dead_code)]
+    pub fn batch_set(&self, apps: Vec<(PathBuf, App)>) -> Result<()> {
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut cache_table = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
+            let mut index_table = write_txn.open_table(NAME_INDEX_TABLE)?;
+            
+            for (path, app) in apps {
+                if let Ok(metadata) = fs::metadata(&path) {
+                    if let Ok(mtime) = metadata.modified() {
+                        let entry = CacheEntry {
+                            app: app.clone(),
+                            mtime,
+                            path: path.clone(),
+                        };
+                        
+                        let path_key = path.to_string_lossy();
+                        let data = bincode::serialize(&entry)?;
+                        cache_table.insert(path_key.as_ref(), data.as_slice())?;
+                        
+                        // Update name index
+                        let path_str = path.to_string_lossy();
+                        index_table.insert(app.name.as_str(), path_str.as_bytes())?;
+                    }
+                }
+            }
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+    
     /// Store file list in cache
+    #[allow(dead_code)]
     pub fn set_file_list(&self, paths: Vec<PathBuf>) -> Result<()> {
         let cache = FileListCache {
             paths,
             last_scan: SystemTime::now(),
         };
         let data = bincode::serialize(&cache)?;
-        self.file_list.insert(b"paths", data.as_slice())?;
+        
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(FILE_LIST_TABLE)?;
+            table.insert("paths", data.as_slice())?;
+        }
+        write_txn.commit()?;
         Ok(())
     }
     
     /// Get app by name (uses index for fast lookup)
     pub fn get_by_name(&self, app_name: &str) -> Result<Option<App>> {
+        let read_txn = self.db.begin_read()?;
+        let index_table = read_txn.open_table(NAME_INDEX_TABLE)?;
+        
         // Look up the path in the index
-        if let Some(path_bytes) = self.name_index.get(app_name.as_bytes())? {
-            let path_str = String::from_utf8_lossy(&path_bytes);
+        if let Some(path_bytes) = index_table.get(app_name)? {
+            let path_str = String::from_utf8_lossy(path_bytes.value());
             let path = PathBuf::from(path_str.as_ref());
             
             // Get the cached app from the path
@@ -90,10 +176,13 @@ impl DesktopCache {
     
     /// Get cached app if file hasn't changed
     pub fn get(&self, path: &Path) -> Result<Option<App>> {
-        let path_key = path.to_string_lossy().as_bytes().to_vec();
+        let path_key = path.to_string_lossy();
         
-        if let Some(data) = self.tree.get(&path_key)? {
-            if let Ok(entry) = bincode::deserialize::<CacheEntry>(&data) {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(DESKTOP_CACHE_TABLE)?;
+        
+        if let Some(data) = table.get(path_key.as_ref())? {
+            if let Ok(entry) = bincode::deserialize::<CacheEntry>(data.value()) {
                 // Check if file has been modified
                 if let Ok(metadata) = fs::metadata(path) {
                     if let Ok(mtime) = metadata.modified() {
@@ -118,13 +207,21 @@ impl DesktopCache {
                     path: path.to_path_buf(),
                 };
                 
-                let path_key = path.to_string_lossy().as_bytes().to_vec();
+                let path_key = path.to_string_lossy();
                 let data = bincode::serialize(&entry)?;
-                self.tree.insert(path_key, data.as_slice())?;
                 
-                // Update name index for fast lookup
-                let path_str = path.to_string_lossy();
-                self.name_index.insert(app.name.as_bytes(), path_str.as_bytes())?;
+                let write_txn = self.db.begin_write()?;
+                {
+                    let mut cache_table = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
+                    let mut index_table = write_txn.open_table(NAME_INDEX_TABLE)?;
+                    
+                    cache_table.insert(path_key.as_ref(), data.as_slice())?;
+                    
+                    // Update name index for fast lookup
+                    let path_str = path.to_string_lossy();
+                    index_table.insert(app.name.as_str(), path_str.as_bytes())?;
+                }
+                write_txn.commit()?;
             }
         }
         
@@ -133,15 +230,44 @@ impl DesktopCache {
     
     /// Clear the entire cache, name index, and file list
     pub fn clear(&self) -> Result<()> {
-        self.tree.clear()?;
-        self.name_index.clear()?;
-        self.file_list.clear()?;
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut cache_table = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
+            let mut index_table = write_txn.open_table(NAME_INDEX_TABLE)?;
+            let mut file_list_table = write_txn.open_table(FILE_LIST_TABLE)?;
+            
+            // Collect keys first, then delete (redb doesn't have drain)
+            let cache_keys: Vec<String> = cache_table.iter()?.filter_map(|r| r.ok().map(|(k, _)| k.value().to_string())).collect();
+            let index_keys: Vec<String> = index_table.iter()?.filter_map(|r| r.ok().map(|(k, _)| k.value().to_string())).collect();
+            let file_keys: Vec<String> = file_list_table.iter()?.filter_map(|r| r.ok().map(|(k, _)| k.value().to_string())).collect();
+            
+            for key in cache_keys {
+                cache_table.remove(key.as_str())?;
+            }
+            for key in index_keys {
+                index_table.remove(key.as_str())?;
+            }
+            for key in file_keys {
+                file_list_table.remove(key.as_str())?;
+            }
+        }
+        write_txn.commit()?;
         Ok(())
     }
     
     /// Clear only the file list (forces directory rescan but keeps parsed apps)
     pub fn clear_file_list(&self) -> Result<()> {
-        self.file_list.clear()?;
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(FILE_LIST_TABLE)?;
+            
+            // Collect keys first, then delete
+            let keys: Vec<String> = table.iter()?.filter_map(|r| r.ok().map(|(k, _)| k.value().to_string())).collect();
+            for key in keys {
+                table.remove(key.as_str())?;
+            }
+        }
+        write_txn.commit()?;
         Ok(())
     }
 }
@@ -154,39 +280,31 @@ pub struct HistoryCache {
 
 impl HistoryCache {
     /// Load all history and pinned data at once
-    pub fn load(db: &sled::Db) -> Self {
+    pub fn load(db: &std::sync::Arc<Database>) -> Result<Self> {
         let mut history = HashMap::new();
         let mut pinned = std::collections::HashSet::new();
         
-        // Load all history entries from the default tree only
-        // Note: db.iter() only iterates the default tree, not named trees
-        for item in db.iter() {
-            if let Ok((key, value)) = item {
-                let key_str = String::from_utf8_lossy(&key);
-                
-                // Skip special keys (pinned_apps is stored in default tree)
-                if key_str == "pinned_apps" {
-                    continue;
-                }
-                
-                // Try to unpack as history count (8 bytes)
-                if value.len() == 8 {
-                    if let Ok(packed_bytes) = value.as_ref().try_into() {
-                        let count = crate::bytes::unpack(packed_bytes);
-                        history.insert(key_str.to_string(), count);
-                    }
+        let read_txn = db.begin_read()?;
+        
+        // Load all history entries (table might not exist yet)
+        if let Ok(history_table) = read_txn.open_table(HISTORY_TABLE) {
+            for item in history_table.iter()? {
+                if let Ok((key, value)) = item {
+                    history.insert(key.value().to_string(), value.value());
                 }
             }
         }
         
-        // Load pinned apps
-        if let Ok(Some(data)) = db.get(b"pinned_apps") {
-            if let Ok(apps) = bincode::deserialize::<Vec<String>>(&data) {
-                pinned.extend(apps);
+        // Load pinned apps (table might not exist yet)
+        if let Ok(pinned_table) = read_txn.open_table(PINNED_TABLE) {
+            if let Some(data) = pinned_table.get("pinned_apps")? {
+                if let Ok(apps) = bincode::deserialize::<Vec<String>>(data.value()) {
+                    pinned.extend(apps);
+                }
             }
         }
         
-        Self { history, pinned }
+        Ok(Self { history, pinned })
     }
     
     /// Get history count for an app

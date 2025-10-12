@@ -1,6 +1,6 @@
 use std::io::{self, BufRead};
 use is_terminal::IsTerminal;
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use nucleo_matcher::{Matcher, Utf32Str};
 use ratatui::widgets::ListItem;
 
 /// Check if stdin is being piped to us
@@ -124,24 +124,25 @@ impl DmenuItem {
         }
     }
 
-    /// Calculate fuzzy match score against query
+    /// Calculate fuzzy match score against query (SIMD-accelerated)
     /// Optimized to check display text first with early return
     #[inline]
-    pub fn calculate_score(&self, query: &str, matcher: &SkimMatcherV2) -> Option<i64> {
+    pub fn calculate_score(&self, query: &str, matcher: &mut Matcher) -> Option<i64> {
         if query.is_empty() {
             return Some(0);
         }
 
         // Try to match against display text first (most common case)
-        if let Some(score) = matcher.fuzzy_match(&self.display_text, query) {
-            return Some(score * 2); // Boost display text matches
+        if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(self.display_text.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+            return Some((score as i64) * 2); // Boost display text matches
         }
 
         // Fallback to matching against original line
-        matcher.fuzzy_match(&self.original_line, query)
+        matcher.fuzzy_match(Utf32Str::Ascii(self.original_line.as_bytes()), Utf32Str::Ascii(query.as_bytes())).map(|s| s as i64)
     }
     
     /// Calculate exact match score against query
+    /// Supports quoted strings for exact matching (e.g., "firefox")
     /// Optimized with early returns
     #[inline]
     pub fn calculate_exact_score(&self, query: &str) -> Option<i64> {
@@ -149,20 +150,35 @@ impl DmenuItem {
             return Some(0);
         }
         
-        let query_lower = query.to_lowercase();
+        // Check if query is wrapped in quotes for exact match
+        let (is_quoted, search_query) = if (query.starts_with('"') && query.ends_with('"')) 
+            || (query.starts_with('\'') && query.ends_with('\'')) {
+            // Strip quotes and require exact match
+            (true, &query[1..query.len()-1])
+        } else {
+            (false, query)
+        };
+        
+        let query_lower = search_query.to_lowercase();
         let display_lower = self.display_text.to_lowercase();
         
-        // Exact match - early return
+        if is_quoted {
+            // Quoted: only exact match
+            if display_lower == query_lower {
+                return Some(1000);
+            }
+            return None;
+        }
+        
+        // Unquoted: exact, prefix, or contains
         if display_lower == query_lower {
             return Some(1000);
         }
         
-        // Starts with query - early return
         if display_lower.starts_with(&query_lower) {
             return Some(500);
         }
         
-        // Contains query
         if display_lower.contains(&query_lower) {
             return Some(100);
         }
@@ -170,11 +186,11 @@ impl DmenuItem {
         None
     }
     
-    /// Calculate match score based on match_nth columns
+    /// Calculate match score based on match_nth columns (SIMD-accelerated)
     pub fn calculate_score_with_match_nth(
         &self,
         query: &str,
-        matcher: &SkimMatcherV2,
+        matcher: &mut Matcher,
         match_nth: &[usize],
     ) -> Option<i64> {
         if query.is_empty() {
@@ -186,8 +202,8 @@ impl DmenuItem {
         for &col_idx in match_nth {
             if col_idx > 0 && col_idx <= self.columns.len() {
                 let col_text = &self.columns[col_idx - 1];
-                if let Some(score) = matcher.fuzzy_match(col_text, query) {
-                    best_score = Some(best_score.map_or(score, |current: i64| current.max(score)));
+                if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(col_text.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+                    best_score = Some(best_score.map_or(score as i64, |current: i64| current.max(score as i64)));
                 }
             }
         }

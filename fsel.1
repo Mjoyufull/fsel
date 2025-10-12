@@ -1,4 +1,4 @@
-.TH FSEL 1 "2025-01-08" "1.0.0-riceknife" "User Commands"
+.TH FSEL 1 "2025-01-12" "2.0.0-seedclay" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -19,8 +19,14 @@ Specify a config file (default: ~/.config/fsel/config.toml)
 .BR \-r ", " \-\-replace
 Replace existing fsel instances
 .TP
-.B \-\-clear_history
+.B \-\-clear-history
 Clear launch history database
+.TP
+.B \-\-clear-cache
+Clear desktop file cache
+.TP
+.B \-\-refresh-cache
+Force refresh of desktop file list
 .TP
 .BR \-p ", " \-\-program " " \fINAME\fR
 Launch program directly, bypassing TUI (requires at least 2 characters)
@@ -322,8 +328,8 @@ User configuration file
 .I ~/.config/fsel/keybinds.toml
 Keybind customization file
 .TP
-.I ~/.local/share/fsel/hist_db
-Launch history and pinned apps database
+.I ~/.local/share/fsel/hist_db.redb
+Launch history and pinned apps database (redb format)
 .TP
 .I ~/.local/share/fsel/lock
 Lock file for single instance

@@ -39,6 +39,8 @@ use std::io;
 use std::path;
 use std::process;
 
+use redb::ReadableTable;
+
 
 use directories::ProjectDirs;
 use eyre::eyre;
@@ -82,18 +84,7 @@ fn shutdown_terminal(disable_mouse: bool) {
 }
 
 async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
-    use crossterm::{
-        event::{KeyCode, KeyModifiers},
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-        ExecutableCommand,
-    };
-    use crossterm::event::{EnableMouseCapture, DisableMouseCapture, MouseButton, MouseEventKind};
-    use ratatui::backend::CrosstermBackend;
-    use ratatui::layout::{Alignment, Constraint, Direction, Layout};
-    use ratatui::style::{Modifier, Style};
-    use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
-    use ratatui::Terminal;
+    use crossterm::event::{KeyCode, KeyModifiers};
 
     // Check if cclip is available
     if !cclip::check_cclip_available() {
@@ -399,7 +390,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             let input_panel_height = get_cclip_u16(cli.cclip_input_panel_height, cli.dmenu_input_panel_height, cli.input_panel_height);
             
             // Layout calculation
-            let total_height = f.size().height;
+            let total_height = f.area().height;
             let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
             
             // Get content panel position (defaults to Top if not set, with cclip -> dmenu -> regular inheritance)
@@ -416,7 +407,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             Constraint::Min(1),
                             Constraint::Length(input_panel_height),
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 0, 1, 2)
                 },
                 crate::cli::PanelPosition::Middle => {
@@ -428,7 +419,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             Constraint::Length(content_height.max(3)),
                             Constraint::Length(input_panel_height),
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 1, 0, 2)
                 },
                 crate::cli::PanelPosition::Bottom => {
@@ -440,7 +431,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             Constraint::Length(input_panel_height),     // Input panel
                             Constraint::Length(content_height.max(3)),  // Content panel at bottom
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 2, 0, 1)
                 }
             };
@@ -583,7 +574,7 @@ async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                         if let Some(rowid) = ui.get_cclip_rowid(item) {
                             // Get the content panel chunk position from the last draw
                             // We need to recalculate the layout to get the correct chunk positions
-                            let term_size = terminal.size()?;
+                            let term_size = terminal.get_frame().area();
                             let total_height = term_size.height;
                             let content_panel_height_percent = get_cclip_u16(cli.cclip_title_panel_height_percent, cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
                             let content_height = (total_height as f32 * content_panel_height_percent as f32 / 100.0).round() as u16;
@@ -1342,7 +1333,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
             let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
             
             // Layout calculation
-            let total_height = f.size().height;
+            let total_height = f.area().height;
             let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
             
             // Get content panel position (defaults to Top if not set)
@@ -1359,7 +1350,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             Constraint::Min(1),
                             Constraint::Length(input_panel_height),
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 0, 1, 2)
                 },
                 crate::cli::PanelPosition::Middle => {
@@ -1371,7 +1362,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             Constraint::Length(content_height.max(3)),
                             Constraint::Length(input_panel_height),
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 1, 0, 2)
                 },
                 crate::cli::PanelPosition::Bottom => {
@@ -1383,7 +1374,7 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
                             Constraint::Length(input_panel_height),     // Input panel
                             Constraint::Length(content_height.max(3)),  // Content panel at bottom
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 2, 0, 1)
                 }
             };
@@ -1789,9 +1780,9 @@ fn run_dmenu_mode(cli: &cli::Opts) -> eyre::Result<()> {
 }
 
 /// Fast app lookup by exact name - uses name index for instant lookup
-fn find_app_by_name_fast(db: &sled::Db, app_name: &str, cli: &cli::Opts) -> eyre::Result<Option<xdg::App>> {
-    let desktop_cache = cache::DesktopCache::new(db.clone());
-    let history_cache = cache::HistoryCache::load(db);
+fn find_app_by_name_fast(db: &std::sync::Arc<redb::Database>, app_name: &str, cli: &cli::Opts) -> eyre::Result<Option<xdg::App>> {
+    let desktop_cache = cache::DesktopCache::new(db.clone())?;
+    let history_cache = cache::HistoryCache::load(db)?;
     
     // Try the name index first - this is instant if the app is cached
     if let Ok(Some(app)) = desktop_cache.get_by_name(app_name) {
@@ -1870,8 +1861,8 @@ fn find_app_by_name_fast(db: &sled::Db, app_name: &str, cli: &cli::Opts) -> eyre
         }
     }
     
-    let desktop_cache = cache::DesktopCache::new(db.clone());
-    let history_cache = cache::HistoryCache::load(db);
+    let desktop_cache = cache::DesktopCache::new(db.clone())?;
+    let history_cache = cache::HistoryCache::load(db)?;
     
     // Search for the specific app
     for dir in &dirs {
@@ -1950,7 +1941,7 @@ fn find_app_by_name_fast(db: &sled::Db, app_name: &str, cli: &cli::Opts) -> eyre
 }
 
 fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<()> {
-    use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+    use nucleo_matcher::{Matcher, Config, Utf32Str};
     
     // Open database for history
     let (db, _data_dir) = helpers::open_history_db()?;
@@ -1959,7 +1950,7 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
     
     // FAST PATH: Check history for exact or prefix match
     // This avoids loading any desktop files for common cases
-    let history_cache = cache::HistoryCache::load(&db);
+    let history_cache = cache::HistoryCache::load(&db)?;
     
     // First try exact match in history
     for (app_name, _count) in history_cache.history.iter() {
@@ -2048,7 +2039,7 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
     }
     
     // Find the best match using improved matching logic for -p
-    let matcher = SkimMatcherV2::default();
+    let mut matcher = Matcher::new(Config::DEFAULT);
     let mut best_app: Option<(xdg::App, i64)> = None;
     
     for app in all_apps {
@@ -2068,9 +2059,9 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
         } else if app_name_lower.starts_with(&program_name_lower) {
             700_000 // App name prefix match
         } else {
-            // Fuzzy matching with priority for executable name
-            let name_score = matcher.fuzzy_match(&app.name, program_name).unwrap_or(0);
-            let exec_score = matcher.fuzzy_match(exec_name, program_name).unwrap_or(0);
+            // Fuzzy matching with priority for executable name (SIMD-accelerated)
+            let name_score = matcher.fuzzy_match(Utf32Str::Ascii(app.name.as_bytes()), Utf32Str::Ascii(program_name.as_bytes())).unwrap_or(0) as i64;
+            let exec_score = matcher.fuzzy_match(Utf32Str::Ascii(exec_name.as_bytes()), Utf32Str::Ascii(program_name.as_bytes())).unwrap_or(0) as i64;
             
             // Prioritize executable name matches (2x weight)
             let best_score = std::cmp::max(name_score, exec_score * 2);
@@ -2199,10 +2190,10 @@ fn real_main() -> eyre::Result<()> {
     defer! {
         shutdown_terminal(cli.disable_mouse);
     }
-    let db: sled::Db;
+    let db: std::sync::Arc<redb::Database>;
     let lock_path: path::PathBuf;
 
-    // Open sled database
+    // Open redb database
     if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
         let mut hist_db = project_dirs.data_local_dir().to_path_buf();
 
@@ -2268,13 +2259,40 @@ fn real_main() -> eyre::Result<()> {
         }
         let _lock_guard = LockGuard(lock_path.clone());
 
-        hist_db.push("hist_db");
+        hist_db.push("hist_db.redb");
 
-        db = sled::open(hist_db).wrap_err("Failed to open database")?;
+        db = std::sync::Arc::new(
+            redb::Database::create(&hist_db)
+                .wrap_err_with(|| format!(
+                    "Failed to open database at {:?}. If you upgraded from an older version, delete the old database file: rm {:?}",
+                    hist_db, hist_db
+                ))?
+        );
 
 
         if cli.clear_history {
-            db.clear().wrap_err("Error clearing database")?;
+            // Clear all tables in redb
+            const HISTORY_TABLE: redb::TableDefinition<&str, u64> = redb::TableDefinition::new("history");
+            const PINNED_TABLE: redb::TableDefinition<&str, &[u8]> = redb::TableDefinition::new("pinned_apps");
+            
+            let write_txn = db.begin_write().wrap_err("Error starting transaction")?;
+            {
+                let mut history_table = write_txn.open_table(HISTORY_TABLE)?;
+                let mut pinned_table = write_txn.open_table(PINNED_TABLE)?;
+                
+                // Collect keys first, then delete
+                let history_keys: Vec<String> = history_table.iter()?.filter_map(|r| r.ok().map(|(k, _)| k.value().to_string())).collect();
+                let pinned_keys: Vec<String> = pinned_table.iter()?.filter_map(|r| r.ok().map(|(k, _)| k.value().to_string())).collect();
+                
+                for key in history_keys {
+                    history_table.remove(key.as_str())?;
+                }
+                for key in pinned_keys {
+                    pinned_table.remove(key.as_str())?;
+                }
+            }
+            write_txn.commit().wrap_err("Error clearing database")?;
+            
             println!("Database cleared succesfully!");
             println!(
                 "To fully remove the database, delete {}",
@@ -2285,14 +2303,14 @@ fn real_main() -> eyre::Result<()> {
         }
         
         if cli.clear_cache {
-            let cache = crate::cache::DesktopCache::new(db.clone());
+            let cache = crate::cache::DesktopCache::new(db.clone())?;
             cache.clear().wrap_err("Error clearing cache")?;
             println!("Desktop file cache cleared successfully!");
             return Ok(());
         }
         
         if cli.refresh_cache {
-            let cache = crate::cache::DesktopCache::new(db.clone());
+            let cache = crate::cache::DesktopCache::new(db.clone())?;
             // Just clear the file list, parsed apps stay cached
             cache.clear_file_list().wrap_err("Error refreshing cache")?;
             println!("Desktop file list refreshed - will rescan on next launch!");
@@ -2364,19 +2382,20 @@ fn real_main() -> eyre::Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
-    // Input handler
+    // Input handler with fast tick rate for instant app loading
     let input = input::Config {
         disable_mouse: cli.disable_mouse,
+        tick_rate: std::time::Duration::from_millis(16), // ~60fps for instant updates
         ..input::Config::default()
     }.init();
 
-    // Collect all apps before showing UI (blocking but fast with cache)
-    let mut all_apps = Vec::new();
+    // PERFORMANCE FIX: Load ALL apps FIRST, then filter ONCE (eliminates "populating" effect)
+    let mut all_apps = Vec::with_capacity(500);
     while let Ok(app) = apps.recv() {
         all_apps.push(app);
     }
     
-    // App UI
+    // Create UI with ALL apps loaded
     let mut ui = UI::new(all_apps);
 
     // Set user-defined verbosity level
@@ -2389,7 +2408,7 @@ fn real_main() -> eyre::Result<()> {
         ui.query = search_str.clone();
     }
     
-    // Initial filter
+    // Filter ONCE with all apps loaded - INSTANT display
     ui.filter(cli.match_mode);
     ui.info(cli.highlight_color, cli.fancy_mode);
 
@@ -2401,7 +2420,7 @@ fn real_main() -> eyre::Result<()> {
         // Draw UI
         terminal.draw(|f| {
             // Calculate layout based on configuration
-            let total_height = f.size().height;
+            let total_height = f.area().height;
             let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
             let input_height = cli.input_panel_height;
             
@@ -2419,7 +2438,7 @@ fn real_main() -> eyre::Result<()> {
                             Constraint::Min(1),                       // Apps panel (remaining space)
                             Constraint::Length(input_height),         // Input panel
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 0, 1, 2)
                 },
                 crate::cli::PanelPosition::Middle => {
@@ -2431,7 +2450,7 @@ fn real_main() -> eyre::Result<()> {
                             Constraint::Length(title_height.max(3)),  // Title panel
                             Constraint::Length(input_height),         // Input panel
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 1, 0, 2)
                 },
                 crate::cli::PanelPosition::Bottom => {
@@ -2443,7 +2462,7 @@ fn real_main() -> eyre::Result<()> {
                             Constraint::Length(input_height),         // Input panel
                             Constraint::Length(title_height.max(3)),  // Title panel at bottom
                         ].as_ref())
-                        .split(f.size());
+                        .split(f.area());
                     (layout, 2, 0, 1)
                 }
             };
@@ -2617,10 +2636,16 @@ fn real_main() -> eyre::Result<()> {
             } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
                 if let Some(selected) = ui.selected {
                     if selected < ui.shown.len() {
-                        let app = &mut ui.shown[selected];
-                        if let Ok(is_pinned) = helpers::toggle_pin(&db, &app.name) {
-                            app.pinned = is_pinned;
+                        let app_name = ui.shown[selected].name.clone();
+                        if let Ok(is_pinned) = helpers::toggle_pin(&db, &app_name) {
+                            // Update all apps with same name (handles duplicates like 2x Alacritty)
+                            for app in &mut ui.shown {
+                                if app.name == app_name {
+                                    app.pinned = is_pinned;
+                                }
+                            }
                             ui.filter(cli.match_mode);
+                            // Cursor stays put, app moves to top
                         }
                     }
                 }
@@ -2765,24 +2790,23 @@ fn real_main() -> eyre::Result<()> {
                             }
                         }
                     }
-                    // Handle scroll wheel for scrolling the list
+                    // Handle scroll wheel only when mouse is over the apps list
                     MouseEventKind::ScrollUp => {
-                        if !ui.shown.is_empty() && ui.scroll_offset > 0 {
-                            ui.scroll_offset -= 1;
-                            // Update selection to match current mouse position after scrolling
-                            update_selection_for_mouse_pos(&mut ui, mouse_row);
+                        if mouse_row >= list_content_start && mouse_row < list_content_end {
+                            if !ui.shown.is_empty() && ui.scroll_offset > 0 {
+                                ui.scroll_offset -= 1;
+                                update_selection_for_mouse_pos(&mut ui, mouse_row);
+                            }
                         }
                     }
                     MouseEventKind::ScrollDown => {
-                        if !ui.shown.is_empty() {
-                            // Calculate maximum visible items (account for borders)
-                            let max_visible = max_visible_rows as usize;
-                            
-                            // Only scroll down if there are more items to show
-                            if ui.scroll_offset + max_visible < ui.shown.len() {
-                                ui.scroll_offset += 1;
-                                // Update selection to match current mouse position after scrolling
-                                update_selection_for_mouse_pos(&mut ui, mouse_row);
+                        if mouse_row >= list_content_start && mouse_row < list_content_end {
+                            if !ui.shown.is_empty() {
+                                let max_visible = max_visible_rows as usize;
+                                if ui.scroll_offset + max_visible < ui.shown.len() {
+                                    ui.scroll_offset += 1;
+                                    update_selection_for_mouse_pos(&mut ui, mouse_row);
+                                }
                             }
                         }
                     }
@@ -2813,39 +2837,3 @@ fn real_main() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Byte packer and unpacker
-mod bytes {
-    /// Unacks an `[u8; 8]` array into a single `u64`, previously packed with [pack]
-    ///
-    /// [pack]: pack
-    pub const fn unpack(buffer: [u8; 8]) -> u64 {
-        let mut data = 0u64;
-        data |= buffer[0] as u64;
-        data |= (buffer[1] as u64) << 8;
-        data |= (buffer[2] as u64) << 16;
-        data |= (buffer[3] as u64) << 24;
-        data |= (buffer[4] as u64) << 32;
-        data |= (buffer[5] as u64) << 40;
-        data |= (buffer[6] as u64) << 48;
-        data |= (buffer[7] as u64) << 56;
-        data
-    }
-
-    /// Packs an `u64` into a `[u8; 8]` array.
-    ///
-    /// Can be unpacked with [unpack].
-    ///
-    /// [unpack]: unpack
-    pub const fn pack(data: u64) -> [u8; 8] {
-        let mut buffer = [0u8; 8];
-        buffer[0] = (data & 0xFF) as u8;
-        buffer[1] = ((data >> 8) & 0xFF) as u8;
-        buffer[2] = ((data >> 16) & 0xFF) as u8;
-        buffer[3] = ((data >> 24) & 0xFF) as u8;
-        buffer[4] = ((data >> 32) & 0xFF) as u8;
-        buffer[5] = ((data >> 40) & 0xFF) as u8;
-        buffer[6] = ((data >> 48) & 0xFF) as u8;
-        buffer[7] = ((data >> 56) & 0xFF) as u8;
-        buffer
-    }
-}

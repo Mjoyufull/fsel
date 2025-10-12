@@ -1,11 +1,11 @@
-use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
+use nucleo_matcher::{Matcher, Config, Utf32Str};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 use super::xdg;
 use crate::dmenu::DmenuItem;
 
-/// Application filtering and sorting facility
+/// App filtering and sorting UI
 pub struct UI<'a> {
     /// Hidden apps (They don't match the current query)
     pub hidden: Vec<xdg::App>,
@@ -21,9 +21,6 @@ pub struct UI<'a> {
     pub verbose: u64,
     /// Scroll offset for the list (how many items are scrolled off the top)
     pub scroll_offset: usize,
-    #[doc(hidden)]
-    // Matching algorithm
-    matcher: SkimMatcherV2,
 }
 
 impl<'a> UI<'a> {
@@ -37,7 +34,6 @@ impl<'a> UI<'a> {
             query: String::new(),
             verbose: 0,
             scroll_offset: 0,
-            matcher: SkimMatcherV2::default(),
         }
     }
 
@@ -144,91 +140,111 @@ impl<'a> UI<'a> {
 
     /// Filter apps based on query string using fuzzy or exact matching
     pub fn filter(&mut self, match_mode: crate::cli::MatchMode) {
-        // Hide apps that do *not* match the current filter,
-        // and update score for the ones that do
-        let mut i = 0;
-        while i != self.shown.len() {
-            let score = match match_mode {
-                crate::cli::MatchMode::Exact => self.calculate_exact_match_score(&self.shown[i]),
-                crate::cli::MatchMode::Fuzzy => self.calculate_match_score(&self.shown[i]),
-            };
-            match score {
-                // No match. Set score to 0 and move to self.hidden
-                None => {
-                    self.shown[i].score = 0;
-                    self.hidden.push(self.shown.remove(i));
-                }
-                // Item matched query. Update score
-                Some(score) => {
-                    self.shown[i].score = score;
-                    i += 1;
-                }
+        // Combine all apps for processing
+        let mut all_apps = Vec::with_capacity(self.shown.len() + self.hidden.len());
+        all_apps.append(&mut self.shown);
+        all_apps.append(&mut self.hidden);
+        
+        // Empty query: all apps match with score 0
+        if self.query.is_empty() {
+            for app in &mut all_apps {
+                app.score = 0;
             }
+            self.shown = all_apps;
+            self.hidden.clear();
+            
+            // Sort by history/pinned
+            self.shown.sort();
+            
+            // Reset selection
+            self.selected = if self.shown.is_empty() { None } else { Some(0) };
+            self.scroll_offset = 0;
+            return;
         }
-
-        // Re-add hidden apps that *do* match the current filter, and update their score
-        i = 0;
-        while i != self.hidden.len() {
-            let score = match match_mode {
-                crate::cli::MatchMode::Exact => self.calculate_exact_match_score(&self.hidden[i]),
-                crate::cli::MatchMode::Fuzzy => self.calculate_match_score(&self.hidden[i]),
-            };
-            if let Some(score) = score {
-                self.hidden[i].score = score;
-                self.shown.push(self.hidden.remove(i));
+        
+        // Score all apps
+        let query = self.query.clone();
+        let scored_apps: Vec<(xdg::App, Option<i64>)> = all_apps
+            .into_iter()
+            .map(|mut app| {
+                // Calculate score based on match mode
+                let score = match match_mode {
+                    crate::cli::MatchMode::Exact => {
+                        Self::calculate_exact_match_score_static(&app, &query)
+                    }
+                    crate::cli::MatchMode::Fuzzy => {
+                        Self::calculate_match_score_static(&app, &query)
+                    }
+                };
+                
+                if let Some(s) = score {
+                    app.score = s;
+                }
+                
+                (app, score)
+            })
+            .collect();
+        
+        // Partition into shown (matched) and hidden (not matched)
+        self.shown.clear();
+        self.hidden.clear();
+        
+        for (app, score) in scored_apps {
+            if score.is_some() {
+                self.shown.push(app);
             } else {
-                i += 1;
+                self.hidden.push(app);
             }
         }
-
-        // Sort by score
+        
+        // Sort shown apps by score
         self.shown.sort();
-
+        
         // Reset selection to beginning and scroll offset
         if self.shown.is_empty() {
-            // Can't select anything if there's no items
             self.selected = None;
             self.scroll_offset = 0;
         } else {
-            // Keep selection valid after filtering
             if let Some(current_selected) = self.selected {
                 if current_selected >= self.shown.len() {
-                    // Current selection is out of bounds, go to first item
                     self.selected = Some(0);
                     self.scroll_offset = 0;
                 } else {
-                    // Current selection is still valid, keep it but reset scroll
                     self.scroll_offset = 0;
                 }
             } else {
-                // No selection, go to first item
                 self.selected = Some(0);
                 self.scroll_offset = 0;
             }
         }
     }
     
-    /// Calculate fuzzy match score across app fields
-    /// Optimized to check high-priority fields first and exit early
-    fn calculate_match_score(&self, app: &xdg::App) -> Option<i64> {
-        if self.query.is_empty() {
+    /// Static version for parallel processing (thread-safe)
+    fn calculate_match_score_static(app: &xdg::App, query: &str) -> Option<i64> {
+        use nucleo_matcher::{Matcher, Config};
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        Self::calculate_match_score_with_matcher(app, query, &mut matcher)
+    }
+    
+
+    
+    /// Shared implementation for match scoring
+    fn calculate_match_score_with_matcher(app: &xdg::App, query: &str, matcher: &mut nucleo_matcher::Matcher) -> Option<i64> {
+        if query.is_empty() {
             return Some(0);
         }
         
-        // Reuse query_lower if already computed
-        let query_lower = self.query.to_lowercase();
+        let query_lower = query.to_lowercase();
         let mut best_score = None;
         
         // Extract executable name from command
         let exec_name = crate::helpers::extract_exec_name(&app.command);
         
-        // Only lowercase if we need to check it
         if !exec_name.is_empty() {
             let exec_name_lower = exec_name.to_lowercase();
         
-            // Check executable name first (highest priority for direct matching)
+            // Check executable name first (highest priority)
             if exec_name_lower == query_lower {
-                // Exact executable match - apply boosts and return early
                 let mut score = 1_000_000;
                 if app.pinned {
                     score += 50_000;
@@ -236,18 +252,18 @@ impl<'a> UI<'a> {
                 score += app.history as i64 * 10;
                 return Some(score);
             } else if exec_name_lower.starts_with(&query_lower) {
-                // Executable prefix match - very high priority
                 best_score = Some(900_000);
-            } else if let Some(score) = self.matcher.fuzzy_match(exec_name, &self.query) {
-                // Fuzzy executable match (high priority)
-                best_score = Some(score * 4);
+            } else {
+                // Use nucleo's SIMD-accelerated fuzzy matching
+                if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(exec_name.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+                    best_score = Some((score as i64) * 4);
+                }
             }
         }
         
         // Match against app name
         let app_name_lower = app.name.to_lowercase();
         if app_name_lower == query_lower {
-            // Exact name match - apply boosts and return early
             let mut score = 800_000;
             if app.pinned {
                 score += 50_000;
@@ -255,29 +271,31 @@ impl<'a> UI<'a> {
             score += app.history as i64 * 10;
             return Some(score);
         } else if app_name_lower.starts_with(&query_lower) {
-            // Prefix match - high priority
             let score = 700_000 + 10000;
             best_score = Some(best_score.map_or(score, |current| current.max(score)));
-        } else if let Some(mut score) = self.matcher.fuzzy_match(&app.name, &self.query) {
-            // Word boundary matches (e.g., "fire" matches "Firefox")
-            if app_name_lower.split_whitespace().any(|word| word.starts_with(&query_lower)) {
-                score += 5000;
+        } else {
+            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(app.name.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+                let mut score_i64 = score as i64;
+                // Word boundary boost
+                if app_name_lower.split_whitespace().any(|word| word.starts_with(&query_lower)) {
+                    score_i64 += 5000;
+                }
+                let boosted_score = score_i64 * 3;
+                best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
-            
-            let boosted_score = score * 3;
-            best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
         }
         
         // Match against generic name
         if let Some(ref generic_name) = app.generic_name {
             let generic_lower = generic_name.to_lowercase();
-            if let Some(mut score) = self.matcher.fuzzy_match(generic_name, &self.query) {
+            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(generic_name.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+                let mut score_i64 = score as i64;
                 if generic_lower == query_lower {
-                    score = 700_000;
+                    score_i64 = 700_000;
                 } else if generic_lower.starts_with(&query_lower) {
-                    score += 8000;
+                    score_i64 += 8000;
                 }
-                let boosted_score = score * 2;
+                let boosted_score = score_i64 * 2;
                 best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
         }
@@ -285,46 +303,43 @@ impl<'a> UI<'a> {
         // Match against keywords
         for keyword in &app.keywords {
             let keyword_lower = keyword.to_lowercase();
-            if let Some(mut score) = self.matcher.fuzzy_match(keyword, &self.query) {
+            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(keyword.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+                let mut score_i64 = score as i64;
                 if keyword_lower == query_lower {
-                    score = 600_000;
+                    score_i64 = 600_000;
                 } else if keyword_lower.starts_with(&query_lower) {
-                    score += 6000;
+                    score_i64 += 6000;
                 }
-                let boosted_score = score * 2;
+                let boosted_score = score_i64 * 2;
                 best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
         }
         
         // Match against description (lower priority)
-        if let Some(score) = self.matcher.fuzzy_match(&app.description, &self.query) {
-            best_score = Some(best_score.map_or(score, |current| current.max(score)));
+        if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(app.description.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+            best_score = Some(best_score.map_or(score as i64, |current| current.max(score as i64)));
         }
         
         // Match against categories (lower priority)
         for category in &app.categories {
-            if let Some(score) = self.matcher.fuzzy_match(category, &self.query) {
-                best_score = Some(best_score.map_or(score, |current| current.max(score)));
+            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(category.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+                best_score = Some(best_score.map_or(score as i64, |current| current.max(score as i64)));
             }
         }
         
-        // add pinned app boost (highest priority after exact matches)
+        // Apply pinned and history boosts
         if let Some(mut score) = best_score {
             if app.pinned {
-                // pinned apps get massive boost, but not above exact matches
                 if score < 600_000 {
-                    score += 500_000; // boost fuzzy matches significantly
+                    score += 500_000;
                 } else {
-                    score += 50_000; // boost exact matches slightly
+                    score += 50_000;
                 }
             }
             
-            // add usage history boost (but don't let it dominate exact/prefix matches)
             score = if score >= 600_000 {
-                // for exact/prefix matches, history is just a tiebreaker
                 score + (app.history as i64 * 10)
             } else {
-                // for fuzzy matches, history adds significant boost
                 score + (app.history as i64 * 100)
             };
             
@@ -334,9 +349,110 @@ impl<'a> UI<'a> {
         best_score
     }
     
-    /// Calculate exact match score (case-insensitive)
-    /// Optimized to minimize string allocations and exit early
-    fn calculate_exact_match_score(&self, app: &xdg::App) -> Option<i64> {
+    /// Static version for parallel processing (thread-safe)
+    fn calculate_exact_match_score_static(app: &xdg::App, query: &str) -> Option<i64> {
+        if query.is_empty() {
+            return Some(0);
+        }
+        
+        let query_lower = query.to_lowercase();
+        
+        // Extract executable name from command
+        let exec_name = crate::helpers::extract_exec_name(&app.command);
+        let exec_name_lower = exec_name.to_lowercase();
+        
+        // Exact match on executable (highest priority) - early return
+        if !exec_name.is_empty() && exec_name_lower == query_lower {
+            let mut score = 100000;
+            if app.pinned {
+                score += 50000;
+            }
+            return Some(score);
+        }
+        
+        // Exact match on name - early return
+        let app_name_lower = app.name.to_lowercase();
+        if app_name_lower == query_lower {
+            let mut score = 90000;
+            if app.pinned {
+                score += 50000;
+            }
+            return Some(score);
+        }
+        
+        // Exact match on generic name - early return
+        if let Some(ref generic_name) = app.generic_name {
+            let generic_lower = generic_name.to_lowercase();
+            if generic_lower == query_lower {
+                let mut score = 80000;
+                if app.pinned {
+                    score += 50000;
+                }
+                return Some(score);
+            }
+        }
+        
+        let mut score = None;
+        
+        // Prefix match on executable
+        if !exec_name.is_empty() && exec_name_lower.starts_with(&query_lower) {
+            score = Some(70000);
+        }
+        // Prefix match on name
+        else if app_name_lower.starts_with(&query_lower) {
+            score = Some(60000);
+        }
+        // Prefix match on generic name
+        else if let Some(ref generic_name) = app.generic_name {
+            if generic_name.to_lowercase().starts_with(&query_lower) {
+                score = Some(50000);
+            }
+        }
+        
+        // Contains query in executable
+        if score.is_none() && !exec_name.is_empty() && exec_name_lower.contains(&query_lower) {
+            score = Some(4000);
+        }
+        // Contains query in name
+        else if score.is_none() && app_name_lower.contains(&query_lower) {
+            score = Some(3000);
+        }
+        
+        // Check keywords (only if no match yet)
+        if score.is_none() && !app.keywords.is_empty() {
+            for keyword in &app.keywords {
+                let keyword_lower = keyword.to_lowercase();
+                if keyword_lower == query_lower {
+                    score = Some(2000);
+                    break;
+                }
+                if keyword_lower.contains(&query_lower) {
+                    score = Some(1000);
+                    break;
+                }
+            }
+        }
+        
+        // Check description (only if no match yet)
+        if score.is_none() && app.description.to_lowercase().contains(&query_lower) {
+            score = Some(500);
+        }
+        
+        // Apply pin boost
+        if let Some(mut s) = score {
+            if app.pinned {
+                s += 50000;
+            }
+            score = Some(s);
+        }
+        
+        score
+    }
+    
+
+    
+    /// Old implementation kept for reference
+    fn _calculate_exact_match_score_old(&mut self, app: &xdg::App) -> Option<i64> {
         if self.query.is_empty() {
             return Some(0);
         }
@@ -436,7 +552,7 @@ impl<'a> UI<'a> {
     }
 }
 
-/// Dmenu-specific UI filtering and sorting facility
+/// Dmenu-specific UI for filtering and sorting
 pub struct DmenuUI<'a> {
     /// Hidden items (They don't match the current query)
     pub hidden: Vec<DmenuItem>,
@@ -463,8 +579,8 @@ pub struct DmenuUI<'a> {
     #[allow(dead_code)]
     pub tag_mode: TagMode,
     #[doc(hidden)]
-    // Matching algorithm
-    matcher: SkimMatcherV2,
+    // Matching algorithm (SIMD-accelerated)
+    matcher: Matcher,
 }
 
 /// Tag mode state for cclip
@@ -497,7 +613,7 @@ impl<'a> DmenuUI<'a> {
             match_mode: crate::cli::MatchMode::Fuzzy,
             match_nth: None,
             tag_mode: TagMode::Normal,
-            matcher: SkimMatcherV2::default(),
+            matcher: Matcher::new(Config::DEFAULT),
         }
     }
     
@@ -783,14 +899,37 @@ impl<'a> DmenuUI<'a> {
 
     /// Updates shown and hidden items with matching (fuzzy or exact)
     pub fn filter(&mut self) {
-        // Hide items that don't match the current filter
+        // Optimized filtering for large datasets
+        // Key optimizations:
+        // 1. Use swap_remove instead of remove (O(1) vs O(n))
+        // 2. Minimize allocations
+        // 3. Process in-place where possible
+        
+        // Early return for empty query - everything matches
+        let query_is_empty = self.query.is_empty();
+        
+        // Filter shown items - remove non-matching
         let mut i = 0;
-        while i != self.shown.len() {
-            let score = self.calculate_item_score(&self.shown[i]);
+        while i < self.shown.len() {
+            // Calculate score for this item
+            let score = if query_is_empty {
+                Some(0)
+            } else if let Some(ref match_cols) = self.match_nth {
+                self.shown[i].calculate_score_with_match_nth(&self.query, &mut self.matcher, match_cols)
+            } else {
+                match self.match_mode {
+                    crate::cli::MatchMode::Exact => self.shown[i].calculate_exact_score(&self.query),
+                    crate::cli::MatchMode::Fuzzy => self.shown[i].calculate_score(&self.query, &mut self.matcher),
+                }
+            };
+            
             match score {
                 None => {
+                    // Doesn't match - move to hidden using swap_remove (O(1))
                     self.shown[i].set_score(0);
-                    self.hidden.push(self.shown.remove(i));
+                    let item = self.shown.swap_remove(i);
+                    self.hidden.push(item);
+                    // Don't increment i since we swapped the last element here
                 }
                 Some(score) => {
                     self.shown[i].set_score(score);
@@ -800,17 +939,31 @@ impl<'a> DmenuUI<'a> {
         }
 
         // Re-add hidden items that now match
-        i = 0;
-        while i != self.hidden.len() {
-            if let Some(score) = self.calculate_item_score(&self.hidden[i]) {
+        let mut i = 0;
+        while i < self.hidden.len() {
+            // Calculate score for this item
+            let score = if query_is_empty {
+                Some(0)
+            } else if let Some(ref match_cols) = self.match_nth {
+                self.hidden[i].calculate_score_with_match_nth(&self.query, &mut self.matcher, match_cols)
+            } else {
+                match self.match_mode {
+                    crate::cli::MatchMode::Exact => self.hidden[i].calculate_exact_score(&self.query),
+                    crate::cli::MatchMode::Fuzzy => self.hidden[i].calculate_score(&self.query, &mut self.matcher),
+                }
+            };
+            
+            if let Some(score) = score {
                 self.hidden[i].set_score(score);
-                self.shown.push(self.hidden.remove(i));
+                let item = self.hidden.swap_remove(i);
+                self.shown.push(item);
+                // Don't increment i since we swapped
             } else {
                 i += 1;
             }
         }
 
-        // Sort by score
+        // Sort by score (descending - higher scores first)
         self.shown.sort();
 
         // Reset selection and scroll
@@ -832,17 +985,5 @@ impl<'a> DmenuUI<'a> {
         }
     }
     
-    /// Calculate score for an item based on match mode and match_nth
-    fn calculate_item_score(&self, item: &DmenuItem) -> Option<i64> {
-        if let Some(ref match_cols) = self.match_nth {
-            // Match against specific columns
-            item.calculate_score_with_match_nth(&self.query, &self.matcher, match_cols)
-        } else {
-            // Match against display text
-            match self.match_mode {
-                crate::cli::MatchMode::Exact => item.calculate_exact_score(&self.query),
-                crate::cli::MatchMode::Fuzzy => item.calculate_score(&self.query, &self.matcher),
-            }
-        }
-    }
+
 }
