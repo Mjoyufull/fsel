@@ -108,7 +108,22 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
     $ cargo install fsel@<version>
     ```
 
-#### Option 3: Build from source
+#### Option 3: AUR (Arch Linux)
+
+* Install the git version with your favorite AUR helper:
+    ```sh
+    $ yay -S fsel-git
+    # or
+    $ paru -S fsel-git
+    ```
+* Or manually:
+    ```sh
+    $ git clone https://aur.archlinux.org/fsel-git.git
+    $ cd fsel-git
+    $ makepkg -si
+    ```
+
+#### Option 4: Build from source
 
 * Install [Rust](https://www.rust-lang.org/learn/get-started) stable
 * Build:
