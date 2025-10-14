@@ -24,7 +24,7 @@
         packages = {
           default = naersk'.buildPackage {
             pname = "fsel";
-            version = "2.0.0-seedclay";
+            version = "2.0.1-seedclay";
             src = ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config ];

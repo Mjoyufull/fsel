@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.0.0-seedclay
+    $ cargo install fsel@2.0.1-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.0.0-seedclay --force
+    $ cargo install fsel@2.0.1-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -285,7 +285,6 @@ fsel --cclip
 - **Content Preview**: Full text preview panel
 - **Fuzzy Search**: Filter clipboard history
 - **Smart Copy**: Auto-copies selection to clipboard
-- **Tagging**: Organize items with tags (Ctrl+T), filter by tag
 - Requires [cclip](https://github.com/heather7283/cclip)
 
 ### Quick Examples

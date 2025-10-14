@@ -55,9 +55,6 @@ Dmenu Mode Options:
 
 Clipboard Mode Options:
       --cclip                   Clipboard history mode: browse cclip history with previews.
-      --tag <name>              Filter clipboard items by tag (use with --cclip).
-      --tag list                List all tags (use with --cclip).
-      --tag list <name>         List items with specific tag (use with --cclip).
 
 General Options:
   -h, --help                    Show this help message.
@@ -553,15 +550,15 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
         if let Some(f) = config_file {
             match fs::read_to_string(&f) {
-                Ok(content) => match FileConf::read(&content) {
+                Ok(content) => match FileConf::read_with_enhanced_errors(&content) {
                     Ok(conf) => {
                         file_conf = Some(conf);
                     }
                     Err(e) => {
                         println!(
-                            "Error reading config file {}:\n\t{}",
+                            "Error reading config file {}:\n{}",
                             f.display(),
-                            e.message()
+                            e
                         );
                         process::exit(1);
                     }
@@ -1169,9 +1166,80 @@ pub(crate) struct AppLauncherConf {
 }
 
 impl FileConf {
-    /// Parse a file.
-    pub fn read(raw: &str) -> Result<Self, toml::de::Error> {
-        toml::from_str(raw)
+    /// Parse a file with enhanced error reporting
+    pub fn read_with_enhanced_errors(raw: &str) -> Result<Self, String> {
+        match toml::from_str::<Self>(raw) {
+            Ok(config) => Ok(config),
+            Err(e) => {
+                let error_msg = e.message();
+                
+                // Check if it's an unknown field error and provide helpful guidance
+                if error_msg.contains("unknown field") {
+                    let enhanced_msg = Self::enhance_unknown_field_error(error_msg);
+                    Err(enhanced_msg)
+                } else {
+                    Err(format!("{}", error_msg))
+                }
+            }
+        }
+    }
+
+    fn enhance_unknown_field_error(original_error: &str) -> String {
+        // Extract the unknown field name from the error message
+        let unknown_field = if let Some(start) = original_error.find("unknown field `") {
+            let start = start + "unknown field `".len();
+            if let Some(end) = original_error[start..].find('`') {
+                Some(&original_error[start..start + end])
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        // Determine section and provide targeted help
+        if original_error.contains("expected one of") && original_error.contains("filter_desktop") {
+            let mut result = String::from("Config Error: Invalid field in [app_launcher] section");
+            
+            if let Some(field) = unknown_field {
+                // Check if it's a color/UI field that belongs at root level
+                let root_level_fields = [
+                    "main_border_color", "apps_border_color", "input_border_color",
+                    "main_text_color", "apps_text_color", "input_text_color", 
+                    "highlight_color", "header_title_color", "pin_color", "pin_icon",
+                    "cursor", "rounded_borders", "hard_stop", "fancy_mode", "terminal_launcher"
+                ];
+                
+                if root_level_fields.contains(&field) {
+                    result.push_str(&format!("\n\n'{}' belongs at ROOT LEVEL", field));
+                    result.push_str("\nMove it outside [app_launcher] section");
+                } else {
+                    result.push_str(&format!("\n\n'{}' is not a valid field", field));
+                }
+            }
+            
+            result.push_str("\n\n[app_launcher] accepts:");
+            result.push_str("\n  filter_desktop, list_executables_in_path,");
+            result.push_str("\n  hide_before_typing, match_mode, confirm_first_launch");
+            
+            result
+        } else if original_error.contains("expected one of") && original_error.contains("delimiter") {
+            format!("Config Error: Invalid field in [dmenu] section{}", 
+                if let Some(field) = unknown_field { 
+                    format!("\n'{}' is not valid here", field) 
+                } else { 
+                    String::new() 
+                })
+        } else if original_error.contains("expected one of") && original_error.contains("image_preview") {
+            format!("Config Error: Invalid field in [cclip] section{}", 
+                if let Some(field) = unknown_field { 
+                    format!("\n'{}' is not valid here", field) 
+                } else { 
+                    String::new() 
+                })
+        } else {
+            format!("{}\n\nTip: Color/UI options go at root level", original_error)
+        }
     }
 }
 

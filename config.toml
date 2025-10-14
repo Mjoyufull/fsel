@@ -1,4 +1,5 @@
 # ===== BASIC SETTINGS =====
+# These settings go at the ROOT LEVEL (not in any [section])
 
 # Highlight color for selected items and cursor
 highlight_color = "LightBlue"
@@ -24,29 +25,9 @@ hard_stop = false
 # Use rounded corners for panels
 rounded_borders = true
 
-# ===== APP LAUNCHER =====
-[app_launcher]
-
-# Filter apps based on OnlyShowIn/NotShowIn and $XDG_CURRENT_DESKTOP
-# Hides apps not meant for your desktop environment
-filter_desktop = true
-
-# Include raw executables from $PATH (ls, grep, etc.)
-list_executables_in_path = false
-
-# Hide app list until you start typing
-hide_before_typing = false
-
-# Match mode: "fuzzy" or "exact"
-# fuzzy = fzf-style matching (fire matches Firefox)
-# exact = only exact/starts-with/contains matches
-match_mode = "fuzzy"
-
-# Confirm before launching with -p if app has never been launched before
-# Helps prevent accidental launches of wrong apps
-confirm_first_launch = false
-
 # ===== COLORS =====
+# WARNING: Color options go at ROOT LEVEL (not in [app_launcher])
+# Note: Colors can be overridden in [dmenu] and [cclip] sections for mode-specific styling
 # Formats: Named ("Red", "LightBlue"), Hex ("#ff0000", "#f00"), 
 #          RGB ("rgb(255,0,0)"), 8-bit ("196")
 
@@ -81,9 +62,37 @@ input_panel_height = 3
 # Title panel position: "top", "middle", or "bottom"
 title_panel_position = "top"
 
+# ===== SECTIONS =====
+# All sections must be at the bottom of the file!
+
+# ===== APP LAUNCHER =====
+# These settings MUST be in the [app_launcher] section
+# WARNING: DO NOT put color/UI options here - they belong at the root level!
+[app_launcher]
+
+# Filter apps based on OnlyShowIn/NotShowIn and $XDG_CURRENT_DESKTOP
+# Hides apps not meant for your desktop environment
+filter_desktop = true
+
+# Include raw executables from $PATH (ls, grep, etc.)
+list_executables_in_path = false
+
+# Hide app list until you start typing
+hide_before_typing = false
+
+# Match mode: "fuzzy" or "exact"
+# fuzzy = fzf-style matching (fire matches Firefox)
+# exact = only exact/starts-with/contains matches
+match_mode = "fuzzy"
+
+# Confirm before launching with -p if app has never been launched before
+# Helps prevent accidental launches of wrong apps
+confirm_first_launch = false
+
 # ===== DMENU MODE =====
 # Override settings when using --dmenu flag
 # Inherits from main settings if not specified
+# These settings MUST be in the [dmenu] section
 
 [dmenu]
 
@@ -123,6 +132,7 @@ exit_if_empty = false            # Exit if stdin is empty
 # ===== CLIPBOARD MODE =====
 # Override settings when using --cclip flag
 # Inherits from [dmenu] then main settings
+# These settings MUST be in the [cclip] section
 
 [cclip]
 

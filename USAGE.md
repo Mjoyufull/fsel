@@ -13,6 +13,7 @@ fsel
 # Pinned apps always appear first with 📌 icon
 
 # Pre-fill search (works with app launcher, dmenu, and cclip modes)
+# Note: -ss must be the LAST option
 fsel -ss firefox
 
 # Direct launch (no UI)
@@ -28,8 +29,9 @@ fsel --hide-before-typing
 fsel --match-mode=exact
 
 # Cache management
-fsel --clear_cache      # Clear all caches (full rebuild)
-fsel --refresh_cache    # Refresh file list (pick up new apps)
+fsel --clear-cache      # Clear all caches (full rebuild)
+fsel --refresh-cache    # Refresh file list (pick up new apps)
+fsel --clear-history    # Clear launch history
 ```
 
 ### Launch Methods
@@ -39,7 +41,8 @@ fsel
 
 # Through Sway
 fsel  # Auto-detected if $SWAYSOCK is set
-fsel --nosway  # Disable Sway integration
+fsel -s  # Disable Sway integration (short form)
+fsel --nosway  # Disable Sway integration (long form)
 
 # Through systemd
 fsel --systemd-run
@@ -137,30 +140,6 @@ fsel --cclip -ss image
 
 # With image previews (requires Kitty/Sixel terminal + chafa)
 fsel --cclip  # Images show automatically if supported
-```
-
-### Tagging Clipboard Items
-
-Organize clipboard items with tags:
-
-```sh
-# In cclip mode, press Ctrl+T on selected item
-# You'll be prompted for:
-#   1. Tag name (e.g., "prompt", "code", "important")
-#   2. Color (optional: hex, rgb, or named color)
-#   3. Emoji (optional: prefix like 📌 or 🔥)
-
-# Tags appear as [tagname] prefix in the list
-# Example: [prompt] Explain this like I'm 5
-
-# Filter by tag
-fsel --cclip --tag prompt
-
-# List all tags
-fsel --cclip --tag list
-
-# List items in specific tag (verbose shows details)
-fsel --cclip --tag list prompt -vv
 ```
 
 ### Keybindings in cclip mode
@@ -286,5 +265,78 @@ fsel --match-mode=exact
 ```sh
 # Show verbose output
 fsel -vvv
-
 ```
+
+## Configuration
+
+### Config File Structure
+
+Configuration is stored in `~/.config/fsel/config.toml`. **Field placement is critical** - putting options in the wrong section will cause crashes.
+
+#### Correct Structure:
+```toml
+# Root level - UI/Color options go here
+highlight_color = "LightBlue"
+main_border_color = "White"
+pin_color = "Orange"
+terminal_launcher = "kitty -e"
+
+# App launcher specific options
+[app_launcher]
+filter_desktop = true
+list_executables_in_path = false
+
+# Dmenu mode overrides
+[dmenu]
+delimiter = " "
+show_line_numbers = true
+
+# Clipboard mode overrides  
+[cclip]
+image_preview = true
+```
+
+#### Common Mistakes (Will Crash):
+```toml
+# WRONG - Color options in app_launcher section
+[app_launcher]
+main_border_color = "White"  # This will crash!
+filter_desktop = true
+
+# WRONG - App launcher options at root level
+filter_desktop = true  # This should be in [app_launcher]
+```
+
+### Error Messages
+
+If you see errors like:
+```
+Error reading config file: unknown field `pin_color`, expected one of `filter_desktop`, `list_executables_in_path`...
+```
+
+This means you've placed a **color/UI option inside the [app_launcher] section**. Move it to the root level.
+
+### Field Reference
+
+**Root Level Fields:**
+- Colors: `highlight_color`, `main_border_color`, `apps_border_color`, `input_border_color`, `main_text_color`, `apps_text_color`, `input_text_color`, `header_title_color`, `pin_color`
+- UI: `cursor`, `rounded_borders`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
+- Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
+- General: `terminal_launcher`, `keybinds`
+
+**[app_launcher] Section (strict validation):**
+- `filter_desktop`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `confirm_first_launch`
+
+**[dmenu] Section:**
+- Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`
+- UI: `cursor`, `hard_stop`, `rounded_borders`, `disable_mouse`
+- Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
+- Parsing: `delimiter`, `show_line_numbers`, `wrap_long_lines`
+- Behavior: `password_character`, `exit_if_empty`
+
+**[cclip] Section:**
+- Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`
+- UI: `cursor`, `hard_stop`, `rounded_borders`, `disable_mouse`
+- Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
+- Display: `show_line_numbers`, `wrap_long_lines`
+- Images: `image_preview`, `hide_inline_image_message`

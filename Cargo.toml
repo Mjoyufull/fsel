@@ -1,6 +1,6 @@
 [package]
 name = "fsel"
-version = "2.0.0-seedclay"
+version = "2.0.1-seedclay"
 authors = ["Mjoyufull <https://github.com/Mjoyufull>"]
 edition = "2021"
 rust-version = "1.70"

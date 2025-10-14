@@ -1,5 +1,19 @@
 # Fsel Color Examples - All Supported Color Formats
 # Copy any of these to your ~/.config/fsel/config.toml
+#
+# WARNING: Color options shown here belong at the ROOT LEVEL by default
+#    DO NOT put them inside [app_launcher] section!
+#    Colors CAN be overridden in [dmenu] and [cclip] sections for mode-specific styling
+#
+# CORRECT placement:
+#    highlight_color = "LightBlue"
+#    [app_launcher]
+#    filter_desktop = true
+#
+# WRONG placement :
+#    [app_launcher]
+#    highlight_color = "LightBlue"  # This will crash!
+#    filter_desktop = true
 
 # === NAMED COLORS ===
 # Basic colors
