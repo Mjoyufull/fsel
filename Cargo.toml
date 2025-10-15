@@ -1,6 +1,6 @@
 [package]
 name = "fsel"
-version = "2.0.1-seedclay"
+version = "2.1.0-seedclay"
 authors = ["Mjoyufull <https://github.com/Mjoyufull>"]
 edition = "2021"
 rust-version = "1.70"
@@ -27,7 +27,7 @@ eyre = "0.6"
 lexopt = "0.3"
 directories = "5.0"
 dirs = "5.0"
-nucleo-matcher = "0.3"
+nucleo-matcher = "0.3.1"
 libc = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 shell-words = "1.1"

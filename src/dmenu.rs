@@ -133,12 +133,22 @@ impl DmenuItem {
         }
 
         // Try to match against display text first (most common case)
-        if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(self.display_text.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+        let query_lower = query.to_lowercase();
+        let mut query_chars = Vec::new();
+        let query_utf32 = Utf32Str::new(&query_lower, &mut query_chars);
+        
+        let display_lower = self.display_text.to_lowercase();
+        let mut display_chars = Vec::new();
+        let display_utf32 = Utf32Str::new(&display_lower, &mut display_chars);
+        if let Some(score) = matcher.fuzzy_match(display_utf32, query_utf32) {
             return Some((score as i64) * 2); // Boost display text matches
         }
 
         // Fallback to matching against original line
-        matcher.fuzzy_match(Utf32Str::Ascii(self.original_line.as_bytes()), Utf32Str::Ascii(query.as_bytes())).map(|s| s as i64)
+        let original_lower = self.original_line.to_lowercase();
+        let mut original_chars = Vec::new();
+        let original_utf32 = Utf32Str::new(&original_lower, &mut original_chars);
+        matcher.fuzzy_match(original_utf32, query_utf32).map(|s| s as i64)
     }
     
     /// Calculate exact match score against query
@@ -199,10 +209,17 @@ impl DmenuItem {
         
         let mut best_score = None;
         
+        let query_lower = query.to_lowercase();
+        let mut query_chars = Vec::new();
+        let query_utf32 = Utf32Str::new(&query_lower, &mut query_chars);
+        
         for &col_idx in match_nth {
             if col_idx > 0 && col_idx <= self.columns.len() {
                 let col_text = &self.columns[col_idx - 1];
-                if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(col_text.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+                let col_lower = col_text.to_lowercase();
+                let mut col_chars = Vec::new();
+                let col_utf32 = Utf32Str::new(&col_lower, &mut col_chars);
+                if let Some(score) = matcher.fuzzy_match(col_utf32, query_utf32) {
                     best_score = Some(best_score.map_or(score as i64, |current: i64| current.max(score as i64)));
                 }
             }

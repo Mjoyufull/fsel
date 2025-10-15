@@ -16,51 +16,95 @@ impl Default for MatchMode {
 }
 
 fn usage() -> ! {
+    let cmd = env::args().next().unwrap_or_else(|| "fsel".to_string());
+
     println!(
-        "Usage: {} [options]
+        "fsel — Fast terminal application launcher
+Usage:
+  {cmd} [OPTIONS]
 
-App Launcher Options:
-  -s, --nosway                  Disable Sway integration.
-  -c, --config <config>         Specify a config file.
-  -r, --replace                 Replace existing fsel instances
-      --clear-history           Clear launch history.
-      --clear-cache             Clear desktop file cache.
-      --refresh-cache           Force refresh of desktop file list.
-  -p, --program <name>          Launch program directly (bypass TUI).
-  -ss <search>                  Pre-fill search in TUI (must be last option).
-  -v, --verbose                 Increase verbosity level (multiple).
-      --no-exec                 Print selected application to stdout instead of launching.
-      --systemd-run             Launch applications using systemd-run --user --scope.
-      --uwsm                    Launch applications using uwsm app.
-      --filter-desktop[=no]     Filter apps by OnlyShowIn/NotShowIn (default: yes).
-      --list-executables-in-path Include executables from $PATH.
-      --hide-before-typing      Hide list until first character typed.
-      --match-mode <mode>       Match mode: 'fuzzy' or 'exact' (default: fuzzy).
+Core Modes:
+  -p, --program <NAME>   Launch program directly (bypass TUI)
+      --cclip            Clipboard history mode
+      --dmenu            Dmenu-compatible mode
 
-Dmenu Mode Options:
-      --dmenu                   Dmenu mode: read from stdin, output selection to stdout.
-      --dmenu0                  Like --dmenu but null-separated input.
-      --password[=char]         Password mode: mask input (default char: *).
-      --index                   Output index instead of text.
-      --with-nth <cols>         Display only specified columns (comma-separated, e.g., 1,3).
-      --accept-nth <cols>       Output only specified columns.
-      --match-nth <cols>        Match against only specified columns.
-      --delimiter <char>        Column delimiter (default: space).
-      --only-match              Don't allow custom input, only return selected items.
-      --exit-if-empty           Exit immediately if stdin is empty.
-      --select <string>         Pre-select first matching entry.
-      --select-index <n>        Pre-select entry at index n.
-      --auto-select             Auto-select when only one match remains.
-      --prompt-only             Prompt-only mode: no list, just input.
+Control Flags:
+  -r, --replace          Replace running fsel/cclip instance
+  -d, --detach           Detach launched applications (GUI-safe)
+  -v, --verbose          Increase verbosity (repeatable)
+      --systemd-run      Launch via systemd-run --user --scope
+      --uwsm             Launch via uwsm app
 
-Clipboard Mode Options:
-      --cclip                   Clipboard history mode: browse cclip history with previews.
+Quick Extras:
+      --clear-cache      Clear app cache
+      --refresh-cache    Rescan desktop entries
+      --filter-desktop[=no] Respect OnlyShowIn/NotShowIn (default: yes)
 
-General Options:
-  -h, --help                    Show this help message.
-  -V, --version                 Show the version number and quit.
+Help:
+  -H, --help             Show detailed option tree
+  -h                     Show this overview
+  -V, --version          Show version info
 ",
-        &env::args().next().unwrap_or_else(|| "fsel".to_string())
+        cmd = cmd
+    );
+    std::process::exit(0);
+}
+
+fn detailed_usage() -> ! {
+    let cmd = env::args().next().unwrap_or_else(|| "fsel".to_string());
+
+    println!(
+        "fsel — Fast terminal application launcher
+Usage:
+  {cmd} [OPTIONS]
+
+├─ Core Modes
+│  ├─ -p, --program <NAME>         Launch program directly (bypass TUI)
+│  ├─ --cclip                      Clipboard history mode
+│  └─ --dmenu                      Dmenu-compatible mode
+│
+├─ Control Flags
+│  ├─ -r, --replace                Replace running fsel/cclip instance
+│  ├─ -d, --detach                 Detach launched applications (GUI-safe)
+│  ├─ -v, --verbose                Increase verbosity (repeatable)
+│  ├─ --systemd-run                Launch via systemd-run --user --scope
+│  ├─ --uwsm                       Launch via uwsm app
+│  ├─ --no-exec                    Print selection to stdout instead of launching
+│  └─ -ss <SEARCH>                 Pre-fill TUI search (must be last option)
+│
+├─ Quick Extras
+│  ├─ --clear-history              Clear launch history
+│  ├─ --clear-cache                Clear app cache
+│  ├─ --refresh-cache              Rescan desktop entries
+│  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn (default: yes)
+│  ├─ --hide-before-typing         Hide list until first character typed
+│  ├─ --list-executables-in-path   Include executables from $PATH
+│  └─ --match-mode <MODE>          fuzzy | exact (default: fuzzy)
+│
+├─ Dmenu Mode Options
+│  ├─ --dmenu0                     Like --dmenu but null-separated input
+│  ├─ --password[=CHAR]            Password mode (mask input)
+│  ├─ --index                      Output index instead of text
+│  ├─ --with-nth <COLS>            Display only specific columns (e.g. 1,3)
+│  ├─ --accept-nth <COLS>          Output only specified columns
+│  ├─ --match-nth <COLS>           Match only specified columns
+│  ├─ --delimiter <CHAR>           Column delimiter (default: space)
+│  ├─ --only-match                 Disallow custom input
+│  ├─ --exit-if-empty              Exit if stdin is empty
+│  ├─ --select <STRING>            Preselect matching entry
+│  ├─ --select-index <N>           Preselect entry by index
+│  ├─ --auto-select                Auto-select when one match remains
+│  └─ --prompt-only                Input-only mode (no list)
+│
+├─ Clipboard
+│  └─ --cclip                      Clipboard history viewer with previews
+│
+└─ General
+   ├─ -h                           Show short help
+   ├─ -H, --help                   Show detailed help
+   └─ -V, --version                Show version info
+",
+        cmd = cmd
     );
     std::process::exit(0);
 }
@@ -96,6 +140,8 @@ pub struct Opts {
     pub systemd_run: bool,
     /// Launch applications using uwsm app
     pub uwsm: bool,
+    /// Detach launched applications from terminal session
+    pub detach: bool,
     /// Use rounded borders
     pub rounded_borders: bool,
     /// Border colors for different panels
@@ -213,6 +259,7 @@ impl Default for Opts {
             no_exec: false,
             systemd_run: false,
             uwsm: false,
+            detach: false,
             rounded_borders: true,
             main_border_color: ratatui::style::Color::White,
             apps_border_color: ratatui::style::Color::White,
@@ -367,6 +414,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             Long("uwsm") => {
                 default.uwsm = true;
             }
+            Short('d') | Long("detach") => {
+                default.detach = true;
+            }
             Long("dmenu") => {
                 default.dmenu_mode = true;
             }
@@ -475,8 +525,11 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                     default.verbose = Some(1);
                 }
             }
-            Short('h') | Long("help") => {
+            Short('h') => {
                 usage();
+            }
+            Short('H') | Long("help") => {
+                detailed_usage();
             }
             Short('V') | Long("version") => {
                 println!("{}", env!("CARGO_PKG_VERSION"));
@@ -518,7 +571,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 eprintln!("Available options:");
                 eprintln!("  -s, --nosway           Disable Sway integration");
                 eprintln!("  -c, --config <file>    Specify config file");
-                eprintln!("  -r, --replace          Replace existing instance");
+                eprintln!("  -r, --replace          Replace existing instance (fsel/cclip only)");
                 eprintln!("  -p, --program [name]   Launch program directly (optional)");
                 eprintln!("  -ss <search>           Pre-fill search (must be last)");
                 eprintln!("  -v, --verbose          Increase verbosity");
@@ -529,6 +582,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 eprintln!("      --no-exec          Print command instead of running");
                 eprintln!("      --systemd-run      Use systemd-run");
                 eprintln!("      --uwsm             Use uwsm");
+                eprintln!("  -d, --detach           Detach from terminal");
                 eprintln!();
                 eprintln!("For more details, use: fsel --help");
                 std::process::exit(1);

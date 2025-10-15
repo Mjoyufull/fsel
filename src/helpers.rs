@@ -2,7 +2,9 @@
 
 use directories::ProjectDirs;
 use eyre::{eyre, Result, WrapErr};
+use std::ffi::CString;
 use std::fs;
+use std::io;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use redb::ReadableDatabase;
@@ -124,9 +126,12 @@ pub fn launch_app(
     let mut runner: Vec<&str> = vec![];
     
     if cli.uwsm {
-        runner.extend_from_slice(&["uwsm", "app", "--"]);
+        runner.insert(0, "uwsm");
+        runner.insert(1, "app");
     } else if cli.systemd_run {
-        runner.extend_from_slice(&["systemd-run", "--user", "--scope", "--"]);
+        runner.insert(0, "systemd-run");
+        runner.insert(1, "--user");
+        runner.insert(2, "--scope");
     } else if cli.sway {
         runner.extend_from_slice(&["swaymsg", "exec", "--"]);
     }
@@ -140,22 +145,52 @@ pub fn launch_app(
     let mut exec = process::Command::new(runner[0]);
     exec.args(&runner[1..]);
     
-    #[allow(unsafe_code)]
-    unsafe {
-        exec.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
+    let use_uwsm_or_systemd = cli.uwsm || cli.systemd_run;
+    
+    // Only use pre_exec for detachment when explicitly requested
+    if !use_uwsm_or_systemd && cli.detach {
+        #[allow(unsafe_code)]
+        unsafe {
+            exec.pre_exec(move || {
+                if libc::setsid() == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+
+                libc::signal(libc::SIGHUP, libc::SIG_IGN);
+
+                let c_path = CString::new("/dev/null").map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+                let null_fd = libc::open(c_path.as_ptr(), libc::O_RDWR);
+                if null_fd == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+
+                let dup = |fd: libc::c_int| -> io::Result<()> {
+                    if libc::dup2(null_fd, fd) == -1 {
+                        Err(io::Error::last_os_error())
+                    } else {
+                        Ok(())
+                    }
+                };
+
+                dup(libc::STDIN_FILENO)?;
+                dup(libc::STDOUT_FILENO)?;
+                dup(libc::STDERR_FILENO)?;
+
+                libc::close(null_fd);
+
+                Ok(())
+            });
+        }
     }
     
-    if cli.verbose.unwrap_or(0) > 0 {
-        exec.stdin(process::Stdio::null())
-            .stdout(process::Stdio::null())
-            .stderr(process::Stdio::null())
-            .spawn()?;
-    } else {
-        exec.spawn()?;
+    // Redirect stdio when detach is requested; allow uwsm/systemd-run to inherit otherwise
+    if cli.detach {
+        exec.stdin(process::Stdio::null());
+        exec.stdout(process::Stdio::null());
+        exec.stderr(process::Stdio::null());
     }
+
+    exec.spawn()?;
     
     // update history
     let value = app.history + 1;

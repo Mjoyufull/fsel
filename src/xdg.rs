@@ -135,7 +135,7 @@ pub fn read_with_options(
                 for dir in &dirs {
                     for entry in WalkDir::new(dir)
                         .min_depth(1)
-                        .max_depth(3)
+                        .max_depth(5)
                         .into_iter()
                         .filter_map(Result::ok)
                         .filter(|entry| {
@@ -156,7 +156,7 @@ pub fn read_with_options(
             for dir in &dirs {
                 for entry in WalkDir::new(dir)
                     .min_depth(1)
-                    .max_depth(3)
+                    .max_depth(5)
                     .into_iter()
                     .filter_map(Result::ok)
                     .filter(|entry| {
@@ -189,7 +189,7 @@ pub fn read_with_options(
                                 continue;
                             }
                             
-                            match App::parse(&contents, None) {
+                            match App::parse(&contents, None, filter_desktop) {
                                 Ok(mut app) => {
                                     if let Some(file_name) = file_path_ref.file_name().and_then(|n| n.to_str()) {
                                         app.desktop_id = Some(file_name.to_string());
@@ -211,7 +211,7 @@ pub fn read_with_options(
                             continue;
                         }
                         
-                        match App::parse(&contents, None) {
+                        match App::parse(&contents, None, filter_desktop) {
                             Ok(mut app) => {
                                 if let Some(file_name) = file_path_ref.file_name().and_then(|n| n.to_str()) {
                                     app.desktop_id = Some(file_name.to_string());
@@ -256,7 +256,7 @@ pub fn read_with_options(
                 if let Some(contents) = contents {
                     for action in actions {
                         let ac = Action::default().name(action).from(app.name.clone());
-                        if let Ok(mut a) = App::parse(&contents, Some(&ac)) {
+                        if let Ok(mut a) = App::parse(&contents, Some(&ac), filter_desktop) {
                             if let Some(file_name) = file_path_ref.file_name().and_then(|n| n.to_str()) {
                                 a.desktop_id = Some(format!("{}#{}", file_name, action));
                             }
@@ -473,7 +473,7 @@ impl App {
     /// Parse an application with full XDG Desktop Entry specification support
     /// Includes localization, all standard fields, and proper validation
     /// Optimized to stop parsing after finding the needed section
-    pub fn parse<T: AsRef<str>>(contents: T, action: Option<&Action>) -> eyre::Result<App> {
+    pub fn parse<T: AsRef<str>>(contents: T, action: Option<&Action>, filter_desktop: bool) -> eyre::Result<App> {
         let contents: &str = contents.as_ref();
         let locales = get_locale();
         
@@ -648,8 +648,9 @@ impl App {
         }
         let command = exec.unwrap();
 
-        // Skip hidden apps (always skip these per XDG spec)
-        if hidden || no_display {
+        // Skip hidden apps (always skip Hidden=true per XDG spec)
+        // But respect filter_desktop flag for NoDisplay=true
+        if hidden || (filter_desktop && no_display) {
             return Err(eyre!("Application is hidden"));
         }
 

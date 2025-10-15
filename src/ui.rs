@@ -222,7 +222,7 @@ impl<'a> UI<'a> {
     /// Static version for parallel processing (thread-safe)
     fn calculate_match_score_static(app: &xdg::App, query: &str) -> Option<i64> {
         use nucleo_matcher::{Matcher, Config};
-        let mut matcher = Matcher::new(Config::DEFAULT);
+        let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
         Self::calculate_match_score_with_matcher(app, query, &mut matcher)
     }
     
@@ -233,16 +233,17 @@ impl<'a> UI<'a> {
         if query.is_empty() {
             return Some(0);
         }
-        
+
         let query_lower = query.to_lowercase();
-        let mut best_score = None;
-        
+        let mut query_chars = Vec::new();
+        let query_utf32 = Utf32Str::new(&query_lower, &mut query_chars);
+        let mut best_score: Option<i64> = None;
+
         // Extract executable name from command
         let exec_name = crate::helpers::extract_exec_name(&app.command);
-        
         if !exec_name.is_empty() {
             let exec_name_lower = exec_name.to_lowercase();
-        
+
             // Check executable name first (highest priority)
             if exec_name_lower == query_lower {
                 let mut score = 1_000_000;
@@ -252,15 +253,16 @@ impl<'a> UI<'a> {
                 score += app.history as i64 * 10;
                 return Some(score);
             } else if exec_name_lower.starts_with(&query_lower) {
-                best_score = Some(900_000);
+                best_score = Some(best_score.map_or(900_000, |current| current.max(900_000)));
             } else {
-                // Use nucleo's SIMD-accelerated fuzzy matching
-                if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(exec_name.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
-                    best_score = Some((score as i64) * 4);
+                let mut exec_name_chars = Vec::new();
+                let exec_name_utf32 = Utf32Str::new(&exec_name_lower, &mut exec_name_chars);
+                if let Some(score) = matcher.fuzzy_match(exec_name_utf32, query_utf32) {
+                    best_score = Some(best_score.map_or((score as i64) * 4, |current| current.max((score as i64) * 4)));
                 }
             }
         }
-        
+
         // Match against app name
         let app_name_lower = app.name.to_lowercase();
         if app_name_lower == query_lower {
@@ -271,62 +273,78 @@ impl<'a> UI<'a> {
             score += app.history as i64 * 10;
             return Some(score);
         } else if app_name_lower.starts_with(&query_lower) {
-            let score = 700_000 + 10000;
+            let score = 710_000; // Prefix boost over fuzzy matches
             best_score = Some(best_score.map_or(score, |current| current.max(score)));
         } else {
-            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(app.name.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+            let mut app_name_chars = Vec::new();
+            let app_name_utf32 = Utf32Str::new(&app_name_lower, &mut app_name_chars);
+            if let Some(score) = matcher.fuzzy_match(app_name_utf32, query_utf32) {
                 let mut score_i64 = score as i64;
-                // Word boundary boost
-                if app_name_lower.split_whitespace().any(|word| word.starts_with(&query_lower)) {
-                    score_i64 += 5000;
+                if app_name_lower
+                    .split_whitespace()
+                    .any(|word| word.starts_with(&query_lower))
+                {
+                    score_i64 += 5_000;
                 }
                 let boosted_score = score_i64 * 3;
                 best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
         }
-        
+
         // Match against generic name
         if let Some(ref generic_name) = app.generic_name {
             let generic_lower = generic_name.to_lowercase();
-            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(generic_name.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+            let mut generic_name_chars = Vec::new();
+            let generic_name_utf32 = Utf32Str::new(&generic_lower, &mut generic_name_chars);
+            if let Some(score) = matcher.fuzzy_match(generic_name_utf32, query_utf32) {
                 let mut score_i64 = score as i64;
                 if generic_lower == query_lower {
                     score_i64 = 700_000;
                 } else if generic_lower.starts_with(&query_lower) {
-                    score_i64 += 8000;
+                    score_i64 += 8_000;
                 }
                 let boosted_score = score_i64 * 2;
                 best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
         }
-        
+
         // Match against keywords
         for keyword in &app.keywords {
             let keyword_lower = keyword.to_lowercase();
-            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(keyword.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
+            let mut keyword_chars = Vec::new();
+            let keyword_utf32 = Utf32Str::new(&keyword_lower, &mut keyword_chars);
+            if let Some(score) = matcher.fuzzy_match(keyword_utf32, query_utf32) {
                 let mut score_i64 = score as i64;
                 if keyword_lower == query_lower {
                     score_i64 = 600_000;
                 } else if keyword_lower.starts_with(&query_lower) {
-                    score_i64 += 6000;
+                    score_i64 += 6_000;
                 }
                 let boosted_score = score_i64 * 2;
                 best_score = Some(best_score.map_or(boosted_score, |current| current.max(boosted_score)));
             }
         }
-        
+
         // Match against description (lower priority)
-        if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(app.description.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
-            best_score = Some(best_score.map_or(score as i64, |current| current.max(score as i64)));
+        let mut description_chars = Vec::new();
+        let description_lower = app.description.to_lowercase();
+        let description_utf32 = Utf32Str::new(&description_lower, &mut description_chars);
+        if let Some(score) = matcher.fuzzy_match(description_utf32, query_utf32) {
+            let score_i64 = score as i64;
+            best_score = Some(best_score.map_or(score_i64, |current| current.max(score_i64)));
         }
-        
+
         // Match against categories (lower priority)
         for category in &app.categories {
-            if let Some(score) = matcher.fuzzy_match(Utf32Str::Ascii(category.as_bytes()), Utf32Str::Ascii(query.as_bytes())) {
-                best_score = Some(best_score.map_or(score as i64, |current| current.max(score as i64)));
+            let mut category_chars = Vec::new();
+            let category_lower = category.to_lowercase();
+            let category_utf32 = Utf32Str::new(&category_lower, &mut category_chars);
+            if let Some(score) = matcher.fuzzy_match(category_utf32, query_utf32) {
+                let score_i64 = score as i64;
+                best_score = Some(best_score.map_or(score_i64, |current| current.max(score_i64)));
             }
         }
-        
+
         // Apply pinned and history boosts
         if let Some(mut score) = best_score {
             if app.pinned {
@@ -336,16 +354,16 @@ impl<'a> UI<'a> {
                     score += 50_000;
                 }
             }
-            
+
             score = if score >= 600_000 {
                 score + (app.history as i64 * 10)
             } else {
                 score + (app.history as i64 * 100)
             };
-            
+
             best_score = Some(score);
         }
-        
+
         best_score
     }
     
@@ -443,113 +461,14 @@ impl<'a> UI<'a> {
             if app.pinned {
                 s += 50000;
             }
+            
             score = Some(s);
         }
         
         score
     }
-    
 
-    
-    /// Old implementation kept for reference
-    fn _calculate_exact_match_score_old(&mut self, app: &xdg::App) -> Option<i64> {
-        if self.query.is_empty() {
-            return Some(0);
-        }
-        
-        let query_lower = self.query.to_lowercase();
-        
-        // Extract executable name from command
-        let exec_name = crate::helpers::extract_exec_name(&app.command);
-        let exec_name_lower = exec_name.to_lowercase();
-        
-        // Exact match on executable (highest priority) - early return
-        if !exec_name.is_empty() && exec_name_lower == query_lower {
-            let mut score = 100000;
-            if app.pinned {
-                score += 50000;
-            }
-            return Some(score);
-        }
-        
-        // Exact match on name - early return
-        let app_name_lower = app.name.to_lowercase();
-        if app_name_lower == query_lower {
-            let mut score = 90000;
-            if app.pinned {
-                score += 50000;
-            }
-            return Some(score);
-        }
-        
-        // Exact match on generic name - early return
-        if let Some(ref generic_name) = app.generic_name {
-            let generic_lower = generic_name.to_lowercase();
-            if generic_lower == query_lower {
-                let mut score = 80000;
-                if app.pinned {
-                    score += 50000;
-                }
-                return Some(score);
-            }
-        }
-        
-        let mut score = None;
-        
-        // Prefix match on executable
-        if !exec_name.is_empty() && exec_name_lower.starts_with(&query_lower) {
-            score = Some(70000);
-        }
-        // Prefix match on name
-        else if app_name_lower.starts_with(&query_lower) {
-            score = Some(60000);
-        }
-        // Prefix match on generic name
-        else if let Some(ref generic_name) = app.generic_name {
-            if generic_name.to_lowercase().starts_with(&query_lower) {
-                score = Some(50000);
-            }
-        }
-        
-        // Contains query in executable
-        if score.is_none() && !exec_name.is_empty() && exec_name_lower.contains(&query_lower) {
-            score = Some(4000);
-        }
-        // Contains query in name
-        else if score.is_none() && app_name_lower.contains(&query_lower) {
-            score = Some(3000);
-        }
-        
-        // Check keywords (only if no match yet)
-        if score.is_none() && !app.keywords.is_empty() {
-            for keyword in &app.keywords {
-                let keyword_lower = keyword.to_lowercase();
-                if keyword_lower == query_lower {
-                    score = Some(2000);
-                    break;
-                }
-                if keyword_lower.contains(&query_lower) {
-                    score = Some(1000);
-                    break;
-                }
-            }
-        }
-        
-        // Check description (only if no match yet)
-        if score.is_none() && app.description.to_lowercase().contains(&query_lower) {
-            score = Some(500);
-        }
-        
-        // Apply pin boost
-        if let Some(mut s) = score {
-            if app.pinned {
-                s += 50000;
-            }
-            score = Some(s);
-        }
-        
-        score
-    }
+
 }
 
 /// Dmenu-specific UI for filtering and sorting
@@ -613,7 +532,7 @@ impl<'a> DmenuUI<'a> {
             match_mode: crate::cli::MatchMode::Fuzzy,
             match_nth: None,
             tag_mode: TagMode::Normal,
-            matcher: Matcher::new(Config::DEFAULT),
+            matcher: Matcher::new(Config::DEFAULT.match_paths()),
         }
     }
     

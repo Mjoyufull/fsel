@@ -1,4 +1,4 @@
-.TH FSEL 1 "2025-01-12" "2.0.0-seedclay" "User Commands"
+.TH FSEL 1 "2025-10-15" "2.1.0-seedclay" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -17,7 +17,7 @@ Disable Sway integration (enabled by default when $SWAYSOCK is set)
 Specify a config file (default: ~/.config/fsel/config.toml)
 .TP
 .BR \-r ", " \-\-replace
-Replace existing fsel instances
+Replace existing fsel or cclip instances; terminates lingering processes before reopening the database
 .TP
 .B \-\-clear-history
 Clear launch history database
@@ -41,10 +41,10 @@ Increase verbosity level (can be used multiple times: -v, -vv, -vvv)
 Print selected application to stdout instead of launching
 .TP
 .B \-\-systemd-run
-Launch applications using systemd-run --user --scope
+Launch applications using systemd-run --user --scope (pairs with -d/--detach)
 .TP
 .B \-\-uwsm
-Launch applications using uwsm app
+Launch applications using uwsm app (pairs with -d/--detach)
 .TP
 .BR \-\-filter-desktop [=\fIno\fR]
 Filter apps by OnlyShowIn/NotShowIn fields (default: yes)
@@ -55,8 +55,11 @@ Include executables from $PATH alongside desktop apps
 .B \-\-hide-before-typing
 Hide list until first character is typed
 .TP
-.BR \-\-match-mode " " \fIMODE\fR
+.B \-\-match-mode " " \fIMODE\fR
 Match mode: 'fuzzy' or 'exact' (default: fuzzy)
+.TP
+.BR \-d ", " \-\-detach
+Detach launched applications from terminal session (compatible with --systemd-run and --uwsm)
 .SS "Dmenu Mode Options"
 .TP
 .B \-\-dmenu
@@ -115,8 +118,11 @@ List all tags (use with --cclip)
 List items with specific tag (use with --cclip)
 .SS "General Options"
 .TP
-.BR \-h ", " \-\-help
-Show help message
+.BR \-h
+Show concise help overview
+.TP
+.BR \-H ", " \-\-help
+Show detailed tree-style help covering all modes
 .TP
 .BR \-V ", " \-\-version
 Show version number

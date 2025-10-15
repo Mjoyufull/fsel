@@ -41,7 +41,7 @@
 - Terminal emulator
 
 **Optional:**
-- `cclip` - for clipboard history mode
+- [`cclip`](https://github.com/heather7283/cclip) - for clipboard history mode
 - `chafa` - for image previews in cclip mode
 - Kitty or Sixel-capable terminal - for best image support
 
@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.0.1-seedclay
+    $ cargo install fsel@2.1.0-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.0.1-seedclay --force
+    $ cargo install fsel@2.1.0-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -326,46 +326,35 @@ See [USAGE.md](./USAGE.md) for more examples and advanced usage.
 ```
 Usage: fsel [options]
 
-App Launcher Options:
-  -s, --nosway                  Disable Sway integration
-  -c, --config <config>         Specify a config file
-  -r, --replace                 Replace existing fsel instances
-      --clear-history           Clear launch history
-      --clear-cache             Clear desktop file cache
-      --refresh-cache           Force refresh of desktop file list
-  -p, --program [name]          Launch program directly (optional, min 2 chars)
-  -ss <search>                  Pre-fill search in TUI (must be last option)
-  -v, --verbose                 Increase verbosity level (multiple)
-      --no-exec                 Print selected application to stdout instead of launching
-      --systemd-run             Launch applications using systemd-run --user --scope
-      --uwsm                    Launch applications using uwsm app
-      --filter-desktop[=no]     Filter apps by OnlyShowIn/NotShowIn (default: yes)
+Core Modes:
+  -p, --program <name>   Launch program directly (bypass TUI)
+      --cclip            Clipboard history mode
+      --dmenu            Dmenu-compatible mode
+
+Control Flags:
+  -r, --replace          Replace running fsel or cclip instance
+  -d, --detach           Detach launched applications (works with uwsm/systemd-run)
+  -v, --verbose          Increase verbosity (repeatable)
+      --systemd-run      Launch via systemd-run --user --scope
+      --uwsm             Launch via uwsm app
+      --no-exec          Print selected command instead of launching
+  -ss <search>           Pre-fill search (must be last option)
+
+Quick Extras:
+      --clear-history    Clear launch history database
+      --clear-cache      Clear cached desktop entries
+      --refresh-cache    Refresh desktop file list
+      --filter-desktop[=no] Respect OnlyShowIn/NotShowIn (default: yes)
       --list-executables-in-path Include executables from $PATH
-      --hide-before-typing      Hide list until first character typed
-      --match-mode <mode>       Match mode: 'fuzzy' or 'exact' (default: fuzzy)
+      --hide-before-typing Hide list until input typed
+      --match-mode <mode> fuzzy | exact (default: fuzzy)
 
-Dmenu Mode Options:
-      --dmenu                   Dmenu mode: read from stdin, output selection to stdout
-      --dmenu0                  Like --dmenu but null-separated input
-      --password[=char]         Password mode: mask input (default char: *)
-      --index                   Output index instead of text
-      --with-nth <cols>         Display only specified columns (comma-separated, e.g., 1,3)
-      --accept-nth <cols>       Output only specified columns
-      --match-nth <cols>        Match against only specified columns
-      --delimiter <char>        Column delimiter (default: space)
-      --only-match              Don't allow custom input, only return selected items
-      --exit-if-empty           Exit immediately if stdin is empty
-      --select <string>         Pre-select first matching entry
-      --select-index <n>        Pre-select entry at index n
-      --auto-select             Auto-select when only one match remains
-      --prompt-only             Prompt-only mode: no list, just input
+Help:
+  -H, --help             Show detailed option tree (same as `fsel -H`)
+  -h                     Show concise overview
+  -V, --version          Show version number and exit
 
-Clipboard Mode Options:
-      --cclip                   Clipboard history mode: browse cclip history with previews
-
-General Options:
-  -h, --help                    Show this help message
-  -V, --version                 Show the version number and quit
+Run `fsel -H` or `fsel --help` to see the full tree-style reference covering every dmenu and clipboard flag.
 ```
 
 #### Launch Methods

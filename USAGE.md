@@ -32,6 +32,11 @@ fsel --match-mode=exact
 fsel --clear-cache      # Clear all caches (full rebuild)
 fsel --refresh-cache    # Refresh file list (pick up new apps)
 fsel --clear-history    # Clear launch history
+
+# Replace existing instances (fsel and cclip modes only)
+fsel -r                 # Replace running fsel instance (ensures previous session exits)
+fsel --cclip -r         # Replace running cclip instance
+# Not supported in --dmenu mode
 ```
 
 ### Launch Methods
@@ -46,9 +51,15 @@ fsel --nosway  # Disable Sway integration (long form)
 
 # Through systemd
 fsel --systemd-run
+fsel --systemd-run --detach   # Fully detached using systemd scope
 
 # Through uwsm
 fsel --uwsm
+fsel --uwsm --detach          # Fully detached via uwsm
+
+# Detach from terminal (prevents apps from being killed when terminal closes)
+# Useful for apps like Discord or Steam; works standalone or with --systemd-run/--uwsm
+fsel --detach
 
 # Print command instead of running
 fsel --no-exec
@@ -263,6 +274,12 @@ fsel --match-mode=exact
 
 ### Debugging
 ```sh
+# Quick overview grouped by mode/flags
+fsel -h
+
+# Full tree-style reference covering every option
+fsel -H
+
 # Show verbose output
 fsel -vvv
 ```

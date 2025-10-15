@@ -32,6 +32,7 @@ use input::Event;
 use ui::{UI, DmenuUI};
 use dmenu::{is_stdin_piped, read_stdin_lines, parse_stdin_to_items};
 
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io;
@@ -81,6 +82,67 @@ fn shutdown_terminal(disable_mouse: bool) {
     }
     let _ = io::stderr().execute(LeaveAlternateScreen);
     let _ = disable_raw_mode();
+}
+
+fn find_processes_holding_file(path: &path::Path) -> io::Result<Vec<i32>> {
+    let mut holders = Vec::new();
+
+    if !path.exists() {
+        return Ok(holders);
+    }
+
+    let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let canonical_str = canonical.to_string_lossy();
+
+    let proc_entries = match fs::read_dir("/proc") {
+        Ok(entries) => entries,
+        Err(_) => return Ok(holders),
+    };
+
+    for entry in proc_entries {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let file_name = entry.file_name();
+        let pid: i32 = match file_name.to_str().and_then(|s| s.parse().ok()) {
+            Some(pid) => pid,
+            None => continue,
+        };
+
+        let fd_dir = entry.path().join("fd");
+        let fd_entries = match fs::read_dir(fd_dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for fd_entry in fd_entries {
+            let fd_entry = match fd_entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let target = match fs::read_link(fd_entry.path()) {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+
+            if target == canonical {
+                holders.push(pid);
+                break;
+            }
+
+            if let Some(target_str) = target.to_str() {
+                if target_str.starts_with(canonical_str.as_ref()) {
+                    holders.push(pid);
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(holders)
 }
 
 async fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
@@ -1868,7 +1930,7 @@ fn find_app_by_name_fast(db: &std::sync::Arc<redb::Database>, app_name: &str, cl
     for dir in &dirs {
         for entry in WalkDir::new(dir)
             .min_depth(1)
-            .max_depth(3)
+            .max_depth(5)
             .into_iter()
             .filter_map(Result::ok)
             .filter(|entry| {
@@ -1889,7 +1951,7 @@ fn find_app_by_name_fast(db: &std::sync::Arc<redb::Database>, app_name: &str, cl
                             continue;
                         }
                         
-                        match xdg::App::parse(&contents, None) {
+                        match xdg::App::parse(&contents, None, cli.filter_desktop) {
                             Ok(mut app) => {
                                 if let Some(file_name) = file_path.file_name().and_then(|n| n.to_str()) {
                                     app.desktop_id = Some(file_name.to_string());
@@ -2039,7 +2101,7 @@ fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> eyre::Result<
     }
     
     // Find the best match using improved matching logic for -p
-    let mut matcher = Matcher::new(Config::DEFAULT);
+    let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
     let mut best_app: Option<(xdg::App, i64)> = None;
     
     for app in all_apps {
@@ -2173,6 +2235,63 @@ fn real_main() -> eyre::Result<()> {
             std::process::exit(1);
         }
         
+        // Handle lock file for cclip mode
+        let lock_path = if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
+            let mut cache_dir = project_dirs.cache_dir().to_path_buf();
+            if !cache_dir.exists() {
+                fs::create_dir_all(&cache_dir)?;
+            }
+            cache_dir.push("fsel-cclip.lock");
+            cache_dir
+        } else {
+            return Err(eyre!("can't find cache dir for {}", env!("CARGO_PKG_NAME")));
+        };
+
+        let contents = match fs::read_to_string(&lock_path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+            Ok(c) => c,
+            Err(e) => {
+                return Err(e).wrap_err("Failed to read cclip lockfile");
+            }
+        };
+
+        if !contents.is_empty() {
+            if cli.replace {
+                let pid: i32 = contents
+                    .parse()
+                    .wrap_err("Failed to parse cclip lockfile contents")?;
+                #[allow(unsafe_code)]
+                unsafe {
+                    libc::kill(pid, libc::SIGTERM);
+                }
+                fs::remove_file(&lock_path)?;
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            } else {
+                // cclip mode is already running
+                return Err(eyre!("Fsel cclip mode is already running"));
+            }
+        }
+
+        // Write current pid to lock file
+        let mut lock_file = fs::File::create(&lock_path)?;
+        let pid;
+        // Safety: call to getpid is safe
+        #[allow(unsafe_code)]
+        unsafe {
+            pid = libc::getpid();
+        }
+        use std::io::Write;
+        lock_file.write_all(pid.to_string().as_bytes())?;
+
+        // Lock file cleanup guard
+        struct CclipLockGuard(path::PathBuf);
+        impl Drop for CclipLockGuard {
+            fn drop(&mut self) {
+                let _ = fs::remove_file(&self.0);
+            }
+        }
+        let _cclip_lock_guard = CclipLockGuard(lock_path);
+        
         let rt = tokio::runtime::Runtime::new()?;
         return rt.block_on(run_cclip_mode(&cli));
     }
@@ -2195,53 +2314,152 @@ fn real_main() -> eyre::Result<()> {
 
     // Open redb database
     if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
-        let mut hist_db = project_dirs.data_local_dir().to_path_buf();
+        let data_dir = project_dirs.data_local_dir().to_path_buf();
 
-        if !hist_db.exists() {
+        if !data_dir.exists() {
             // Create dir if it doesn't exist
-            if let Err(error) = fs::create_dir_all(&hist_db) {
-                return Err(eyre!(
-                    "Error creating data dir {}: {}",
-                    hist_db.display(),
-                    error,
-                ));
+            if let Err(error) = fs::create_dir_all(&data_dir) {
+                return Err(eyre!("Failed to create data directory: {}", error));
             }
         }
 
-        // Check if Fsel is already running
+        let hist_db_file = data_dir.join("hist_db.redb");
+
+        // Check if Fsel is already running (mode-specific lock file) - BEFORE opening database
         {
-            let mut lock = hist_db.clone();
-            lock.push("lock");
+            let mut lock = data_dir.clone();
+            lock.push("fsel-fsel.lock");
             lock_path = lock;
             let contents = match fs::read_to_string(&lock_path) {
                 Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
                 Ok(c) => c,
-                Err(e) => {
-                    return Err(e).wrap_err("Failed to read lockfile");
-                }
+                Err(e) => return Err(e).wrap_err("Failed to read lockfile"),
             };
 
             if !contents.is_empty() {
                 if cli.replace {
-                    let pid: i32 = contents
-                        .parse()
-                        .wrap_err("Failed to parse lockfile contents")?;
-                    #[allow(unsafe_code)]
-                    unsafe {
-                        libc::kill(pid, libc::SIGTERM);
+                    let mut target_pids: BTreeSet<i32> = BTreeSet::new();
+
+                    if let Ok(pid) = contents.parse::<i32>() {
+                        target_pids.insert(pid);
                     }
-                    fs::remove_file(&lock_path)?;
-                    std::thread::sleep(std::time::Duration::from_millis(200));
+
+                    if let Ok(holders) = find_processes_holding_file(&hist_db_file) {
+                        target_pids.extend(holders);
+                    }
+
+                    for pid in target_pids.clone() {
+                        #[allow(unsafe_code)]
+                        unsafe {
+                            let _ = libc::kill(pid, libc::SIGTERM);
+                        }
+
+                        const CHECK_INTERVAL_MS: u64 = 5;
+                        const TOTAL_WAIT_MS: u64 = 30;
+                        let mut waited_ms = 0u64;
+                        let mut escalated = false;
+
+                        loop {
+                            #[allow(unsafe_code)]
+                            let still_running = unsafe { libc::kill(pid, 0) == 0 };
+
+                            if !still_running {
+                                break;
+                            }
+
+                            if !escalated {
+                                #[allow(unsafe_code)]
+                                unsafe {
+                                    let _ = libc::kill(pid, libc::SIGKILL);
+                                }
+                                escalated = true;
+                            }
+
+                            if waited_ms >= TOTAL_WAIT_MS {
+                                return Err(eyre::eyre!(
+                                    "Existing fsel instance (pid {pid}) refused to exit"
+                                ));
+                            }
+
+                            std::thread::sleep(std::time::Duration::from_millis(CHECK_INTERVAL_MS));
+                            waited_ms += CHECK_INTERVAL_MS;
+                        }
+                    }
+
+                    if let Ok(mut remaining) = find_processes_holding_file(&hist_db_file) {
+                        remaining.retain(|pid| !target_pids.contains(pid));
+
+                        if !remaining.is_empty() {
+                            return Err(eyre::eyre!(
+                                "Existing fsel instance (pid(s) {:?}) refused to exit",
+                                remaining
+                            ));
+                        }
+                    }
                 } else {
-                    // fsel is already running
                     return Err(eyre!("Fsel is already running"));
+                }
+            } else if cli.replace {
+                if let Ok(holders) = find_processes_holding_file(&hist_db_file) {
+                    if !holders.is_empty() {
+                        for pid in holders.clone() {
+                            #[allow(unsafe_code)]
+                            unsafe {
+                                let _ = libc::kill(pid, libc::SIGTERM);
+                            }
+
+                            const CHECK_INTERVAL_MS: u64 = 5;
+                            const TOTAL_WAIT_MS: u64 = 30;
+                            let mut waited_ms = 0u64;
+                            let mut escalated = false;
+
+                            loop {
+                                #[allow(unsafe_code)]
+                                let still_running = unsafe { libc::kill(pid, 0) == 0 };
+
+                                if !still_running {
+                                    break;
+                                }
+
+                                if !escalated {
+                                    #[allow(unsafe_code)]
+                                    unsafe {
+                                        let _ = libc::kill(pid, libc::SIGKILL);
+                                    }
+                                    escalated = true;
+                                }
+
+                                if waited_ms >= TOTAL_WAIT_MS {
+                                    return Err(eyre::eyre!(
+                                        "Existing fsel instance (pid {pid}) refused to exit"
+                                    ));
+                                }
+
+                                std::thread::sleep(std::time::Duration::from_millis(CHECK_INTERVAL_MS));
+                                waited_ms += CHECK_INTERVAL_MS;
+                            }
+                        }
+
+                        if let Ok(final_holders) = find_processes_holding_file(&hist_db_file) {
+                            if !final_holders.is_empty() {
+                                return Err(eyre::eyre!(
+                                    "Existing fsel instance (pid(s) {:?}) refused to exit",
+                                    final_holders
+                                ));
+                            }
+                        }
+                    }
                 }
             }
 
-            // Write current pid to lock file
+            if let Err(err) = fs::remove_file(&lock_path) {
+                if err.kind() != io::ErrorKind::NotFound {
+                    return Err(err).wrap_err("Failed to remove existing lockfile");
+                }
+            }
+
             let mut lock_file = fs::File::create(&lock_path)?;
             let pid;
-            // Safety: call to getpid is safe
             #[allow(unsafe_code)]
             unsafe {
                 pid = libc::getpid();
@@ -2259,15 +2477,18 @@ fn real_main() -> eyre::Result<()> {
         }
         let _lock_guard = LockGuard(lock_path.clone());
 
-        hist_db.push("hist_db.redb");
+        let mut db_instance = redb::Database::create(&hist_db_file);
+        if let Err(err) = &db_instance {
+            if cli.replace && err.to_string().contains("Cannot acquire lock") {
+                std::thread::sleep(std::time::Duration::from_millis(15));
+                db_instance = redb::Database::create(&hist_db_file);
+            }
+        }
 
-        db = std::sync::Arc::new(
-            redb::Database::create(&hist_db)
-                .wrap_err_with(|| format!(
-                    "Failed to open database at {:?}. If you upgraded from an older version, delete the old database file: rm {:?}",
-                    hist_db, hist_db
-                ))?
-        );
+        let db_instance = db_instance
+            .wrap_err_with(|| format!("Failed to open database at {:?}", hist_db_file))?;
+
+        db = std::sync::Arc::new(db_instance);
 
 
         if cli.clear_history {
