@@ -3,7 +3,7 @@ name = "fsel"
 version = "2.1.0-seedclay"
 authors = ["Mjoyufull <https://github.com/Mjoyufull>"]
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.89"
 
 description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD"
 
