@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.1.0-seedclay
+    $ cargo install fsel@2.1.1-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.1.0-seedclay --force
+    $ cargo install fsel@2.1.1-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh

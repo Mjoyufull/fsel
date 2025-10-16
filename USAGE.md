@@ -229,7 +229,6 @@ description = "search apps with fsel"
 prefix = "search"
 cmd = "fsel -vv -r -ss \"{}\""
 with_argument = true
-unbind_proc = true
 
 # Mode 2: Instant launch
 [[modules]]
@@ -237,7 +236,6 @@ description = "launch apps instantly"
 prefix = "app"
 cmd = "fsel -vv -r -p \"{}\""
 with_argument = true
-unbind_proc = true
 ```
 
 **Usage:**
@@ -258,6 +256,10 @@ cmd = "fsel --systemd-run -vv -r -p \"{}\""
 
 # With Sway (auto-detected if $SWAYSOCK is set)
 cmd = "fsel -vv -r -p \"{}\""
+
+```
+
+**Warning:** Keep `unbind_proc` disabled for TUI modules. If it is set to `true`, otter-launcher returns to its own prompt while `fsel` is still running and raw terminal input will leak (escape sequences like `[B`). Use a dedicated terminal wrapper if you need asynchronous launch behavior.
 ```
 
 ### Performance with Large Lists

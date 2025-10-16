@@ -128,6 +128,7 @@ pub fn launch_app(
     if cli.uwsm {
         runner.insert(0, "uwsm");
         runner.insert(1, "app");
+        runner.insert(2, "--");
     } else if cli.systemd_run {
         runner.insert(0, "systemd-run");
         runner.insert(1, "--user");
@@ -145,10 +146,8 @@ pub fn launch_app(
     let mut exec = process::Command::new(runner[0]);
     exec.args(&runner[1..]);
     
-    let use_uwsm_or_systemd = cli.uwsm || cli.systemd_run;
-    
-    // Only use pre_exec for detachment when explicitly requested
-    if !use_uwsm_or_systemd && cli.detach {
+    // Ensure detached launches always get their own session and null stdio
+    if cli.detach {
         #[allow(unsafe_code)]
         unsafe {
             exec.pre_exec(move || {
@@ -183,7 +182,7 @@ pub fn launch_app(
         }
     }
     
-    // Redirect stdio when detach is requested; allow uwsm/systemd-run to inherit otherwise
+    // Redirect stdio when detach is requested to avoid leaking output to parent
     if cli.detach {
         exec.stdin(process::Stdio::null());
         exec.stdout(process::Stdio::null());
