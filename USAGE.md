@@ -227,14 +227,14 @@ exec_cmd = "sh -c"
 [[modules]]
 description = "search apps with fsel"
 prefix = "search"
-cmd = "fsel -vv -r -ss \"{}\""
+cmd = "fsel -vv -d -r -ss \"{}\""
 with_argument = true
 
 # Mode 2: Instant launch
 [[modules]]
 description = "launch apps instantly"
 prefix = "app"
-cmd = "fsel -vv -r -p \"{}\""
+cmd = "fsel -vv -d -r -p \"{}\""
 with_argument = true
 ```
 
@@ -249,17 +249,17 @@ app code         # Instantly launches VS Code
 **Optional: Add launch method flags if needed:**
 ```toml
 # With uwsm (requires uwsm installed)
-cmd = "fsel --uwsm -vv -r -p \"{}\""
+cmd = "fsel --uwsm -vv -d -r -p \"{}\""
 
 # With systemd-run (requires systemd)
-cmd = "fsel --systemd-run -vv -r -p \"{}\""
+cmd = "fsel --systemd-run -vv -d -r -p \"{}\""
 
 # With Sway (auto-detected if $SWAYSOCK is set)
-cmd = "fsel -vv -r -p \"{}\""
+cmd = "fsel -vv -r -d -p \"{}\""
 
 ```
 
-**Warning:** Keep `unbind_proc` disabled for TUI modules. If it is set to `true`, otter-launcher returns to its own prompt while `fsel` is still running and raw terminal input will leak (escape sequences like `[B`). Use a dedicated terminal wrapper if you need asynchronous launch behavior.
+**Warning:** Keep `unbind_proc` disabled for Fsel modules whilst using -d, and you need to do -d for apps to launch without unbind_proc and you need unbind_proc to launch apps without -d,. If it is set to `true`, otter-launcher returns to its own prompt while `fsel` is still running and raw terminal input will leak (escape sequences like `[B`). Use a dedicated terminal wrapper if you need asynchronous launch behavior.
 ```
 
 ### Performance with Large Lists
