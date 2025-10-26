@@ -203,20 +203,10 @@ impl<'a> UI<'a> {
         // Reset selection to beginning and scroll offset
         if self.shown.is_empty() {
             self.selected = None;
-            self.scroll_offset = 0;
         } else {
-            if let Some(current_selected) = self.selected {
-                if current_selected >= self.shown.len() {
-                    self.selected = Some(0);
-                    self.scroll_offset = 0;
-                } else {
-                    self.scroll_offset = 0;
-                }
-            } else {
-                self.selected = Some(0);
-                self.scroll_offset = 0;
-            }
+            self.selected = Some(0);
         }
+        self.scroll_offset = 0;
     }
     
     /// Static version for parallel processing (thread-safe)
