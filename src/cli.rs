@@ -96,8 +96,13 @@ Usage:
 │  ├─ --auto-select                Auto-select when one match remains
 │  └─ --prompt-only                Input-only mode (no list)
 │
-├─ Clipboard
-│  └─ --cclip                      Clipboard history viewer with previews
+├─ Clipboard Mode Options
+│  ├─ --cclip                      Clipboard history viewer with previews
+│  ├─ --tag <NAME>                 Filter clipboard items by tag
+│  ├─ --tag list                   List all tags
+│  ├─ --tag list <NAME>            List items with specific tag
+│  ├─ --tag clear                  Clear all tags and metadata
+│  └─ --cclip-show-tag-color-names Show tag color names in display
 │
 └─ General
    ├─ -h                           Show short help
@@ -161,7 +166,7 @@ pub struct Opts {
     /// Pin icon character
     pub pin_icon: String,
     /// Keybinds configuration
-    pub keybinds: crate::keybinds::Keybinds,
+    pub keybinds: crate::ui::Keybinds,
     /// Layout configuration
     pub title_panel_height_percent: u16,
     pub input_panel_height: u16,
@@ -197,6 +202,8 @@ pub struct Opts {
     pub cclip_tag: Option<String>,
     /// List tags mode
     pub cclip_tag_list: bool,
+    /// Clear all tags and metadata
+    pub cclip_clear_tags: bool,
     /// App launcher settings
     pub filter_desktop: bool,
     pub list_executables_in_path: bool,
@@ -236,6 +243,7 @@ pub struct Opts {
     pub cclip_wrap_long_lines: Option<bool>,
     pub cclip_image_preview: Option<bool>,
     pub cclip_hide_inline_image_message: Option<bool>,
+    pub cclip_show_tag_color_names: Option<bool>,
     /// Dmenu-specific disable mouse option
     pub dmenu_disable_mouse: Option<bool>,
     /// Cclip-specific disable mouse option
@@ -271,7 +279,7 @@ impl Default for Opts {
             header_title_color: ratatui::style::Color::White,
             pin_color: ratatui::style::Color::Rgb(255, 165, 0), // orange
             pin_icon: "📌".to_string(),
-            keybinds: crate::keybinds::Keybinds::default(),
+            keybinds: crate::ui::Keybinds::default(),
             title_panel_height_percent: 30,
             input_panel_height: 3,
             title_panel_position: None,
@@ -301,6 +309,7 @@ impl Default for Opts {
             cclip_mode: false,
             cclip_tag: None,
             cclip_tag_list: false,
+            cclip_clear_tags: false,
             // App launcher defaults
             filter_desktop: true,
             list_executables_in_path: false,
@@ -340,6 +349,7 @@ impl Default for Opts {
             cclip_wrap_long_lines: None,
             cclip_image_preview: None,
             cclip_hide_inline_image_message: None,
+            cclip_show_tag_color_names: None,
             dmenu_disable_mouse: None,
             cclip_disable_mouse: None,
         }
@@ -356,14 +366,14 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     if let Ok(_socket) = env::var("SWAYSOCK") {
         default.sway = true;
     }
-    
+
     // Check if invoked as dmenu
     if let Some(arg0) = env::args().next() {
         if arg0.ends_with("dmenu") {
             default.dmenu_mode = true;
         }
     }
-    
+
     // Check for -ss option first and handle it specially
     let args: Vec<String> = env::args().collect();
     if let Some(ss_pos) = args.iter().position(|arg| arg == "-ss") {
@@ -371,14 +381,14 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         if ss_pos + 1 < args.len() {
             let search_parts: Vec<String> = args[ss_pos + 1..].to_vec();
             default.search_string = Some(search_parts.join(" "));
-            
+
             // Create a new parser without the -ss and search string parts
             let filtered_args: Vec<String> = args[..ss_pos].to_vec();
             parser = lexopt::Parser::from_args(filtered_args.into_iter().skip(1));
         } else {
             // -ss with no arguments, just set empty search string and open TUI normally
             default.search_string = Some(String::new());
-            
+
             // Create a new parser without the -ss part
             let filtered_args: Vec<String> = args[..ss_pos].to_vec();
             parser = lexopt::Parser::from_args(filtered_args.into_iter().skip(1));
@@ -424,16 +434,27 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 default.cclip_mode = true;
             }
             Long("tag") => {
-                let tag_arg = parser.value()?.into_string().map_err(|_| "Tag argument must be valid UTF-8")?;
+                let tag_arg = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Tag argument must be valid UTF-8")?;
                 if tag_arg == "list" {
                     default.cclip_tag_list = true;
                     // Check if there's another argument for specific tag
                     if let Ok(val) = parser.value() {
-                        default.cclip_tag = Some(val.into_string().map_err(|_| "Tag name must be valid UTF-8")?);
+                        default.cclip_tag = Some(
+                            val.into_string()
+                                .map_err(|_| "Tag name must be valid UTF-8")?,
+                        );
                     }
+                } else if tag_arg == "clear" {
+                    default.cclip_clear_tags = true;
                 } else {
                     default.cclip_tag = Some(tag_arg);
                 }
+            }
+            Long("cclip-show-tag-color-names") => {
+                default.cclip_show_tag_color_names = Some(true);
             }
             Long("dmenu0") => {
                 default.dmenu_mode = true;
@@ -443,22 +464,32 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 let val = parser.optional_value();
                 default.dmenu_password_mode = true;
                 if let Some(v) = val {
-                    default.dmenu_password_character = v.into_string().map_err(|_| "Password character must be valid UTF-8")?;
+                    default.dmenu_password_character = v
+                        .into_string()
+                        .map_err(|_| "Password character must be valid UTF-8")?;
                 }
             }
             Long("index") => {
                 default.dmenu_index_mode = true;
             }
             Long("accept-nth") => {
-                let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
-                let cols: Result<Vec<usize>, _> = cols_str.split(',')
+                let cols_str = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Column specification must be valid UTF-8")?;
+                let cols: Result<Vec<usize>, _> = cols_str
+                    .split(',')
                     .map(|s| s.trim().parse::<usize>())
                     .collect();
                 default.dmenu_accept_nth = Some(cols.map_err(|_| "Invalid column specification")?);
             }
             Long("match-nth") => {
-                let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
-                let cols: Result<Vec<usize>, _> = cols_str.split(',')
+                let cols_str = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Column specification must be valid UTF-8")?;
+                let cols: Result<Vec<usize>, _> = cols_str
+                    .split(',')
                     .map(|s| s.trim().parse::<usize>())
                     .collect();
                 default.dmenu_match_nth = Some(cols.map_err(|_| "Invalid column specification")?);
@@ -470,11 +501,20 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 default.dmenu_exit_if_empty = true;
             }
             Long("select") => {
-                default.dmenu_select = Some(parser.value()?.into_string().map_err(|_| "Select string must be valid UTF-8")?);
+                default.dmenu_select = Some(
+                    parser
+                        .value()?
+                        .into_string()
+                        .map_err(|_| "Select string must be valid UTF-8")?,
+                );
             }
             Long("select-index") => {
-                let idx_str = parser.value()?.into_string().map_err(|_| "Index must be valid UTF-8")?;
-                default.dmenu_select_index = Some(idx_str.parse::<usize>().map_err(|_| "Invalid index")?);
+                let idx_str = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Index must be valid UTF-8")?;
+                default.dmenu_select_index =
+                    Some(idx_str.parse::<usize>().map_err(|_| "Invalid index")?);
             }
             Long("auto-select") => {
                 default.dmenu_auto_select = true;
@@ -488,7 +528,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             Long("filter-desktop") => {
                 let val = parser.optional_value();
                 if let Some(v) = val {
-                    let v_str = v.into_string().map_err(|_| "filter-desktop value must be valid UTF-8")?;
+                    let v_str = v
+                        .into_string()
+                        .map_err(|_| "filter-desktop value must be valid UTF-8")?;
                     default.filter_desktop = v_str != "no";
                 } else {
                     default.filter_desktop = true;
@@ -498,7 +540,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 default.list_executables_in_path = true;
             }
             Long("match-mode") => {
-                let mode_str = parser.value()?.into_string().map_err(|_| "Match mode must be valid UTF-8")?;
+                let mode_str = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Match mode must be valid UTF-8")?;
                 default.match_mode = match mode_str.as_str() {
                     "exact" => MatchMode::Exact,
                     "fuzzy" => MatchMode::Fuzzy,
@@ -506,17 +551,31 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 };
             }
             Long("with-nth") => {
-                let cols_str = parser.value()?.into_string().map_err(|_| "Column specification must be valid UTF-8")?;
-                let cols: Result<Vec<usize>, _> = cols_str.split(',')
+                let cols_str = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Column specification must be valid UTF-8")?;
+                let cols: Result<Vec<usize>, _> = cols_str
+                    .split(',')
                     .map(|s| s.trim().parse::<usize>())
                     .collect();
-                default.dmenu_with_nth = Some(cols.map_err(|_| "Invalid column specification. Use comma-separated numbers like: 1,2,4")?);
+                default.dmenu_with_nth = Some(cols.map_err(|_| {
+                    "Invalid column specification. Use comma-separated numbers like: 1,2,4"
+                })?);
             }
             Long("delimiter") => {
-                default.dmenu_delimiter = parser.value()?.into_string().map_err(|_| "Delimiter must be valid UTF-8")?;
+                default.dmenu_delimiter = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Delimiter must be valid UTF-8")?;
             }
             Short('p') | Long("program") => {
-                default.program = Some(parser.value()?.into_string().map_err(|_| "Program name must be valid UTF-8")?);
+                default.program = Some(
+                    parser
+                        .value()?
+                        .into_string()
+                        .map_err(|_| "Program name must be valid UTF-8")?,
+                );
             }
             Short('v') | Long("verbose") => {
                 if let Some(v) = default.verbose {
@@ -565,7 +624,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                         return Err(arg.unexpected());
                     }
                 };
-                
+
                 eprintln!("Error: {}", error_msg);
                 eprintln!();
                 eprintln!("Available options:");
@@ -609,16 +668,59 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                         file_conf = Some(conf);
                     }
                     Err(e) => {
-                        println!(
-                            "Error reading config file {}:\n{}",
-                            f.display(),
-                            e
-                        );
+                        println!("Error reading config file {}:\n{}", f.display(), e);
                         process::exit(1);
                     }
                 },
                 Err(e) => {
-                    if io::ErrorKind::NotFound != e.kind() {
+                    if io::ErrorKind::NotFound == e.kind() {
+                        // Config file doesn't exist, create a default one
+                        if let Some(parent) = f.parent() {
+                            if let Err(mkdir_err) = fs::create_dir_all(parent) {
+                                println!(
+                                    "Warning: Could not create config directory {}: {}",
+                                    parent.display(),
+                                    mkdir_err
+                                );
+                            } else {
+                                // Create default config
+                                let default_config = include_str!("../config.toml");
+                                if let Err(write_err) = fs::write(&f, default_config) {
+                                    println!(
+                                        "Warning: Could not create default config file {}: {}",
+                                        f.display(),
+                                        write_err
+                                    );
+                                } else {
+                                    println!("Created default config file: {}", f.display());
+
+                                    // Also create default keybinds.toml for reference
+                                    let mut keybinds_path = f.clone();
+                                    keybinds_path.set_file_name("keybinds.toml");
+                                    let default_keybinds = include_str!("../keybinds.toml");
+                                    if let Err(keybind_err) =
+                                        fs::write(&keybinds_path, default_keybinds)
+                                    {
+                                        println!("Warning: Could not create default keybinds file {}: {}", keybinds_path.display(), keybind_err);
+                                    } else {
+                                        println!(
+                                            "Created default keybinds file: {}",
+                                            keybinds_path.display()
+                                        );
+                                    }
+
+                                    // Try to read the newly created config
+                                    if let Ok(content) = fs::read_to_string(&f) {
+                                        if let Ok(conf) =
+                                            FileConf::read_with_enhanced_errors(&content)
+                                        {
+                                            file_conf = Some(conf);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
                         println!("Error reading config file {}:\n\t{}", f.display(), e);
                         process::exit(1);
                     }
@@ -655,7 +757,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     if let Some(rb) = file_conf.rounded_borders {
         default.rounded_borders = rb;
     }
-    
+
     if let Some(dm) = file_conf.disable_mouse {
         default.disable_mouse = dm;
     }
@@ -710,18 +812,18 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             Err(_) => eprintln!("Warning: Invalid header_title_color in config"),
         }
     }
-    
+
     if let Some(color) = file_conf.pin_color {
         match string_to_color(color) {
             Ok(c) => default.pin_color = c,
             Err(_) => eprintln!("Warning: Invalid pin_color in config"),
         }
     }
-    
+
     if let Some(icon) = file_conf.pin_icon {
         default.pin_icon = icon;
     }
-    
+
     if let Some(keybinds) = file_conf.keybinds {
         default.keybinds = keybinds;
     }
@@ -745,7 +847,6 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         default.title_panel_position = Some(position);
     }
 
-
     // Load dmenu configuration if present
     if let Some(dmenu_conf) = &file_conf.dmenu {
         if let Some(color) = &dmenu_conf.highlight_color {
@@ -763,7 +864,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         if let Some(rounded_borders) = dmenu_conf.rounded_borders {
             default.dmenu_rounded_borders = Some(rounded_borders);
         }
-        
+
         // Load dmenu border colors
         if let Some(color) = &dmenu_conf.main_border_color {
             match string_to_color(color) {
@@ -783,7 +884,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 Err(_) => eprintln!("Warning: Invalid dmenu input_border_color in config"),
             }
         }
-        
+
         // Load dmenu text colors
         if let Some(color) = &dmenu_conf.main_text_color {
             match string_to_color(color) {
@@ -809,7 +910,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 Err(_) => eprintln!("Warning: Invalid dmenu header_title_color in config"),
             }
         }
-        
+
         // Load dmenu layout
         if let Some(height) = dmenu_conf.title_panel_height_percent {
             if height >= 10 && height <= 70 {
@@ -822,13 +923,15 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             if height >= 1 && height <= 10 {
                 default.dmenu_input_panel_height = Some(height);
             } else {
-                eprintln!("Warning: dmenu input_panel_height must be between 1-10 lines, using default");
+                eprintln!(
+                    "Warning: dmenu input_panel_height must be between 1-10 lines, using default"
+                );
             }
         }
         if let Some(position) = &dmenu_conf.title_panel_position {
             default.dmenu_title_panel_position = Some(position.clone());
         }
-        
+
         // Load other dmenu options
         if let Some(delimiter) = &dmenu_conf.delimiter {
             default.dmenu_delimiter = delimiter.clone();
@@ -849,7 +952,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             default.dmenu_exit_if_empty = exit_if_empty;
         }
     }
-    
+
     // Load app launcher configuration if present
     if let Some(app_conf) = &file_conf.app_launcher {
         if let Some(filter_desktop) = app_conf.filter_desktop {
@@ -893,7 +996,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         if let Some(rounded_borders) = cclip_conf.rounded_borders {
             default.cclip_rounded_borders = Some(rounded_borders);
         }
-        
+
         // Load cclip border colors
         if let Some(color) = &cclip_conf.main_border_color {
             match string_to_color(color) {
@@ -913,7 +1016,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 Err(_) => eprintln!("Warning: Invalid cclip input_border_color in config"),
             }
         }
-        
+
         // Load cclip text colors
         if let Some(color) = &cclip_conf.main_text_color {
             match string_to_color(color) {
@@ -939,7 +1042,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 Err(_) => eprintln!("Warning: Invalid cclip header_title_color in config"),
             }
         }
-        
+
         // Load cclip layout
         if let Some(height) = cclip_conf.title_panel_height_percent {
             if height >= 10 && height <= 70 {
@@ -952,13 +1055,15 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             if height >= 1 && height <= 10 {
                 default.cclip_input_panel_height = Some(height);
             } else {
-                eprintln!("Warning: cclip input_panel_height must be between 1-10 lines, using default");
+                eprintln!(
+                    "Warning: cclip input_panel_height must be between 1-10 lines, using default"
+                );
             }
         }
         if let Some(position) = &cclip_conf.title_panel_position {
             default.cclip_title_panel_position = Some(position.clone());
         }
-        
+
         // Load other cclip options
         if let Some(show_line_numbers) = cclip_conf.show_line_numbers {
             default.cclip_show_line_numbers = Some(show_line_numbers);
@@ -975,6 +1080,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         if let Some(disable_mouse) = cclip_conf.disable_mouse {
             default.cclip_disable_mouse = Some(disable_mouse);
         }
+        if let Some(show_color_names) = cclip_conf.show_tag_color_names {
+            default.cclip_show_tag_color_names = Some(show_color_names);
+        }
     }
 
     // Validate mutually exclusive options
@@ -983,7 +1091,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         eprintln!("Use -p for direct launch or -ss for pre-filled TUI search");
         std::process::exit(1);
     }
-    
+
     // Validate dmenu mode conflicts
     if default.dmenu_mode {
         if default.program.is_some() {
@@ -994,18 +1102,18 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         // dmenu mode implies no-exec behavior
         default.no_exec = true;
     }
-    
+
     // Validate prompt-only conflicts
     if default.dmenu_prompt_only && default.dmenu_mode {
         default.dmenu_show_line_numbers = false;
     }
-    
+
     // Validate select conflicts
     if default.dmenu_select.is_some() && default.dmenu_select_index.is_some() {
         eprintln!("Error: Cannot use --select and --select-index together");
         std::process::exit(1);
     }
-    
+
     // Validate cclip mode conflicts
     if default.cclip_mode {
         if default.program.is_some() {
@@ -1016,21 +1124,24 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         // cclip mode implies no-exec behavior
         default.no_exec = true;
     }
-    
+
     // Validate tag options require cclip mode
-    if (default.cclip_tag.is_some() || default.cclip_tag_list) && !default.cclip_mode {
+    if (default.cclip_tag.is_some() || default.cclip_tag_list || default.cclip_clear_tags)
+        && !default.cclip_mode
+    {
         eprintln!("Error: --tag requires --cclip mode");
         eprintln!("Usage: fsel --cclip --tag <name>");
         eprintln!("       fsel --cclip --tag list");
+        eprintln!("       fsel --cclip --tag clear");
         std::process::exit(1);
     }
-    
+
     // Validate mutually exclusive special modes
     if default.dmenu_mode && default.cclip_mode {
         eprintln!("Error: --dmenu and --cclip cannot be used together");
         std::process::exit(1);
     }
-    
+
     // Validate flag conflicts - no-exec overrides all launch methods
     if default.no_exec {
         if default.sway || default.systemd_run || default.uwsm {
@@ -1038,7 +1149,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
     } else {
         // Check for mutually exclusive launch methods
-        let launch_methods = [default.systemd_run, default.uwsm, default.sway].iter().filter(|&&x| x).count();
+        let launch_methods = [default.systemd_run, default.uwsm, default.sway]
+            .iter()
+            .filter(|&&x| x)
+            .count();
         if launch_methods > 1 {
             eprintln!("Error: Only one launch method can be specified at a time");
             eprintln!("Available methods: --systemd-run, --uwsm, Sway integration (auto-detected)");
@@ -1075,7 +1189,10 @@ impl FromStr for PanelPosition {
             "top" => Ok(PanelPosition::Top),
             "middle" => Ok(PanelPosition::Middle),
             "bottom" => Ok(PanelPosition::Bottom),
-            _ => Err(format!("Invalid panel position: '{}'. Valid options: top, middle, bottom", s)),
+            _ => Err(format!(
+                "Invalid panel position: '{}'. Valid options: top, middle, bottom",
+                s
+            )),
         }
     }
 }
@@ -1118,7 +1235,7 @@ pub struct FileConf {
     /// Pin icon character
     pub pin_icon: Option<String>,
     /// Keybinds configuration
-    pub keybinds: Option<crate::keybinds::Keybinds>,
+    pub keybinds: Option<crate::ui::Keybinds>,
     /// Title panel height percentage (10-70%)
     pub title_panel_height_percent: Option<u16>,
     /// Input panel height in lines
@@ -1207,6 +1324,8 @@ pub struct CclipConf {
     pub hide_inline_image_message: Option<bool>,
     /// Disable mouse input in cclip mode
     pub disable_mouse: Option<bool>,
+    /// Show tag color names next to tags in the item list
+    pub show_tag_color_names: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1226,7 +1345,7 @@ impl FileConf {
             Ok(config) => Ok(config),
             Err(e) => {
                 let error_msg = e.message();
-                
+
                 // Check if it's an unknown field error and provide helpful guidance
                 if error_msg.contains("unknown field") {
                     let enhanced_msg = Self::enhance_unknown_field_error(error_msg);
@@ -1250,20 +1369,31 @@ impl FileConf {
         } else {
             None
         };
-        
+
         // Determine section and provide targeted help
         if original_error.contains("expected one of") && original_error.contains("filter_desktop") {
             let mut result = String::from("Config Error: Invalid field in [app_launcher] section");
-            
+
             if let Some(field) = unknown_field {
                 // Check if it's a color/UI field that belongs at root level
                 let root_level_fields = [
-                    "main_border_color", "apps_border_color", "input_border_color",
-                    "main_text_color", "apps_text_color", "input_text_color", 
-                    "highlight_color", "header_title_color", "pin_color", "pin_icon",
-                    "cursor", "rounded_borders", "hard_stop", "fancy_mode", "terminal_launcher"
+                    "main_border_color",
+                    "apps_border_color",
+                    "input_border_color",
+                    "main_text_color",
+                    "apps_text_color",
+                    "input_text_color",
+                    "highlight_color",
+                    "header_title_color",
+                    "pin_color",
+                    "pin_icon",
+                    "cursor",
+                    "rounded_borders",
+                    "hard_stop",
+                    "fancy_mode",
+                    "terminal_launcher",
                 ];
-                
+
                 if root_level_fields.contains(&field) {
                     result.push_str(&format!("\n\n'{}' belongs at ROOT LEVEL", field));
                     result.push_str("\nMove it outside [app_launcher] section");
@@ -1271,28 +1401,38 @@ impl FileConf {
                     result.push_str(&format!("\n\n'{}' is not a valid field", field));
                 }
             }
-            
+
             result.push_str("\n\n[app_launcher] accepts:");
             result.push_str("\n  filter_desktop, list_executables_in_path,");
             result.push_str("\n  hide_before_typing, match_mode, confirm_first_launch");
-            
+
             result
-        } else if original_error.contains("expected one of") && original_error.contains("delimiter") {
-            format!("Config Error: Invalid field in [dmenu] section{}", 
-                if let Some(field) = unknown_field { 
-                    format!("\n'{}' is not valid here", field) 
-                } else { 
-                    String::new() 
-                })
-        } else if original_error.contains("expected one of") && original_error.contains("image_preview") {
-            format!("Config Error: Invalid field in [cclip] section{}", 
-                if let Some(field) = unknown_field { 
-                    format!("\n'{}' is not valid here", field) 
-                } else { 
-                    String::new() 
-                })
+        } else if original_error.contains("expected one of") && original_error.contains("delimiter")
+        {
+            format!(
+                "Config Error: Invalid field in [dmenu] section{}",
+                if let Some(field) = unknown_field {
+                    format!("\n'{}' is not valid here", field)
+                } else {
+                    String::new()
+                }
+            )
+        } else if original_error.contains("expected one of")
+            && original_error.contains("image_preview")
+        {
+            format!(
+                "Config Error: Invalid field in [cclip] section{}",
+                if let Some(field) = unknown_field {
+                    format!("\n'{}' is not valid here", field)
+                } else {
+                    String::new()
+                }
+            )
         } else {
-            format!("{}\n\nTip: Color/UI options go at root level", original_error)
+            format!(
+                "{}\n\nTip: Color/UI options go at root level",
+                original_error
+            )
         }
     }
 }
@@ -1303,25 +1443,25 @@ impl FileConf {
 ///
 /// [String]: std::string::String
 /// [color]: tui::style::Color
-fn string_to_color<T: Into<String>>(val: T) -> Result<ratatui::style::Color, &'static str> {
+pub fn string_to_color<T: Into<String>>(val: T) -> Result<ratatui::style::Color, &'static str> {
     let color_str = val.into();
     let color_lower = color_str.to_lowercase();
-    
+
     // Try hex color first (e.g., "#ff0000" or "ff0000")
     if let Some(hex_color) = parse_hex_color(&color_str) {
         return Ok(hex_color);
     }
-    
+
     // Try RGB format (e.g., "rgb(255,0,0)")
     if let Some(rgb_color) = parse_rgb_color(&color_str) {
         return Ok(rgb_color);
     }
-    
+
     // Try 8-bit color index (e.g., "125")
     if let Ok(index) = color_str.parse::<u8>() {
         return Ok(ratatui::style::Color::Indexed(index));
     }
-    
+
     // Named colors (case-insensitive)
     match color_lower.as_ref() {
         "black" => Ok(ratatui::style::Color::Black),
@@ -1329,18 +1469,26 @@ fn string_to_color<T: Into<String>>(val: T) -> Result<ratatui::style::Color, &'s
         "green" => Ok(ratatui::style::Color::Green),
         "yellow" => Ok(ratatui::style::Color::Yellow),
         "blue" => Ok(ratatui::style::Color::Blue),
-        "magenta" => Ok(ratatui::style::Color::Magenta),
-        "cyan" => Ok(ratatui::style::Color::Cyan),
+        "magenta" | "purple" => Ok(ratatui::style::Color::Magenta),
+        "cyan" | "teal" => Ok(ratatui::style::Color::Cyan),
         "gray" | "grey" => Ok(ratatui::style::Color::Gray),
         "darkgray" | "darkgrey" => Ok(ratatui::style::Color::DarkGray),
         "lightred" => Ok(ratatui::style::Color::LightRed),
         "lightgreen" => Ok(ratatui::style::Color::LightGreen),
         "lightyellow" => Ok(ratatui::style::Color::LightYellow),
         "lightblue" => Ok(ratatui::style::Color::LightBlue),
-        "lightmagenta" => Ok(ratatui::style::Color::LightMagenta),
+        "lightmagenta" | "pink" => Ok(ratatui::style::Color::LightMagenta),
         "lightcyan" => Ok(ratatui::style::Color::LightCyan),
         "white" => Ok(ratatui::style::Color::White),
         "reset" => Ok(ratatui::style::Color::Reset),
+        // Additional common colors using indexed colors
+        "orange" => Ok(ratatui::style::Color::Indexed(208)),
+        "brown" => Ok(ratatui::style::Color::Indexed(130)),
+        "lime" => Ok(ratatui::style::Color::Indexed(46)),
+        "navy" => Ok(ratatui::style::Color::Indexed(17)),
+        "maroon" => Ok(ratatui::style::Color::Indexed(88)),
+        "olive" => Ok(ratatui::style::Color::Indexed(58)),
+        "silver" => Ok(ratatui::style::Color::Indexed(7)),
         _ => Err("unknown color format. Use: named colors (red, blue, etc.), hex (#ff0000), RGB (rgb(255,0,0)), or 8-bit index (0-255)"),
     }
 }
@@ -1348,7 +1496,7 @@ fn string_to_color<T: Into<String>>(val: T) -> Result<ratatui::style::Color, &'s
 /// Parse hex color in format #RRGGBB or RRGGBB
 fn parse_hex_color(color_str: &str) -> Option<ratatui::style::Color> {
     let hex = color_str.strip_prefix('#').unwrap_or(color_str);
-    
+
     if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         if let (Ok(r), Ok(g), Ok(b)) = (
             u8::from_str_radix(&hex[0..2], 16),
@@ -1358,7 +1506,7 @@ fn parse_hex_color(color_str: &str) -> Option<ratatui::style::Color> {
             return Some(ratatui::style::Color::Rgb(r, g, b));
         }
     }
-    
+
     // Support 3-digit hex (#RGB -> #RRGGBB)
     if hex.len() == 3 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         if let (Ok(r), Ok(g), Ok(b)) = (
@@ -1369,26 +1517,26 @@ fn parse_hex_color(color_str: &str) -> Option<ratatui::style::Color> {
             return Some(ratatui::style::Color::Rgb(r, g, b));
         }
     }
-    
+
     None
 }
 
 /// Parse RGB color in format rgb(r,g,b) or (r,g,b)
 fn parse_rgb_color(color_str: &str) -> Option<ratatui::style::Color> {
     let rgb_str = color_str.trim();
-    
+
     // Match rgb(r,g,b) format
     if rgb_str.starts_with("rgb(") && rgb_str.ends_with(')') {
-        let values = &rgb_str[4..rgb_str.len()-1];
+        let values = &rgb_str[4..rgb_str.len() - 1];
         return parse_rgb_values(values);
     }
-    
+
     // Match (r,g,b) format
     if rgb_str.starts_with('(') && rgb_str.ends_with(')') {
-        let values = &rgb_str[1..rgb_str.len()-1];
+        let values = &rgb_str[1..rgb_str.len() - 1];
         return parse_rgb_values(values);
     }
-    
+
     None
 }
 

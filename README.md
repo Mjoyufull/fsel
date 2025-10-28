@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.1.1-seedclay
+    $ cargo install fsel@2.2.0-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.1.1-seedclay --force
+    $ cargo install fsel@2.2.0-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -277,6 +277,21 @@ Browse and select from your clipboard history with image previews:
 ```sh
 # Browse clipboard history with cclip integration
 fsel --cclip
+
+# Filter by tag
+fsel --cclip --tag prompt
+
+# List all tags
+fsel --cclip --tag list
+
+# List items with specific tag (verbose shows details)
+fsel --cclip --tag list prompt -vv
+
+# Clear all tags and metadata
+fsel --cclip --tag clear
+
+# Show tag color names in display
+fsel --cclip --cclip-show-tag-color-names
 ```
 
 #### Clipboard Features
@@ -285,6 +300,7 @@ fsel --cclip
 - **Content Preview**: Full text preview panel
 - **Fuzzy Search**: Filter clipboard history
 - **Smart Copy**: Auto-copies selection to clipboard
+- **Tag System**: Organize clipboard items with tags (requires cclip with tag support)
 - Requires [cclip](https://github.com/heather7283/cclip)
 
 ### Quick Examples
@@ -348,6 +364,13 @@ Quick Extras:
       --list-executables-in-path Include executables from $PATH
       --hide-before-typing Hide list until input typed
       --match-mode <mode> fuzzy | exact (default: fuzzy)
+
+Clipboard Mode Options:
+      --tag <name>       Filter clipboard items by tag
+      --tag list         List all tags
+      --tag list <name>  List items with specific tag
+      --tag clear        Clear all tags and metadata
+      --cclip-show-tag-color-names Show tag color names in display
 
 Help:
   -H, --help             Show detailed option tree (same as `fsel -H`)
@@ -460,11 +483,27 @@ bindsym $mod+d exec "fsel --dmenu | xargs swaymsg exec --"
 
 ## Contributing
 
-Feature requests and bug reports are welcome.
+Contributions are welcome! Whether you're reporting bugs, suggesting features, or submitting code, we appreciate your help making fsel better.
 
-Pull requests for bug fixes or requested features are accepted.
+### How to Contribute
 
-Please use GitHub issues and pull requests for contributions.
+1. **Bug Reports & Feature Requests**: Open an issue on [GitHub Issues](https://github.com/Mjoyufull/fsel/issues)
+2. **Pull Requests**: Fork the repo, create a feature branch, and submit a PR
+3. **Code Style**: Run `cargo fmt` and `cargo clippy` before submitting
+4. **Testing**: Ensure `cargo test` and `cargo build --release` pass
+
+### Development Workflow
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines on:
+- Branch naming conventions
+- Commit message format
+- Pull request process
+- Code review standards
+- Release procedures
+
+All contributors are valued and appreciated. Your name will be added to the contributors list, and significant contributions will be highlighted in release notes.
+
+Thank you for helping improve fsel!
 
 ## Philosophy
 
