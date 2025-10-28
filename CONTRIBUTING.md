@@ -171,12 +171,36 @@ There are many ways to contribute to fsel:
 
 ### Non-Code Contributions
 
-- Improve documentation
+- Improve documentation (see [Documentation Changes](#documentation-changes) below)
 - Create example configurations
 - Answer questions in [discussions](https://github.com/Mjoyufull/fsel/discussions)
 - Test new releases and report issues
 - Package fsel for other distributions
 - Write tutorials or blog posts
+
+### Documentation Changes
+
+**Simple documentation fixes** (typos, grammar, formatting) can be pushed directly to `main` without going through the PR process:
+
+**Criteria for direct push:**
+- Changes only to `.md` files (README, USAGE, CONTRIBUTING, etc.)
+- No code changes whatsoever
+- Typo fixes, grammar corrections, formatting improvements
+
+**Process:**
+```bash
+git checkout main
+git pull origin main
+# Make documentation changes
+git commit -m "docs: fix typo in README"
+git push origin main
+# Sync to dev
+git checkout dev
+git merge main
+git push origin dev
+```
+
+**For substantial documentation changes** (rewrites, new sections, structural changes), please use the normal PR process for review.
 
 ---
 

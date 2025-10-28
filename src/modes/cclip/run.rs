@@ -39,26 +39,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
     if cli.cclip_clear_tags {
         let (db, _) = crate::core::database::open_history_db()?;
 
-        // Clear all tags from cclip items
-        let result = std::process::Command::new("cclip")
-            .args(&["clear-tags"])
-            .output();
-
-        match result {
-            Ok(output) if output.status.success() => {
-                println!("Cleared all tags from cclip items");
-            }
-            Ok(output) => {
-                eprintln!(
-                    "Warning: cclip clear-tags failed: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-            }
-            Err(e) => {
-                eprintln!("Warning: Failed to run cclip clear-tags: {}", e);
-            }
-        }
-
         // Clear tag metadata from fsel database
         let write_txn = db.begin_write()?;
         {
@@ -67,7 +47,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
         }
         write_txn.commit()?;
 
-        println!("Cleared all tag metadata");
+        println!("Cleared all tag metadata from fsel database");
+        println!();
+        println!("Note: To clear tags from cclip entries, use:");
+        println!("  cclip tag -d <ID>     # Clear all tags from specific entry");
+        println!("  cclip wipe -t         # Delete all entries (including tagged)");
         return Ok(());
     }
 

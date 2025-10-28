@@ -89,7 +89,10 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         }
     };
 
-    if !contents.is_empty() {
+    // Skip lock check for non-interactive commands (tag clear, tag list)
+    let is_non_interactive = cli.cclip_clear_tags || cli.cclip_tag_list;
+    
+    if !contents.is_empty() && !is_non_interactive {
         if cli.replace {
             let pid: i32 = contents
                 .parse()
@@ -102,20 +105,25 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         }
     }
 
-    // Write current pid to lock file
-    let mut lock_file = fs::File::create(&lock_path)?;
-    let pid = process::get_current_pid();
-    use std::io::Write;
-    lock_file.write_all(pid.to_string().as_bytes())?;
+    // Only create lock file for interactive mode
+    let _cclip_lock_guard = if !is_non_interactive {
+        // Write current pid to lock file
+        let mut lock_file = fs::File::create(&lock_path)?;
+        let pid = process::get_current_pid();
+        use std::io::Write;
+        lock_file.write_all(pid.to_string().as_bytes())?;
 
-    // Lock file cleanup guard
-    struct CclipLockGuard(path::PathBuf);
-    impl Drop for CclipLockGuard {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
+        // Lock file cleanup guard
+        struct CclipLockGuard(path::PathBuf);
+        impl Drop for CclipLockGuard {
+            fn drop(&mut self) {
+                let _ = fs::remove_file(&self.0);
+            }
         }
-    }
-    let _cclip_lock_guard = CclipLockGuard(lock_path);
+        Some(CclipLockGuard(lock_path))
+    } else {
+        None
+    };
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(modes::cclip::run(cli))

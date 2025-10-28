@@ -1,5 +1,5 @@
 {
-  description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v2.2.0-seedclay";
+  description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v2.2.1-seedclay";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -24,7 +24,7 @@
         packages = {
           default = naersk'.buildPackage {
             pname = "fsel";
-            version = "2.2.0-seedclay";
+            version = "2.2.1-seedclay";
             src = ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config ];
@@ -36,7 +36,7 @@
             '';
 
             meta = with pkgs.lib; {
-              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v2.2.0-seedclay";
+              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v2.2.1-seedclay";
               homepage = "https://github.com/Mjoyufull/fsel";
               license = licenses.bsd2;
               maintainers = [ ];

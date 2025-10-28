@@ -89,6 +89,32 @@ All work occurs in feature branches created from dev.
 
 Hotfix branches are created from main, merged back into main after patching, then merged into dev.
 
+### Documentation-Only Changes
+
+**Exception to PR workflow:** Documentation-only changes (typo fixes, clarifications, formatting) that don't affect code can be pushed directly to main without going through dev.
+
+**Criteria for direct-to-main docs:**
+- Changes only to `.md` files (README, USAGE, CONTRIBUTING, etc.)
+- No code changes whatsoever
+- No config file changes
+- Typo fixes, grammar corrections, formatting improvements
+- Clarifications that don't change meaning
+
+**Process:**
+```bash
+git checkout main
+git pull origin main
+# Make documentation changes
+git commit -m "docs: fix typo in README"
+git push origin main
+# Sync to dev
+git checkout dev
+git merge main
+git push origin dev
+```
+
+**Note:** For substantial documentation rewrites or new documentation, still use the PR process for review.
+
 ---
 
 ## Workflow Overview
@@ -550,6 +576,20 @@ git push origin hotfix/cache
 # PR to main, approve, merge
 git tag -a v2.2.1-seedclay -m "v2.2.1-seedclay: hotfix"
 git push origin main --tags
+git checkout dev
+git merge main
+git push origin dev
+```
+
+### Documentation-Only Fix
+
+```bash
+git checkout main
+git pull origin main
+# Fix typo in README
+git commit -am "docs: fix typo in installation section"
+git push origin main
+# Sync to dev
 git checkout dev
 git merge main
 git push origin dev
