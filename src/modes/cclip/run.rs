@@ -1082,6 +1082,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                         .map(|s| s.to_string())
                                                 });
 
+                                            // Preserve scroll offset
+                                            let old_scroll_offset = ui.scroll_offset;
+
                                             // Update UI with new items
                                             ui.hidden = new_items;
                                             ui.shown.clear();
@@ -1096,8 +1099,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     })
                                                 {
                                                     ui.selected = Some(pos);
+                                                    // Restore scroll offset, ensuring selected item is visible
+                                                    ui.scroll_offset = old_scroll_offset.min(pos);
                                                 } else if !ui.shown.is_empty() {
                                                     ui.selected = Some(0);
+                                                    ui.scroll_offset = 0;
                                                 }
                                             }
                                         }
@@ -1165,6 +1171,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                             .map(|s| s.to_string())
                                                     });
 
+                                                // Preserve scroll offset
+                                                let old_scroll_offset = ui.scroll_offset;
+
                                                 // Update UI with new items
                                                 ui.hidden = new_items;
                                                 ui.shown.clear();
@@ -1179,8 +1188,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                         })
                                                     {
                                                         ui.selected = Some(pos);
+                                                        // Restore scroll offset, ensuring selected item is visible
+                                                        ui.scroll_offset = old_scroll_offset.min(pos);
                                                     } else if !ui.shown.is_empty() {
                                                         ui.selected = Some(0);
+                                                        ui.scroll_offset = 0;
                                                     }
                                                 }
                                             }

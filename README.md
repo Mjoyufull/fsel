@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.2.1-seedclay
+    $ cargo install fsel@2.2.2-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.2.1-seedclay --force
+    $ cargo install fsel@2.2.2-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -287,7 +287,7 @@ fsel --cclip --tag list
 # List items with specific tag (verbose shows details)
 fsel --cclip --tag list prompt -vv
 
-# Clear all tags and metadata
+# Clear tag metadata from fsel database
 fsel --cclip --tag clear
 
 # Show tag color names in display
@@ -369,7 +369,7 @@ Clipboard Mode Options:
       --tag <name>       Filter clipboard items by tag
       --tag list         List all tags
       --tag list <name>  List items with specific tag
-      --tag clear        Clear all tags and metadata
+      --tag clear        Clear tag metadata from fsel database
       --cclip-show-tag-color-names Show tag color names in display
 
 Help:

@@ -168,7 +168,9 @@ fsel --cclip --tag list prompt
 # List items with tag (verbose shows details)
 fsel --cclip --tag list prompt -vv
 
-# Clear all tags and metadata from database
+# Clear tag metadata from fsel database
+# Note: This only clears fsel's tag metadata (colors, emojis)
+# To clear tags from cclip entries, use: cclip tag -d <ID>
 fsel --cclip --tag clear
 
 # Show tag color names in item display

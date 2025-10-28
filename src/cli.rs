@@ -101,7 +101,7 @@ Usage:
 │  ├─ --tag <NAME>                 Filter clipboard items by tag
 │  ├─ --tag list                   List all tags
 │  ├─ --tag list <NAME>            List items with specific tag
-│  ├─ --tag clear                  Clear all tags and metadata
+│  ├─ --tag clear                  Clear tag metadata from fsel database
 │  └─ --cclip-show-tag-color-names Show tag color names in display
 │
 └─ General
