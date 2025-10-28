@@ -168,3 +168,6 @@ wrap_long_lines = true           # Wrap long lines
 image_preview = true             # Show inline image previews
 hide_inline_image_message = false # Hide "[Inline Image Preview]" text
 
+# Tags (requires cclip with tag support)
+# show_tag_color_names = false   # Show tag color names in display
+

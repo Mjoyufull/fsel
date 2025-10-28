@@ -37,6 +37,14 @@ backspace = ["backspace"]
 # Note: Ctrl+I is the same as Tab in terminals, so we use Alt+I instead
 image_preview = [{ key = "i", modifiers = "alt" }]
 
+# Tag clipboard item with custom tags (colors, emojis)
+# Note: Press Esc to cancel tag creation/editing
+tag = [{ key = "t", modifiers = "ctrl" }]
+
+# Remove tag from clipboard item (hardcoded, not configurable)
+# Keybind: Alt+T
+# Note: This prompts which tag to remove if item has multiple tags
+
 # ===== KEY REFERENCE =====
 # Available key names:
 #   Letters: "a", "b", "c", ... "z"

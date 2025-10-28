@@ -1,4 +1,4 @@
-.TH FSEL 1 "2025-10-15" "2.1.0-seedclay" "User Commands"
+.TH FSEL 1 "2025-10-27" "2.2.0-seedclay" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -116,6 +116,12 @@ List all tags (use with --cclip)
 .TP
 .BR \-\-tag " list " \fINAME\fR
 List items with specific tag (use with --cclip)
+.TP
+.B \-\-tag clear
+Clear all tags and metadata from cclip database (use with --cclip)
+.TP
+.B \-\-cclip-show-tag-color-names
+Show tag color names in clipboard item display (use with --cclip)
 .SS "General Options"
 .TP
 .BR \-h
@@ -288,18 +294,11 @@ fsel --cclip
 .RE
 .fi
 .TP
-Tag clipboard item (press Ctrl-T in cclip mode):
-.nf
-.RS
-# Prompts for: tag name, color (optional), emoji (optional)
-# Tags appear as [tagname] prefix in list
-.RE
-.fi
-.TP
 Filter by tag:
 .nf
 .RS
 fsel --cclip --tag prompt
+fsel --cclip --tag code
 .RE
 .fi
 .TP
@@ -307,7 +306,28 @@ List all tags:
 .nf
 .RS
 fsel --cclip --tag list
-fsel --cclip --tag list prompt -vv  # verbose shows items
+.RE
+.fi
+.TP
+List items with specific tag:
+.nf
+.RS
+fsel --cclip --tag list prompt
+fsel --cclip --tag list prompt -vv  # verbose shows details
+.RE
+.fi
+.TP
+Clear all tags and metadata:
+.nf
+.RS
+fsel --cclip --tag clear
+.RE
+.fi
+.TP
+Show tag color names in display:
+.nf
+.RS
+fsel --cclip --cclip-show-tag-color-names
 .RE
 .fi
 .SH ENVIRONMENT
