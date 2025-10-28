@@ -458,7 +458,12 @@ impl<'a> DmenuUI<'a> {
                 let safe_content = if content.is_empty() {
                     "[Empty content]".to_string()
                 } else if content.len() > 5000 {
-                    format!("{}...", &content[..5000])
+                    // Find a valid UTF-8 char boundary at or before 5000
+                    let mut truncate_at = 5000.min(content.len());
+                    while truncate_at > 0 && !content.is_char_boundary(truncate_at) {
+                        truncate_at -= 1;
+                    }
+                    format!("{}...", &content[..truncate_at])
                 } else {
                     content
                 };
