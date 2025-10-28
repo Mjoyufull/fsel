@@ -16,7 +16,6 @@ mod process;
 mod strings;
 mod ui;
 
-use std::{fs, io, path};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -24,6 +23,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use eyre::{eyre, WrapErr};
+use std::{fs, io, path};
 
 fn main() {
     if let Err(error) = run() {
@@ -35,16 +35,16 @@ fn main() {
 
 fn run() -> eyre::Result<()> {
     let cli = cli::parse()?;
-    
+
     // Route to appropriate mode
     if cli.dmenu_mode {
         return modes::dmenu::run(&cli);
     }
-    
+
     if cli.cclip_mode {
         return run_cclip_mode(&cli);
     }
-    
+
     // Default: app launcher
     modes::app_launcher::run(cli)
 }
@@ -56,7 +56,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         eprintln!("install cclip from: https://github.com/heather7283/cclip");
         std::process::exit(1);
     }
-    
+
     // Check if cclipd is running and has data
     if let Err(e) = modes::cclip::check_cclip_database() {
         eprintln!("error: {}", e);
@@ -67,18 +67,19 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         eprintln!("\nfor more info: https://github.com/heather7283/cclip");
         std::process::exit(1);
     }
-    
+
     // Handle lock file for cclip mode
-    let lock_path = if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
-        let mut cache_dir = project_dirs.cache_dir().to_path_buf();
-        if !cache_dir.exists() {
-            fs::create_dir_all(&cache_dir)?;
-        }
-        cache_dir.push("fsel-cclip.lock");
-        cache_dir
-    } else {
-        return Err(eyre!("can't find cache dir for {}", env!("CARGO_PKG_NAME")));
-    };
+    let lock_path =
+        if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
+            let mut cache_dir = project_dirs.cache_dir().to_path_buf();
+            if !cache_dir.exists() {
+                fs::create_dir_all(&cache_dir)?;
+            }
+            cache_dir.push("fsel-cclip.lock");
+            cache_dir
+        } else {
+            return Err(eyre!("can't find cache dir for {}", env!("CARGO_PKG_NAME")));
+        };
 
     let contents = match fs::read_to_string(&lock_path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
@@ -115,7 +116,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
         }
     }
     let _cclip_lock_guard = CclipLockGuard(lock_path);
-    
+
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(modes::cclip::run(cli))
 }
@@ -123,9 +124,13 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
 /// Setup terminal for TUI mode
 pub fn setup_terminal(disable_mouse: bool) -> eyre::Result<()> {
     enable_raw_mode().wrap_err("Failed to enable raw mode")?;
-    io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
+    io::stderr()
+        .execute(EnterAlternateScreen)
+        .wrap_err("Failed to enter alternate screen")?;
     if !disable_mouse {
-        io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+        io::stderr()
+            .execute(EnableMouseCapture)
+            .wrap_err("Failed to enable mouse capture")?;
     }
     Ok(())
 }

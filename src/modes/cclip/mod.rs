@@ -5,10 +5,10 @@ pub mod run;
 pub mod scan;
 pub mod select;
 
-use std::collections::HashMap;
+use crate::common::Item;
 use eyre::{eyre, Result};
 use ratatui::style::Color;
-use crate::common::Item;
+use std::collections::HashMap;
 
 // Re-export main entry point
 pub use run::run;
@@ -243,7 +243,7 @@ fn format_tags_for_display(
     if tags.is_empty() {
         return base;
     }
-    
+
     let display_tags: Vec<String> = if let Some(formatter) = formatter {
         formatter.format_tags_with_options(tags, include_color_names)
     } else {

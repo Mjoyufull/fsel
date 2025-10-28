@@ -43,14 +43,18 @@ pub enum TagMode {
     /// Normal mode (not tagging)
     Normal,
     /// Prompting for tag name
-    PromptingTagName { 
-        input: String, 
+    PromptingTagName {
+        input: String,
         selected_item: Option<String>,
         available_tags: Vec<String>,
         selected_tag: Option<usize>,
     },
     /// Prompting for tag emoji
-    PromptingTagEmoji { tag_name: String, input: String, selected_item: Option<String> },
+    PromptingTagEmoji {
+        tag_name: String,
+        input: String,
+        selected_item: Option<String>,
+    },
     /// Prompting for tag color
     PromptingTagColor {
         tag_name: String,
@@ -69,11 +73,7 @@ pub enum TagMode {
 
 impl<'a> DmenuUI<'a> {
     /// Creates a new DmenuUI from a Vec of Items
-    pub fn new(
-        items: Vec<Item>,
-        wrap_long_lines: bool,
-        show_line_numbers: bool,
-    ) -> DmenuUI<'a> {
+    pub fn new(items: Vec<Item>, wrap_long_lines: bool, show_line_numbers: bool) -> DmenuUI<'a> {
         DmenuUI {
             shown: vec![],
             hidden: items,
@@ -123,7 +123,13 @@ impl<'a> DmenuUI<'a> {
     }
 
     pub fn cycle_removal_selection(&mut self, direction: i32) {
-        if let TagMode::RemovingTag { tags, selected, input, .. } = &mut self.tag_mode {
+        if let TagMode::RemovingTag {
+            tags,
+            selected,
+            input,
+            ..
+        } = &mut self.tag_mode
+        {
             if tags.is_empty() {
                 *selected = None;
                 return;
@@ -133,7 +139,7 @@ impl<'a> DmenuUI<'a> {
             let current = selected.map(|idx| idx as i32).unwrap_or(0);
             let next = (current + direction).rem_euclid(len);
             *selected = Some(next as usize);
-            
+
             // Update input with selected tag
             if let Some(idx) = *selected {
                 if idx < tags.len() {
@@ -144,7 +150,13 @@ impl<'a> DmenuUI<'a> {
     }
 
     pub fn cycle_tag_creation_selection(&mut self, direction: i32) {
-        if let TagMode::PromptingTagName { available_tags, selected_tag, input, .. } = &mut self.tag_mode {
+        if let TagMode::PromptingTagName {
+            available_tags,
+            selected_tag,
+            input,
+            ..
+        } = &mut self.tag_mode
+        {
             if available_tags.is_empty() {
                 *selected_tag = None;
                 return;
@@ -154,7 +166,7 @@ impl<'a> DmenuUI<'a> {
             let current = selected_tag.map(|idx| idx as i32).unwrap_or(-1);
             let next = (current + direction).rem_euclid(len);
             *selected_tag = Some(next as usize);
-            
+
             // Update input with selected tag name only (not full display)
             if let Some(idx) = *selected_tag {
                 if idx < available_tags.len() {
@@ -162,7 +174,8 @@ impl<'a> DmenuUI<'a> {
                     let tag = &available_tags[idx];
                     // Remove any formatting like (color) or emoji prefix
                     let clean_tag = tag.split('(').next().unwrap_or(tag).trim();
-                    let clean_tag = clean_tag.trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
+                    let clean_tag = clean_tag
+                        .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
                     *input = clean_tag.to_string();
                 }
             }
@@ -196,7 +209,12 @@ impl<'a> DmenuUI<'a> {
         _panel_height: u16,
     ) {
         match &self.tag_mode {
-            TagMode::PromptingTagName { input, available_tags, selected_tag, .. } => {
+            TagMode::PromptingTagName {
+                input,
+                available_tags,
+                selected_tag,
+                ..
+            } => {
                 let mut text = vec![
                     Line::from(vec![Span::styled(
                         "Tagging Mode",
@@ -212,7 +230,11 @@ impl<'a> DmenuUI<'a> {
                 if !available_tags.is_empty() {
                     text.push(Line::from("Existing tags:"));
                     for (idx, tag) in available_tags.iter().enumerate() {
-                        let marker = if Some(idx) == *selected_tag { "▶" } else { " " };
+                        let marker = if Some(idx) == *selected_tag {
+                            "▶"
+                        } else {
+                            " "
+                        };
                         text.push(Line::from(vec![
                             Span::styled(marker, Style::default().fg(highlight_color)),
                             Span::raw(" "),
@@ -228,26 +250,32 @@ impl<'a> DmenuUI<'a> {
                 text.extend_from_slice(&[
                     Line::from(vec![
                         Span::styled("Tag: ", Style::default().fg(highlight_color)),
-                        Span::styled(input.clone(), Style::default().fg(ratatui::style::Color::White)),
+                        Span::styled(
+                            input.clone(),
+                            Style::default().fg(ratatui::style::Color::White),
+                        ),
                         Span::styled("▌", Style::default().fg(highlight_color)),
                     ]),
                     Line::from(""),
                 ]);
-                
+
                 // Show temp message if present
                 if let Some((ref msg, _)) = self.temp_message {
-                    text.push(Line::from(vec![
-                        Span::styled(msg.clone(), Style::default().fg(ratatui::style::Color::Yellow)),
-                    ]));
+                    text.push(Line::from(vec![Span::styled(
+                        msg.clone(),
+                        Style::default().fg(ratatui::style::Color::Yellow),
+                    )]));
                     text.push(Line::from(""));
                 }
-                
+
                 text.push(Line::from("Press Enter to continue, Esc to cancel."));
 
                 self.text = text;
                 return;
             }
-            TagMode::PromptingTagEmoji { tag_name, input, .. } => {
+            TagMode::PromptingTagEmoji {
+                tag_name, input, ..
+            } => {
                 let mut text = vec![
                     Line::from(vec![Span::styled(
                         "Tag Emoji",
@@ -255,15 +283,16 @@ impl<'a> DmenuUI<'a> {
                     )]),
                     Line::from(""),
                 ];
-                
+
                 // Show temp message if present (e.g., "already applied (editing)")
                 if let Some((ref msg, _)) = self.temp_message {
-                    text.push(Line::from(vec![
-                        Span::styled(msg.clone(), Style::default().fg(ratatui::style::Color::Yellow)),
-                    ]));
+                    text.push(Line::from(vec![Span::styled(
+                        msg.clone(),
+                        Style::default().fg(ratatui::style::Color::Yellow),
+                    )]));
                     text.push(Line::from(""));
                 }
-                
+
                 text.extend_from_slice(&[
                     Line::from(format!("Tag: {}", tag_name)),
                     Line::from(""),
@@ -272,13 +301,16 @@ impl<'a> DmenuUI<'a> {
                     Line::from("  Leave blank to keep existing emoji"),
                     Line::from(vec![
                         Span::styled("Emoji: ", Style::default().fg(highlight_color)),
-                        Span::styled(input.clone(), Style::default().fg(ratatui::style::Color::White)),
+                        Span::styled(
+                            input.clone(),
+                            Style::default().fg(ratatui::style::Color::White),
+                        ),
                         Span::styled("▌", Style::default().fg(highlight_color)),
                     ]),
                     Line::from(""),
                     Line::from("Press Enter to continue, Esc to cancel."),
                 ]);
-                
+
                 self.text = text;
                 return;
             }
@@ -296,15 +328,16 @@ impl<'a> DmenuUI<'a> {
                     )]),
                     Line::from(""),
                 ];
-                
+
                 // Show temp message if present (e.g., "already applied (editing)")
                 if let Some((ref msg, _)) = self.temp_message {
-                    text.push(Line::from(vec![
-                        Span::styled(msg.clone(), Style::default().fg(ratatui::style::Color::Yellow)),
-                    ]));
+                    text.push(Line::from(vec![Span::styled(
+                        msg.clone(),
+                        Style::default().fg(ratatui::style::Color::Yellow),
+                    )]));
                     text.push(Line::from(""));
                 }
-                
+
                 text.extend_from_slice(&[
                     Line::from(format!("Tag: {}", tag_name)),
                     Line::from(format!("Emoji: {}", emoji_display)),
@@ -317,13 +350,16 @@ impl<'a> DmenuUI<'a> {
                     Line::from(""),
                     Line::from(vec![
                         Span::styled("Color: ", Style::default().fg(highlight_color)),
-                        Span::styled(input.clone(), Style::default().fg(ratatui::style::Color::White)),
+                        Span::styled(
+                            input.clone(),
+                            Style::default().fg(ratatui::style::Color::White),
+                        ),
                         Span::styled("▌", Style::default().fg(highlight_color)),
                     ]),
                     Line::from(""),
                     Line::from("Press Enter to finish, Esc to cancel."),
                 ]);
-                
+
                 self.text = text;
                 return;
             }
@@ -368,7 +404,10 @@ impl<'a> DmenuUI<'a> {
                     Line::from(""),
                     Line::from(vec![
                         Span::styled("Tag: ", Style::default().fg(highlight_color)),
-                        Span::styled(input.clone(), Style::default().fg(ratatui::style::Color::White)),
+                        Span::styled(
+                            input.clone(),
+                            Style::default().fg(ratatui::style::Color::White),
+                        ),
                         Span::styled("▌", Style::default().fg(highlight_color)),
                     ]),
                     Line::from(""),
@@ -442,7 +481,7 @@ impl<'a> DmenuUI<'a> {
                     // Wrap by actual panel width (accounting for borders and padding)
                     let max_width = (panel_width.saturating_sub(4)) as usize; // -2 for borders, -2 for padding
                     let max_width = max_width.max(20); // Minimum 20 chars
-                    
+
                     let chars: Vec<char> = display_content.chars().collect();
                     let mut start = 0;
                     while start < chars.len() {
@@ -510,17 +549,17 @@ impl<'a> DmenuUI<'a> {
     /// Get actual clipboard content for display
     fn get_cclip_content_for_display(&mut self, item: &crate::common::Item) -> String {
         let parts: Vec<&str> = item.original_line.splitn(4, '\t').collect();
-        
+
         if parts.len() >= 3 {
             let rowid = parts[0].trim();
             let _mime_type = parts[1].trim();
             let preview = parts[2].trim();
-            
+
             // Check cache first
             if let Some(cached_content) = self.content_cache.get(rowid) {
                 return cached_content.clone();
             }
-            
+
             // Always try to get the full content - no filtering, show everything
             if let Ok(output) = std::process::Command::new("cclip")
                 .args(&["get", rowid])
@@ -530,13 +569,14 @@ impl<'a> DmenuUI<'a> {
                     if let Ok(content) = String::from_utf8(output.stdout) {
                         // Don't cache empty content
                         if !content.trim().is_empty() {
-                            self.content_cache.insert(rowid.to_string(), content.clone());
+                            self.content_cache
+                                .insert(rowid.to_string(), content.clone());
                             return content;
                         }
                     }
                 }
             }
-            
+
             // Only fallback to preview if cclip get completely fails
             if !preview.is_empty() {
                 preview.to_string()
@@ -544,7 +584,7 @@ impl<'a> DmenuUI<'a> {
                 format!("[Failed to get content for rowid {}]", rowid)
             }
         } else if parts.len() >= 2 {
-            // Show mime type info  
+            // Show mime type info
             format!("[{} content]", parts[1].trim())
         } else {
             // Fallback

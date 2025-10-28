@@ -1,8 +1,8 @@
 // Selection, copying, and tagging functionality
 
-use std::process::{Command, Stdio};
-use eyre::{eyre, Result};
 use super::CclipItem;
+use eyre::{eyre, Result};
+use std::process::{Command, Stdio};
 
 impl CclipItem {
     /// Copy this item back to the clipboard (Wayland)

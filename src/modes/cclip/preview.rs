@@ -1,8 +1,8 @@
 // Preview functionality for clipboard items
 
-use std::process::{Command, Stdio};
-use eyre::{eyre, Result};
 use super::CclipItem;
+use eyre::{eyre, Result};
+use std::process::{Command, Stdio};
 
 impl CclipItem {
     /// Check if this item is an image

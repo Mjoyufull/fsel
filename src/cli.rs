@@ -677,28 +677,43 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                         // Config file doesn't exist, create a default one
                         if let Some(parent) = f.parent() {
                             if let Err(mkdir_err) = fs::create_dir_all(parent) {
-                                println!("Warning: Could not create config directory {}: {}", parent.display(), mkdir_err);
+                                println!(
+                                    "Warning: Could not create config directory {}: {}",
+                                    parent.display(),
+                                    mkdir_err
+                                );
                             } else {
                                 // Create default config
                                 let default_config = include_str!("../config.toml");
                                 if let Err(write_err) = fs::write(&f, default_config) {
-                                    println!("Warning: Could not create default config file {}: {}", f.display(), write_err);
+                                    println!(
+                                        "Warning: Could not create default config file {}: {}",
+                                        f.display(),
+                                        write_err
+                                    );
                                 } else {
                                     println!("Created default config file: {}", f.display());
-                                    
+
                                     // Also create default keybinds.toml for reference
                                     let mut keybinds_path = f.clone();
                                     keybinds_path.set_file_name("keybinds.toml");
                                     let default_keybinds = include_str!("../keybinds.toml");
-                                    if let Err(keybind_err) = fs::write(&keybinds_path, default_keybinds) {
+                                    if let Err(keybind_err) =
+                                        fs::write(&keybinds_path, default_keybinds)
+                                    {
                                         println!("Warning: Could not create default keybinds file {}: {}", keybinds_path.display(), keybind_err);
                                     } else {
-                                        println!("Created default keybinds file: {}", keybinds_path.display());
+                                        println!(
+                                            "Created default keybinds file: {}",
+                                            keybinds_path.display()
+                                        );
                                     }
-                                    
+
                                     // Try to read the newly created config
                                     if let Ok(content) = fs::read_to_string(&f) {
-                                        if let Ok(conf) = FileConf::read_with_enhanced_errors(&content) {
+                                        if let Ok(conf) =
+                                            FileConf::read_with_enhanced_errors(&content)
+                                        {
                                             file_conf = Some(conf);
                                         }
                                     }
@@ -1111,7 +1126,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
 
     // Validate tag options require cclip mode
-    if (default.cclip_tag.is_some() || default.cclip_tag_list || default.cclip_clear_tags) && !default.cclip_mode {
+    if (default.cclip_tag.is_some() || default.cclip_tag_list || default.cclip_clear_tags)
+        && !default.cclip_mode
+    {
         eprintln!("Error: --tag requires --cclip mode");
         eprintln!("Usage: fsel --cclip --tag <name>");
         eprintln!("       fsel --cclip --tag list");

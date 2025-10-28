@@ -2,9 +2,9 @@
 // This represents a filterable/searchable item with metadata
 
 use nucleo_matcher::{Matcher, Utf32Str};
-use ratatui::widgets::ListItem;
-use ratatui::text::{Line, Span};
 use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::ListItem;
 
 /// Represents a filterable item with column parsing capabilities
 /// Used by dmenu mode and cclip mode for displaying and filtering items
@@ -132,20 +132,22 @@ impl Item {
         let query_utf32 = Utf32Str::new(&query_lower, &mut query_chars);
 
         // For cclip items, check if query matches any tag names first (highest priority)
-        if let Ok(cclip_item) = crate::modes::cclip::CclipItem::from_line(self.original_line.clone()) {
+        if let Ok(cclip_item) =
+            crate::modes::cclip::CclipItem::from_line(self.original_line.clone())
+        {
             for tag in &cclip_item.tags {
                 let tag_lower = tag.to_lowercase();
-                
+
                 // Exact tag name match gets highest priority
                 if tag_lower == query_lower {
                     return Some(1_000_000);
                 }
-                
+
                 // Tag name prefix match gets very high priority
                 if tag_lower.starts_with(&query_lower) {
                     return Some(800_000);
                 }
-                
+
                 // Fuzzy tag name match gets high priority
                 let mut tag_chars = Vec::new();
                 let tag_utf32 = Utf32Str::new(&tag_lower, &mut tag_chars);
@@ -321,13 +323,16 @@ impl Item {
     }
 
     /// Create a ListItem with optional tag metadata formatting
-    pub fn to_list_item<'a>(&'a self, tag_metadata: Option<&'a crate::modes::cclip::TagMetadataFormatter>) -> ListItem<'a> {
+    pub fn to_list_item<'a>(
+        &'a self,
+        tag_metadata: Option<&'a crate::modes::cclip::TagMetadataFormatter>,
+    ) -> ListItem<'a> {
         if let Some(actual_tags) = &self.tags {
             if !actual_tags.is_empty() {
                 if let Some(formatter) = tag_metadata {
                     // Use actual tags from self.tags, not parsed from display_text
                     let mut spans = Vec::new();
-                    
+
                     // Find where tags are in display_text to split properly
                     if let Some(tag_start) = self.display_text.find('[') {
                         if let Some(tag_end) = self.display_text.find(']') {
@@ -335,32 +340,36 @@ impl Item {
                             if tag_start > 0 {
                                 spans.push(Span::raw(&self.display_text[..tag_start]));
                             }
-                            
+
                             // Get first tag color for brackets
-                            let first_tag_color = actual_tags.first()
+                            let first_tag_color = actual_tags
+                                .first()
                                 .and_then(|tag| formatter.get_color(tag))
                                 .unwrap_or(ratatui::style::Color::Green);
-                            
+
                             // Opening bracket with first tag color
                             spans.push(Span::styled("[", Style::default().fg(first_tag_color)));
-                            
+
                             // Format each tag individually with its own color
                             // Extract the formatted tags from display_text to preserve color names
-                            let formatted_tags = if let Some(tag_start_idx) = self.display_text.find('[') {
-                                if let Some(tag_end_idx) = self.display_text.find(']') {
-                                    let tags_str = &self.display_text[tag_start_idx + 1..tag_end_idx];
-                                    tags_str.split(", ").collect::<Vec<&str>>()
+                            let formatted_tags =
+                                if let Some(tag_start_idx) = self.display_text.find('[') {
+                                    if let Some(tag_end_idx) = self.display_text.find(']') {
+                                        let tags_str =
+                                            &self.display_text[tag_start_idx + 1..tag_end_idx];
+                                        tags_str.split(", ").collect::<Vec<&str>>()
+                                    } else {
+                                        vec![]
+                                    }
                                 } else {
                                     vec![]
-                                }
-                            } else {
-                                vec![]
-                            };
-                            
+                                };
+
                             for (idx, tag_name) in actual_tags.iter().enumerate() {
-                                let tag_color = formatter.get_color(tag_name)
+                                let tag_color = formatter
+                                    .get_color(tag_name)
                                     .unwrap_or(ratatui::style::Color::Green);
-                                
+
                                 // Use the formatted tag from display_text if available (includes color names)
                                 let display = if idx < formatted_tags.len() {
                                     formatted_tags[idx].to_string()
@@ -376,30 +385,33 @@ impl Item {
                                     display.push_str(tag_name);
                                     display
                                 };
-                                
+
                                 spans.push(Span::styled(display, Style::default().fg(tag_color)));
-                                
+
                                 // Add comma separator if not last tag
                                 if idx < actual_tags.len() - 1 {
-                                    spans.push(Span::styled(", ", Style::default().fg(first_tag_color)));
+                                    spans.push(Span::styled(
+                                        ", ",
+                                        Style::default().fg(first_tag_color),
+                                    ));
                                 }
                             }
-                            
+
                             // Closing bracket with first tag color
                             spans.push(Span::styled("]", Style::default().fg(first_tag_color)));
-                            
+
                             // Add content after tags
                             if tag_end + 2 < self.display_text.len() {
                                 spans.push(Span::raw(&self.display_text[tag_end + 2..]));
                             }
-                            
+
                             return ListItem::new(Line::from(spans));
                         }
                     }
                 }
             }
         }
-        
+
         // Fallback to simple display
         ListItem::new(self.display_text.clone())
     }

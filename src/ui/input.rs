@@ -111,10 +111,13 @@ impl Input {
     pub fn next(&self) -> Result<Event<KeyEvent>, mpsc::RecvError> {
         self.rx.recv()
     }
-    
+
     /// Next key pressed by user with timeout.
     #[allow(dead_code)]
-    pub fn next_timeout(&self, timeout: Duration) -> Result<Event<KeyEvent>, mpsc::RecvTimeoutError> {
+    pub fn next_timeout(
+        &self,
+        timeout: Duration,
+    ) -> Result<Event<KeyEvent>, mpsc::RecvTimeoutError> {
         self.rx.recv_timeout(timeout)
     }
 }

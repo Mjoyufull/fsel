@@ -1,3 +1,3 @@
 mod app;
 
-pub use app::{App, read_with_options};
+pub use app::{read_with_options, App};

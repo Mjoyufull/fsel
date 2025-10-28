@@ -1,28 +1,27 @@
 //! Dmenu compatibility mode
 
-use eyre::{Result, WrapErr};
 use crate::cli::Opts;
 use crate::ui::{DmenuUI, InputConfig, InputEvent as Event};
+use eyre::{Result, WrapErr};
 
-
-use std::io;
-use scopeguard::defer;
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
-
-
+use scopeguard::defer;
+use std::io;
 
 /// Run dmenu mode
 pub fn run(cli: &Opts) -> Result<()> {
+    use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
     use crossterm::{
         terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
     };
-    use crossterm::event::{EnableMouseCapture, DisableMouseCapture};
     use ratatui::backend::CrosstermBackend;
     use ratatui::layout::{Alignment, Constraint, Direction, Layout};
     use ratatui::style::{Modifier, Style};
     use ratatui::text::{Line, Span};
-    use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
+    use ratatui::widgets::{
+        Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap,
+    };
     use ratatui::Terminal;
 
     // Check if stdin is piped (unless prompt-only mode)
@@ -34,18 +33,16 @@ pub fn run(cli: &Opts) -> Result<()> {
     let lines = if cli.dmenu_prompt_only {
         vec![] // No input in prompt-only mode
     } else if cli.dmenu_null_separated {
-        super::parse::read_stdin_null_separated()
-            .wrap_err("Failed to read from stdin")?
+        super::parse::read_stdin_null_separated().wrap_err("Failed to read from stdin")?
     } else {
-        super::parse::read_stdin_lines()
-            .wrap_err("Failed to read from stdin")?
+        super::parse::read_stdin_lines().wrap_err("Failed to read from stdin")?
     };
-    
+
     // Exit immediately if no input and exit_if_empty is set
     if cli.dmenu_exit_if_empty && lines.is_empty() {
         return Ok(());
     }
-    
+
     // Also check if lines only contain empty strings
     if cli.dmenu_exit_if_empty && lines.iter().all(|l| l.trim().is_empty()) {
         return Ok(());
@@ -60,14 +57,18 @@ pub fn run(cli: &Opts) -> Result<()> {
 
     // Setup terminal
     enable_raw_mode().wrap_err("Failed to enable raw mode")?;
-    io::stderr().execute(EnterAlternateScreen).wrap_err("Failed to enter alternate screen")?;
-    
+    io::stderr()
+        .execute(EnterAlternateScreen)
+        .wrap_err("Failed to enter alternate screen")?;
+
     // Get effective disable_mouse setting with dmenu -> regular inheritance
     let disable_mouse = cli.dmenu_disable_mouse.unwrap_or(cli.disable_mouse);
     if !disable_mouse {
-        io::stderr().execute(EnableMouseCapture).wrap_err("Failed to enable mouse capture")?;
+        io::stderr()
+            .execute(EnableMouseCapture)
+            .wrap_err("Failed to enable mouse capture")?;
     }
-    
+
     // Ensure cleanup on exit
     defer! {
         if !disable_mouse {
@@ -88,20 +89,25 @@ pub fn run(cli: &Opts) -> Result<()> {
         disable_mouse,
         exit_key: KeyCode::Null, // Use Null key to prevent accidental input thread termination
         ..InputConfig::default()
-    }.init();
+    }
+    .init();
 
     // Create dmenu UI
-    let mut ui = DmenuUI::new(items, cli.dmenu_wrap_long_lines, cli.dmenu_show_line_numbers);
+    let mut ui = DmenuUI::new(
+        items,
+        cli.dmenu_wrap_long_lines,
+        cli.dmenu_show_line_numbers,
+    );
     ui.set_match_mode(cli.match_mode);
     ui.set_match_nth(cli.dmenu_match_nth.clone());
-    
+
     // Pre-fill search if -ss was provided
     if let Some(ref search) = cli.search_string {
         ui.query = search.clone();
     }
-    
+
     ui.filter(); // Initial filter to show all items (or filtered by search_string)
-    
+
     // Handle pre-selection
     if let Some(ref select_str) = cli.dmenu_select {
         // Find first matching item (case-insensitive)
@@ -117,30 +123,28 @@ pub fn run(cli: &Opts) -> Result<()> {
             ui.selected = Some(select_idx);
         }
     }
-    
+
     // Ensure we have a valid selection if there are items
     if !ui.shown.is_empty() && ui.selected.is_none() {
         ui.selected = Some(0);
     }
-    
+
     ui.info(cli.dmenu_highlight_color.unwrap_or(cli.highlight_color));
-    
+
     // List state for ratatui
     let mut list_state = ListState::default();
-    
+
     // Get effective dmenu colors with fallback
-    let get_dmenu_color = |dmenu_opt: Option<ratatui::style::Color>, default: ratatui::style::Color| {
+    let get_dmenu_color = |dmenu_opt: Option<ratatui::style::Color>,
+                           default: ratatui::style::Color| {
         dmenu_opt.unwrap_or(default)
     };
-    let get_dmenu_bool = |dmenu_opt: Option<bool>, default: bool| {
-        dmenu_opt.unwrap_or(default)
-    };
-    let get_dmenu_u16 = |dmenu_opt: Option<u16>, default: u16| {
-        dmenu_opt.unwrap_or(default)
-    };
-    let get_dmenu_panel_position = |dmenu_opt: Option<crate::cli::PanelPosition>, default: crate::cli::PanelPosition| {
-        dmenu_opt.unwrap_or(default)
-    };
+    let get_dmenu_bool = |dmenu_opt: Option<bool>, default: bool| dmenu_opt.unwrap_or(default);
+    let get_dmenu_u16 = |dmenu_opt: Option<u16>, default: u16| dmenu_opt.unwrap_or(default);
+    let get_dmenu_panel_position =
+        |dmenu_opt: Option<crate::cli::PanelPosition>, default: crate::cli::PanelPosition| {
+            dmenu_opt.unwrap_or(default)
+        };
     // Get effective cursor string
     let cursor = cli.dmenu_cursor.as_ref().unwrap_or(&cli.cursor);
 
@@ -149,107 +153,137 @@ pub fn run(cli: &Opts) -> Result<()> {
         terminal.draw(|f| {
             // Get effective colors and settings for dmenu mode
             let highlight_color = get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color);
-            let main_border_color = get_dmenu_color(cli.dmenu_main_border_color, cli.main_border_color);
-            let items_border_color = get_dmenu_color(cli.dmenu_items_border_color, cli.apps_border_color);
-            let input_border_color = get_dmenu_color(cli.dmenu_input_border_color, cli.input_border_color);
+            let main_border_color =
+                get_dmenu_color(cli.dmenu_main_border_color, cli.main_border_color);
+            let items_border_color =
+                get_dmenu_color(cli.dmenu_items_border_color, cli.apps_border_color);
+            let input_border_color =
+                get_dmenu_color(cli.dmenu_input_border_color, cli.input_border_color);
             let main_text_color = get_dmenu_color(cli.dmenu_main_text_color, cli.main_text_color);
             let items_text_color = get_dmenu_color(cli.dmenu_items_text_color, cli.apps_text_color);
-            let input_text_color = get_dmenu_color(cli.dmenu_input_text_color, cli.input_text_color);
-            let header_title_color = get_dmenu_color(cli.dmenu_header_title_color, cli.header_title_color);
+            let input_text_color =
+                get_dmenu_color(cli.dmenu_input_text_color, cli.input_text_color);
+            let header_title_color =
+                get_dmenu_color(cli.dmenu_header_title_color, cli.header_title_color);
             let rounded_borders = get_dmenu_bool(cli.dmenu_rounded_borders, cli.rounded_borders);
-            let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
-            let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-            
+            let content_panel_height = get_dmenu_u16(
+                cli.dmenu_title_panel_height_percent,
+                cli.title_panel_height_percent,
+            );
+            let input_panel_height =
+                get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+
             // Layout calculation
             let total_height = f.area().height;
-            let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
-            
+            let content_height =
+                (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+
             // Get content panel position (defaults to Top if not set)
-            let content_panel_position = get_dmenu_panel_position(cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
-            
+            let content_panel_position = get_dmenu_panel_position(
+                cli.dmenu_title_panel_position,
+                cli.title_panel_position
+                    .unwrap_or(crate::cli::PanelPosition::Top),
+            );
+
             // Split the window into three parts based on content panel position
-            let (chunks, content_panel_index, items_panel_index, input_panel_index) = match content_panel_position {
-                crate::cli::PanelPosition::Top => {
-                    // Top: content, items, input (original layout)
-                    let layout = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Length(content_height.max(3)),
-                            Constraint::Min(1),
-                            Constraint::Length(input_panel_height),
-                        ].as_ref())
-                        .split(f.area());
-                    (layout, 0, 1, 2)
-                },
-                crate::cli::PanelPosition::Middle => {
-                    // Middle: items, content, input
-                    let layout = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Min(1),
-                            Constraint::Length(content_height.max(3)),
-                            Constraint::Length(input_panel_height),
-                        ].as_ref())
-                        .split(f.area());
-                    (layout, 1, 0, 2)
-                },
-                crate::cli::PanelPosition::Bottom => {
-                    // Bottom: items, input, content
-                    let layout = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Min(1),                         // Items panel (remaining space)
-                            Constraint::Length(input_panel_height),     // Input panel
-                            Constraint::Length(content_height.max(3)),  // Content panel at bottom
-                        ].as_ref())
-                        .split(f.area());
-                    (layout, 2, 0, 1)
-                }
-            };
-            
+            let (chunks, content_panel_index, items_panel_index, input_panel_index) =
+                match content_panel_position {
+                    crate::cli::PanelPosition::Top => {
+                        // Top: content, items, input (original layout)
+                        let layout = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints(
+                                [
+                                    Constraint::Length(content_height.max(3)),
+                                    Constraint::Min(1),
+                                    Constraint::Length(input_panel_height),
+                                ]
+                                .as_ref(),
+                            )
+                            .split(f.area());
+                        (layout, 0, 1, 2)
+                    }
+                    crate::cli::PanelPosition::Middle => {
+                        // Middle: items, content, input
+                        let layout = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints(
+                                [
+                                    Constraint::Min(1),
+                                    Constraint::Length(content_height.max(3)),
+                                    Constraint::Length(input_panel_height),
+                                ]
+                                .as_ref(),
+                            )
+                            .split(f.area());
+                        (layout, 1, 0, 2)
+                    }
+                    crate::cli::PanelPosition::Bottom => {
+                        // Bottom: items, input, content
+                        let layout = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints(
+                                [
+                                    Constraint::Min(1),                        // Items panel (remaining space)
+                                    Constraint::Length(input_panel_height),    // Input panel
+                                    Constraint::Length(content_height.max(3)), // Content panel at bottom
+                                ]
+                                .as_ref(),
+                            )
+                            .split(f.area());
+                        (layout, 2, 0, 1)
+                    }
+                };
+
             // Border type
             let border_type = if rounded_borders {
                 BorderType::Rounded
             } else {
                 BorderType::Plain
             };
-            
+
             // Content panel (shows selected item's full content)
             let content_block = Block::default()
                 .borders(Borders::ALL)
                 .title(Span::styled(
                     " Content ",
-                    Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(header_title_color),
                 ))
                 .border_type(border_type)
                 .border_style(Style::default().fg(main_border_color));
-            
+
             let content_paragraph = Paragraph::new(ui.text.clone())
                 .block(content_block)
                 .style(Style::default().fg(main_text_color))
                 .wrap(Wrap { trim: false })
                 .alignment(Alignment::Left);
-            
+
             // Items panel
             let items_panel_height = chunks[items_panel_index].height;
             let max_visible = items_panel_height.saturating_sub(2) as usize;
-            
-            let visible_items = ui.shown
+
+            let visible_items = ui
+                .shown
                 .iter()
                 .skip(ui.scroll_offset)
                 .take(max_visible)
                 .map(ListItem::from)
                 .collect::<Vec<ListItem>>();
-            
+
             let items_list = List::new(visible_items)
-                .block(Block::default()
-                    .borders(Borders::ALL)
-                    .title(Span::styled(
-                        " Items ",
-                        Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
-                    ))
-                    .border_type(border_type)
-                    .border_style(Style::default().fg(items_border_color))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(Span::styled(
+                            " Items ",
+                            Style::default()
+                                .add_modifier(Modifier::BOLD)
+                                .fg(header_title_color),
+                        ))
+                        .border_type(border_type)
+                        .border_style(Style::default().fg(items_border_color)),
                 )
                 .style(Style::default().fg(items_text_color))
                 .highlight_style(
@@ -258,7 +292,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                         .add_modifier(Modifier::BOLD),
                 )
                 .highlight_symbol("> ");
-            
+
             // Update list state selection
             let visible_selection = ui.selected.and_then(|sel| {
                 if sel >= ui.scroll_offset && sel < ui.scroll_offset + max_visible {
@@ -268,7 +302,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                 }
             });
             list_state.select(visible_selection);
-            
+
             // Input panel
             let input_paragraph = Paragraph::new(Line::from(vec![
                 Span::styled("(", Style::default().fg(input_text_color)),
@@ -277,7 +311,10 @@ pub fn run(cli: &Opts) -> Result<()> {
                     Style::default().fg(highlight_color),
                 ),
                 Span::styled("/", Style::default().fg(input_text_color)),
-                Span::styled(ui.shown.len().to_string(), Style::default().fg(input_text_color)),
+                Span::styled(
+                    ui.shown.len().to_string(),
+                    Style::default().fg(input_text_color),
+                ),
                 Span::styled(") ", Style::default().fg(input_text_color)),
                 Span::styled(">", Style::default().fg(highlight_color)),
                 Span::styled("> ", Style::default().fg(input_text_color)),
@@ -287,23 +324,30 @@ pub fn run(cli: &Opts) -> Result<()> {
                     } else {
                         ui.query.clone()
                     },
-                    Style::default().fg(input_text_color)
+                    Style::default().fg(input_text_color),
                 ),
                 Span::styled(cursor, Style::default().fg(highlight_color)),
             ]))
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title(Span::styled(
-                    if cli.dmenu_prompt_only { " Input " } else { " Filter " },
-                    Style::default().add_modifier(Modifier::BOLD).fg(header_title_color),
-                ))
-                .border_type(border_type)
-                .border_style(Style::default().fg(input_border_color))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        if cli.dmenu_prompt_only {
+                            " Input "
+                        } else {
+                            " Filter "
+                        },
+                        Style::default()
+                            .add_modifier(Modifier::BOLD)
+                            .fg(header_title_color),
+                    ))
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(input_border_color)),
             )
             .style(Style::default().fg(input_text_color))
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: false });
-            
+
             // Render all components in their dynamic positions
             // Only render content panel if not hide_before_typing or query is not empty
             if !cli.dmenu_hide_before_typing || !ui.query.is_empty() {
@@ -315,13 +359,15 @@ pub fn run(cli: &Opts) -> Result<()> {
             }
             f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
-        
+
         // Handle input events
         match input.next()? {
             Event::Input(key) => {
                 match (key.code, key.modifiers) {
                     // Exit on escape or Ctrl+C/Q
-                    (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::CONTROL) | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                    (KeyCode::Esc, _)
+                    | (KeyCode::Char('q'), KeyModifiers::CONTROL)
+                    | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                         return Ok(()); // Exit without output
                     }
                     // Select item on Enter or Ctrl+Y
@@ -330,7 +376,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                         if cli.dmenu_auto_select && ui.shown.len() == 1 {
                             ui.selected = Some(0);
                         }
-                        
+
                         // Store selection and exit loop to handle output outside TUI context
                         if let Some(selected) = ui.selected {
                             if selected < ui.shown.len() {
@@ -344,7 +390,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                                     // Output original line
                                     ui.shown[selected].original_line.clone()
                                 };
-                                
+
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
                                 drop(terminal);
@@ -353,7 +399,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 }
                                 let _ = io::stderr().execute(LeaveAlternateScreen);
                                 let _ = disable_raw_mode();
-                                
+
                                 // Print to stdout
                                 println!("{}", output);
                                 return Ok(());
@@ -367,23 +413,24 @@ pub fn run(cli: &Opts) -> Result<()> {
                             }
                             let _ = io::stderr().execute(LeaveAlternateScreen);
                             let _ = disable_raw_mode();
-                            
+
                             println!("{}", ui.query);
                             return Ok(());
                         }
-                        
+
                         // only_match is set and no selection - don't exit
                         if cli.dmenu_only_match {
                             continue;
                         }
-                        
+
                         return Ok(()); // Exit without selection
                     }
                     // Add character to query
-                    (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+                    (KeyCode::Char(c), KeyModifiers::NONE)
+                    | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
                         ui.query.push(c);
                         ui.filter();
-                        
+
                         // Auto-select if only one match
                         if cli.dmenu_auto_select && ui.shown.len() == 1 {
                             ui.selected = Some(0);
@@ -393,7 +440,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                     (KeyCode::Backspace, _) => {
                         ui.query.pop();
                         ui.filter();
-                        
+
                         // Auto-select if only one match
                         if cli.dmenu_auto_select && ui.shown.len() == 1 {
                             ui.selected = Some(0);
@@ -410,18 +457,25 @@ pub fn run(cli: &Opts) -> Result<()> {
                         if !ui.shown.is_empty() {
                             let last_index = ui.shown.len() - 1;
                             ui.selected = Some(last_index);
-                            
+
                             // Scroll to show last item
                             let total_height = terminal.size()?.height;
-                            let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
-                            let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-                            
+                            let content_panel_height = get_dmenu_u16(
+                                cli.dmenu_title_panel_height_percent,
+                                cli.title_panel_height_percent,
+                            );
+                            let input_panel_height =
+                                get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+
                             // Use same calculation as rendering code
-                            let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                            let content_height = (total_height as f32 * content_panel_height as f32
+                                / 100.0)
+                                .round() as u16;
                             let content_height = content_height.max(3);
-                            let items_panel_height = total_height - content_height - input_panel_height;
+                            let items_panel_height =
+                                total_height - content_height - input_panel_height;
                             let max_visible = items_panel_height.saturating_sub(2) as usize;
-                            
+
                             if max_visible > 0 && ui.shown.len() > max_visible {
                                 ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
                             } else {
@@ -439,19 +493,28 @@ pub fn run(cli: &Opts) -> Result<()> {
                             } else {
                                 Some(selected)
                             };
-                            
+
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
-                                let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-                                
+                                let content_panel_height = get_dmenu_u16(
+                                    cli.dmenu_title_panel_height_percent,
+                                    cli.title_panel_height_percent,
+                                );
+                                let input_panel_height = get_dmenu_u16(
+                                    cli.dmenu_input_panel_height,
+                                    cli.input_panel_height,
+                                );
+
                                 // Use same calculation as rendering code
-                                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                                let content_height =
+                                    (total_height as f32 * content_panel_height as f32 / 100.0)
+                                        .round() as u16;
                                 let content_height = content_height.max(3);
-                                let items_panel_height = total_height - content_height - input_panel_height;
+                                let items_panel_height =
+                                    total_height - content_height - input_panel_height;
                                 let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
-                                
+
                                 // Scroll down if selection is below visible area
                                 if new_selected >= ui.scroll_offset + max_visible {
                                     ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
@@ -460,7 +523,6 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 else if new_selected < ui.scroll_offset {
                                     ui.scroll_offset = new_selected;
                                 }
-                                
                             }
                         }
                     }
@@ -474,19 +536,28 @@ pub fn run(cli: &Opts) -> Result<()> {
                             } else {
                                 Some(selected)
                             };
-                            
+
                             // Auto-scroll to keep selection visible
                             if let Some(new_selected) = ui.selected {
                                 let total_height = terminal.size()?.height;
-                                let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
-                                let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-                                
+                                let content_panel_height = get_dmenu_u16(
+                                    cli.dmenu_title_panel_height_percent,
+                                    cli.title_panel_height_percent,
+                                );
+                                let input_panel_height = get_dmenu_u16(
+                                    cli.dmenu_input_panel_height,
+                                    cli.input_panel_height,
+                                );
+
                                 // Use same calculation as rendering code
-                                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                                let content_height =
+                                    (total_height as f32 * content_panel_height as f32 / 100.0)
+                                        .round() as u16;
                                 let content_height = content_height.max(3);
-                                let items_panel_height = total_height - content_height - input_panel_height;
+                                let items_panel_height =
+                                    total_height - content_height - input_panel_height;
                                 let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
-                                
+
                                 // Scroll up if selection is above visible area
                                 if new_selected < ui.scroll_offset {
                                     ui.scroll_offset = new_selected;
@@ -495,75 +566,95 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 else if new_selected >= ui.scroll_offset + max_visible {
                                     ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
                                 }
-                                
                             }
                         }
                     }
                     _ => {}
                 }
-                
+
                 // Update info display
-                ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
+                ui.info(get_dmenu_color(
+                    cli.dmenu_highlight_color,
+                    cli.highlight_color,
+                ));
             }
             Event::Mouse(mouse_event) => {
                 // Dmenu-specific mouse handling with proper layout calculations
                 let mouse_row = mouse_event.row;
                 let total_height = terminal.size()?.height;
-                let content_panel_height = get_dmenu_u16(cli.dmenu_title_panel_height_percent, cli.title_panel_height_percent);
-                let input_panel_height = get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
-                
+                let content_panel_height = get_dmenu_u16(
+                    cli.dmenu_title_panel_height_percent,
+                    cli.title_panel_height_percent,
+                );
+                let input_panel_height =
+                    get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
+
                 // Use same calculation as rendering code
-                let content_height = (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                let content_height =
+                    (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
                 let content_height = content_height.max(3);
                 let items_panel_height = total_height - content_height - input_panel_height;
-                
+
                 // Get content panel position to calculate items panel position
-                let content_panel_position = get_dmenu_panel_position(cli.dmenu_title_panel_position, cli.title_panel_position.unwrap_or(crate::cli::PanelPosition::Top));
-                
+                let content_panel_position = get_dmenu_panel_position(
+                    cli.dmenu_title_panel_position,
+                    cli.title_panel_position
+                        .unwrap_or(crate::cli::PanelPosition::Top),
+                );
+
                 // Calculate items panel coordinates based on layout
                 let (items_panel_start, items_panel_height) = match content_panel_position {
                     crate::cli::PanelPosition::Top => {
                         // Top: content, items, input - items start after content
                         (content_height, items_panel_height)
-                    },
+                    }
                     crate::cli::PanelPosition::Middle => {
                         // Middle: items, content, input - items start at top
                         (0, items_panel_height)
-                    },
+                    }
                     crate::cli::PanelPosition::Bottom => {
                         // Bottom: items, input, content - items start at top
                         (0, items_panel_height)
                     }
                 };
-                
+
                 let items_content_start = items_panel_start + 1; // +1 for top border
                 let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
                 let items_content_end = items_content_start + max_visible_rows;
-                
+
                 let update_selection_for_mouse_pos = |ui: &mut DmenuUI, mouse_row: u16| {
-                    if !ui.shown.is_empty() && mouse_row >= items_content_start && mouse_row < items_content_end {
+                    if !ui.shown.is_empty()
+                        && mouse_row >= items_content_start
+                        && mouse_row < items_content_end
+                    {
                         let row_in_content = mouse_row - items_content_start;
                         let hovered_item_index = ui.scroll_offset + row_in_content as usize;
                         if hovered_item_index < ui.shown.len() {
                             ui.selected = Some(hovered_item_index);
-                            ui.info(get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color));
+                            ui.info(get_dmenu_color(
+                                cli.dmenu_highlight_color,
+                                cli.highlight_color,
+                            ));
                         }
                     }
                 };
-                
+
                 match mouse_event.kind {
                     MouseEventKind::Moved => {
                         update_selection_for_mouse_pos(&mut ui, mouse_row);
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
-                        if mouse_row >= items_content_start && mouse_row < items_content_end && !ui.shown.is_empty() {
+                        if mouse_row >= items_content_start
+                            && mouse_row < items_content_end
+                            && !ui.shown.is_empty()
+                        {
                             let row_in_content = mouse_row - items_content_start;
                             let clicked_item_index = ui.scroll_offset + row_in_content as usize;
-                            
+
                             if clicked_item_index < ui.shown.len() {
                                 // Store the original line as-is for dmenu output
                                 let selected_line = &ui.shown[clicked_item_index].original_line;
-                                
+
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
                                 drop(terminal); // Ensure terminal is fully cleaned up
@@ -572,7 +663,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 }
                                 let _ = io::stderr().execute(LeaveAlternateScreen);
                                 let _ = disable_raw_mode();
-                                
+
                                 // Output selection in clean context
                                 println!("{}", selected_line);
                                 return Ok(());
@@ -590,7 +681,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                         if !ui.shown.is_empty() {
                             // Calculate maximum visible items (account for borders)
                             let max_visible = max_visible_rows as usize;
-                            
+
                             // Only scroll down if there are more items to show
                             if ui.scroll_offset + max_visible < ui.shown.len() {
                                 ui.scroll_offset += 1;

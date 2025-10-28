@@ -1,8 +1,8 @@
 //! Stdin parsing for dmenu mode
 
-use std::io::{self, BufRead};
-use is_terminal::IsTerminal;
 use crate::common::Item;
+use is_terminal::IsTerminal;
+use std::io::{self, BufRead};
 
 /// Check if stdin is being piped to us
 pub fn is_stdin_piped() -> bool {

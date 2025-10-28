@@ -1,8 +1,8 @@
 // Clipboard database scanning functions
 
-use std::process::{Command, Stdio};
-use eyre::{eyre, Result};
 use super::CclipItem;
+use eyre::{eyre, Result};
+use std::process::{Command, Stdio};
 
 /// Get clipboard history from cclip
 pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
