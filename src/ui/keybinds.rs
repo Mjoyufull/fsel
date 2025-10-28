@@ -24,8 +24,8 @@ pub struct Keybinds {
     #[serde(default = "default_image_preview")]
     pub image_preview: Vec<KeyBind>,
     #[serde(default = "default_tag")]
-    #[allow(dead_code)]
     pub tag: Vec<KeyBind>,
+
 }
 
 impl Default for Keybinds {
@@ -41,6 +41,7 @@ impl Default for Keybinds {
             backspace: default_backspace(),
             image_preview: default_image_preview(),
             tag: default_tag(),
+
         }
     }
 }
@@ -174,6 +175,8 @@ fn default_tag() -> Vec<KeyBind> {
     }]
 }
 
+
+
 impl Keybinds {
     pub fn matches_up(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.up.iter().any(|kb| kb.matches(code, mods))
@@ -211,9 +214,10 @@ impl Keybinds {
         self.image_preview.iter().any(|kb| kb.matches(code, mods))
     }
 
-    /// DISABLED: Waiting for cclip maintainer to add tag support
-    #[allow(dead_code)]
+    /// Tag keybind for cclip mode
     pub fn matches_tag(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.tag.iter().any(|kb| kb.matches(code, mods))
     }
+
+
 }

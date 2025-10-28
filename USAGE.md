@@ -153,12 +153,36 @@ fsel --cclip -ss image
 fsel --cclip  # Images show automatically if supported
 ```
 
+### Tag Management
+```sh
+# Filter clipboard items by tag
+fsel --cclip --tag prompt
+fsel --cclip --tag code
+
+# List all available tags
+fsel --cclip --tag list
+
+# List items with specific tag
+fsel --cclip --tag list prompt
+
+# List items with tag (verbose shows details)
+fsel --cclip --tag list prompt -vv
+
+# Clear all tags and metadata from database
+fsel --cclip --tag clear
+
+# Show tag color names in item display
+fsel --cclip --cclip-show-tag-color-names
+```
+
 ### Keybindings in cclip mode
 - `Enter` - Copy selection to clipboard
 - `i` - Display image fullscreen (bypass TUI)
 - `Esc` - Exit without copying
 - Arrow keys - Navigate
 - Type to filter
+
+**Note:** Tag creation and management requires cclip with tag support. Tags appear as `[tagname]` prefixes in the clipboard item list.
 
 ## Scripting Examples
 
