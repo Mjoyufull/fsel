@@ -1,7 +1,7 @@
 <div align="center">
 
   ![Logo](./assets/fsel.png)
-  
+
 *(fast select)*
 
   [![License](https://img.shields.io/crates/l/fsel?style=flat-square)](https://github.com/Mjoyufull/fsel/blob/main/LICENSE)
@@ -53,7 +53,7 @@ Get up and running in 30 seconds:
 # Install with Nix (recommended)
 nix run github:Mjoyufull/fsel
 
-# Or the Aur 
+# Or the Aur
 $ yay -S fsel-git
  # or
 $ paru -S fsel-git
@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.2.2-seedclay
+    $ cargo install fsel@2.2.3-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.2.2-seedclay --force
+    $ cargo install fsel@2.2.3-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh

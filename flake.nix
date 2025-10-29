@@ -24,7 +24,7 @@
         packages = {
           default = naersk'.buildPackage {
             pname = "fsel";
-            version = "2.2.2-seedclay";
+            version = "2.2.3-seedclay";
             src = ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config ];
@@ -36,7 +36,7 @@
             '';
 
             meta = with pkgs.lib; {
-              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v2.2.2-seedclay";
+              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v2.2.3-seedclay";
               homepage = "https://github.com/Mjoyufull/fsel";
               license = licenses.bsd2;
               maintainers = [ ];
