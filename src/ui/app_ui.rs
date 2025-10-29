@@ -199,23 +199,9 @@ impl<'a> UI<'a> {
         // Sort shown apps by score
         self.shown.sort();
 
-        // Reset selection to beginning and scroll offset
-        if self.shown.is_empty() {
-            self.selected = None;
-            self.scroll_offset = 0;
-        } else {
-            if let Some(current_selected) = self.selected {
-                if current_selected >= self.shown.len() {
-                    self.selected = Some(0);
-                    self.scroll_offset = 0;
-                } else {
-                    self.scroll_offset = 0;
-                }
-            } else {
-                self.selected = Some(0);
-                self.scroll_offset = 0;
-            }
-        }
+        // Reset selection
+        self.selected = if self.shown.is_empty() { None } else { Some(0) };
+        self.scroll_offset = 0;
     }
 
     /// Static version for parallel processing (thread-safe)
