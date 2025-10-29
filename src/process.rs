@@ -8,8 +8,11 @@ pub fn get_current_pid() -> i32 {
 
 /// Send SIGTERM to a process
 #[allow(unsafe_code)]
-pub fn kill_process_sigterm(pid: i32) {
-    unsafe {
-        libc::kill(pid, libc::SIGTERM);
+pub fn kill_process_sigterm(pid: i32) -> Result<(), std::io::Error> {
+    let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
+    if ret == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
 }
