@@ -79,7 +79,7 @@ pub fn run(cli: Opts) -> Result<()> {
                     for pid in target_pids.clone() {
                         #[allow(unsafe_code)]
                         unsafe {
-                            let _ = libc::kill(pid, libc::SIGTERM);
+                            crate::process::kill_process_sigterm_result(pid)?; // Handle error explicitly
                         }
 
                         const CHECK_INTERVAL_MS: u64 = 5;
@@ -133,7 +133,7 @@ pub fn run(cli: Opts) -> Result<()> {
                         for pid in holders.clone() {
                             #[allow(unsafe_code)]
                             unsafe {
-                                let _ = libc::kill(pid, libc::SIGTERM);
+                                crate::process::kill_process_sigterm_result(pid)?; // Handle error explicitly
                             }
 
                             const CHECK_INTERVAL_MS: u64 = 5;

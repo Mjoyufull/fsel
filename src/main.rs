@@ -97,7 +97,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             let pid: i32 = contents
                 .parse()
                 .wrap_err("Failed to parse cclip lockfile contents")?;
-            process::kill_process_sigterm(pid);
+            process::kill_process_sigterm_result(pid)?;
             fs::remove_file(&lock_path)?;
             std::thread::sleep(std::time::Duration::from_millis(200));
         } else {
