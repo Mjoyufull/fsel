@@ -77,12 +77,11 @@ pub fn run(cli: Opts) -> Result<()> {
                     }
 
                     for pid in target_pids.clone() {
-                        #[allow(unsafe_code)]
                             if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
                                 if e != libc::ESRCH {
                                     return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                                    // Log or handle error, but don't necessarily exit
                                 }
-                            }; // Handle error explicitly 
                         }
 
                         const CHECK_INTERVAL_MS: u64 = 5;
@@ -134,12 +133,11 @@ pub fn run(cli: Opts) -> Result<()> {
                 if let Ok(holders) = crate::find_processes_holding_file(&hist_db_file) {
                     if !holders.is_empty() {
                         for pid in holders.clone() {
-                            #[allow(unsafe_code)]
                             if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
                                 if e != libc::ESRCH {
                                     return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                                    // Log or handle error, but don't necessarily exit
                                 }
-                            }; // Handle error explicitly
                         }
 
                             const CHECK_INTERVAL_MS: u64 = 5;
