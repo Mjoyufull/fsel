@@ -78,8 +78,11 @@ pub fn run(cli: Opts) -> Result<()> {
 
                     for pid in target_pids.clone() {
                         #[allow(unsafe_code)]
-                        unsafe {
-                            crate::process::kill_process_sigterm_result(pid)?; // Handle error explicitly
+                            if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
+                                if e != libc::ESRCH {
+                                    return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                                }
+                            }; // Handle error explicitly 
                         }
 
                         const CHECK_INTERVAL_MS: u64 = 5;
@@ -132,9 +135,12 @@ pub fn run(cli: Opts) -> Result<()> {
                     if !holders.is_empty() {
                         for pid in holders.clone() {
                             #[allow(unsafe_code)]
-                            unsafe {
-                                crate::process::kill_process_sigterm_result(pid)?; // Handle error explicitly
-                            }
+                            if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
+                                if e != libc::ESRCH {
+                                    return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                                }
+                            }; // Handle error explicitly
+                        }
 
                             const CHECK_INTERVAL_MS: u64 = 5;
                             const TOTAL_WAIT_MS: u64 = 30;

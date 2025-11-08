@@ -97,7 +97,24 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
             let pid: i32 = contents
                 .parse()
                 .wrap_err("Failed to parse cclip lockfile contents")?;
-            process::kill_process_sigterm_result(pid)?;
+            match process::kill_process_sigterm_result(pid){ {
+                Ok(()) => {
+                    // Process killed, remove lock
+                    fs::remove_file(&lock_path)?;
+                }
+                Err(e) if e == libc::ESRCH => {
+                    // Process does not exist, remove lock
+                    fs::remove_file(&lock_path)?;
+                }
+                Err(e) => {
+                    // Other error, don't remove lock
+                    return Err(eyre!(
+                        "Failed to kill existing fsel cclip process (pid {}): {}",
+                        pid,
+                        e
+                    ));
+                }
+            }
             fs::remove_file(&lock_path)?;
             std::thread::sleep(std::time::Duration::from_millis(200));
         } else {

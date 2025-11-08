@@ -6,14 +6,6 @@ pub fn get_current_pid() -> i32 {
     unsafe { libc::getpid() }
 }
 
-
-pub fn kill_process_sigterm(pid: i32) -> Result<(), std::io::Error> {
-    if Err(e) = kill_process_sigterm_result(pid) {
-        eprintln!("Failed to send SIGTERM to process {}: error code {}", pid, e);
-    }
-}
-
-
 /// Send SIGTERM to a process
 /// Lets SIGTERM fail with error code
 /// Allows caller to handle error codes
@@ -24,7 +16,7 @@ pub fn kill_process_sigterm_result(pid: i32) -> Result<(), i32> {
     if ret == 0 {
         Ok(())
     } else {
-        Err(ret)
+        Err(unsafe { *libc::__errno_location()})
     }
 }
 
