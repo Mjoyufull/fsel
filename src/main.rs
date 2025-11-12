@@ -91,7 +91,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
 
     // Skip lock check for non-interactive commands (tag clear, tag list)
     let is_non_interactive = cli.cclip_clear_tags || cli.cclip_tag_list;
-    
+
     if !contents.is_empty() && !is_non_interactive {
         if cli.replace {
             let pid: i32 = contents
@@ -102,7 +102,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
                     // Process killed, remove lock
                     fs::remove_file(&lock_path)?;
                 }
-                Err(e) if e == libc::ESRCH => {
+                Err(e) if e.raw_os_error() == Some(libc::ESRCH) => {
                     // Process does not exist, remove lock
                     fs::remove_file(&lock_path)?;
                 }

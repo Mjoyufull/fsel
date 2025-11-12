@@ -31,6 +31,7 @@ Before contributing, please:
 1. Read the [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) for our Git workflow and conventions
 2. Check existing [issues](https://github.com/Mjoyufull/fsel/issues) and [pull requests](https://github.com/Mjoyufull/fsel/pulls) to avoid duplicating work
 3. Understand that **all code changes go through pull requests** — no exceptions
+4. **Fork the repository** if you don't have write access (most contributors)
 
 ### Key Resources
 
@@ -66,13 +67,55 @@ For full functionality during development:
 - **uwsm** - For testing Universal Wayland Session Manager integration
 - **systemd** - For testing systemd-run integration (usually pre-installed)
 
-### Clone and Build
+### Fork and Clone
+
+**For external contributors (most people):**
+
+1. **Fork the repository** on GitHub:
+   - Go to https://github.com/Mjoyufull/fsel
+   - Click the "Fork" button in the top-right corner
+   - This creates your own copy of the repository
+
+2. **Clone your fork**:
+   ```sh
+   # Replace YOUR_USERNAME with your GitHub username
+   git clone https://github.com/YOUR_USERNAME/fsel.git
+   cd fsel
+   
+   # Add the upstream repository as a remote
+   # This lets you sync with the main repository before creating PRs
+   git remote add upstream https://github.com/Mjoyufull/fsel.git
+   ```
+   
+   **Why add upstream?** The upstream remote lets you:
+   - Fetch the latest changes from the main repository
+   - Rebase your feature branch on top of the latest `dev` branch
+   - Keep your fork synchronized with the main project
+
+3. **Keep your fork up to date** (do this periodically, especially before starting new work):
+   ```sh
+   # Fetch latest changes from the main repository
+   git fetch upstream
+   
+   # Update your fork's dev branch
+   git checkout dev
+   git merge upstream/dev
+   git push origin dev
+   ```
+   
+   **When to sync**: Before starting a new feature branch, or if you notice the main repository has new commits you want to include.
+
+**For maintainers with write access:**
 
 ```sh
-# Clone the repository
+# Clone the repository directly
 git clone https://github.com/Mjoyufull/fsel.git
 cd fsel
+```
 
+### Build
+
+```sh
 # Build in debug mode (faster compilation)
 cargo build
 
@@ -229,6 +272,43 @@ All work occurs in feature branches created from `dev`:
 
 ### Standard Workflow
 
+**For external contributors (using forks):**
+
+```sh
+# 1. Update your fork's dev branch
+git fetch upstream
+git checkout dev
+git merge upstream/dev
+git push origin dev
+
+# 2. Create feature branch from dev
+git checkout dev
+git checkout -b feat/your-feature-name
+
+# 3. Develop locally (commit freely)
+git commit -am "wip: working on feature"
+
+# 4. Prepare for PR (sync with latest dev and clean up commits)
+# First, get the latest changes from the main repository
+git fetch upstream
+
+# Rebase your feature branch on top of the latest dev
+# This doesn't lose your changes - it just moves your commits to be based on the latest code
+git rebase upstream/dev
+
+# Interactive rebase to clean up commit history (optional but recommended)
+# This lets you squash, reword, or reorder commits before the PR
+git rebase -i upstream/dev
+
+# 5. Push feature branch to your fork
+git push origin feat/your-feature-name
+
+# 6. Open pull request on GitHub targeting Mjoyufull/fsel:dev
+# IMPORTANT: Enable "Allow edits by maintainers" checkbox
+```
+
+**For maintainers (direct access):**
+
 ```sh
 # 1. Create feature branch from dev
 git checkout dev
@@ -301,9 +381,19 @@ chore: update flake.nix to use naersk
 
 1. **Rebase on latest dev**:
    ```sh
+   # For external contributors using forks:
+   git fetch upstream
+   git rebase upstream/dev
+   
+   # For maintainers with direct access:
    git fetch origin
    git rebase origin/dev
    ```
+   
+   **Note**: Rebase doesn't delete your changes! It:
+   - Takes your commits and replays them on top of the latest `dev` branch
+   - Ensures your PR is based on the most recent code
+   - Helps avoid merge conflicts when your PR is reviewed
 
 2. **Run all checks**:
    ```sh
@@ -325,10 +415,21 @@ chore: update flake.nix to use naersk
 
 ### Opening a PR
 
-1. Go to GitHub and open a pull request
-2. **Base**: `dev` (NOT `main`)
-3. **Compare**: your feature branch
-4. Use the PR template below
+1. **For external contributors**: Go to your fork on GitHub and click "New Pull Request"
+   - **Base repository**: `Mjoyufull/fsel`
+   - **Base**: `dev` (NOT `main`)
+   - **Compare**: `YOUR_USERNAME/fsel:feat/your-feature-name`
+   
+   **For maintainers**: Go to the main repository and click "New Pull Request"
+   - **Base**: `dev` (NOT `main`)
+   - **Compare**: your feature branch
+
+2. **IMPORTANT**: Enable the **"Allow edits by maintainers"** checkbox
+   - This allows maintainers to make small fixes, rebase, or help resolve conflicts
+   - This follows the collaborative philosophy in [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md)
+   - Maintainers will respect your work and credit you appropriately
+
+3. Use the PR template below
 
 ### PR Template
 

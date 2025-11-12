@@ -301,10 +301,8 @@ impl HistoryCache {
 
         // Load all history entries (table might not exist yet)
         if let Ok(history_table) = read_txn.open_table(HISTORY_TABLE) {
-            for item in history_table.iter()? {
-                if let Ok((key, value)) = item {
-                    history.insert(key.value().to_string(), value.value());
-                }
+            for (key, value) in (history_table.iter()?).flatten() {
+                history.insert(key.value().to_string(), value.value());
             }
         }
 

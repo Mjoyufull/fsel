@@ -77,11 +77,11 @@ pub fn run(cli: Opts) -> Result<()> {
                     }
 
                     for pid in target_pids.clone() {
-                            if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
-                                if e != libc::ESRCH {
-                                    return Err(eyre!("Failed to kill process {}: {}", pid, e));
-                                    // Log or handle error, but don't necessarily exit
-                                }
+                        if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
+                            if e.raw_os_error() != Some(libc::ESRCH) {
+                                return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                                // Log or handle error, but don't necessarily exit
+                            }
                         }
 
                         const CHECK_INTERVAL_MS: u64 = 5;
@@ -134,11 +134,11 @@ pub fn run(cli: Opts) -> Result<()> {
                     if !holders.is_empty() {
                         for pid in holders.clone() {
                             if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
-                                if e != libc::ESRCH {
+                                if e.raw_os_error() != Some(libc::ESRCH) {
                                     return Err(eyre!("Failed to kill process {}: {}", pid, e));
                                     // Log or handle error, but don't necessarily exit
                                 }
-                        }
+                            }
 
                             const CHECK_INTERVAL_MS: u64 = 5;
                             const TOTAL_WAIT_MS: u64 = 30;
@@ -795,21 +795,24 @@ pub fn run(cli: Opts) -> Result<()> {
                     }
                     // Handle scroll wheel only when mouse is over the apps list
                     MouseEventKind::ScrollUp => {
-                        if mouse_row >= list_content_start && mouse_row < list_content_end {
-                            if !ui.shown.is_empty() && ui.scroll_offset > 0 {
-                                ui.scroll_offset -= 1;
-                                update_selection_for_mouse_pos(&mut ui, mouse_row);
-                            }
+                        if mouse_row >= list_content_start
+                            && mouse_row < list_content_end
+                            && !ui.shown.is_empty()
+                            && ui.scroll_offset > 0
+                        {
+                            ui.scroll_offset -= 1;
+                            update_selection_for_mouse_pos(&mut ui, mouse_row);
                         }
                     }
                     MouseEventKind::ScrollDown => {
-                        if mouse_row >= list_content_start && mouse_row < list_content_end {
-                            if !ui.shown.is_empty() {
-                                let max_visible = max_visible_rows as usize;
-                                if ui.scroll_offset + max_visible < ui.shown.len() {
-                                    ui.scroll_offset += 1;
-                                    update_selection_for_mouse_pos(&mut ui, mouse_row);
-                                }
+                        if mouse_row >= list_content_start
+                            && mouse_row < list_content_end
+                            && !ui.shown.is_empty()
+                        {
+                            let max_visible = max_visible_rows as usize;
+                            if ui.scroll_offset + max_visible < ui.shown.len() {
+                                ui.scroll_offset += 1;
+                                update_selection_for_mouse_pos(&mut ui, mouse_row);
                             }
                         }
                     }
@@ -833,7 +836,7 @@ pub fn run(cli: Opts) -> Result<()> {
         }
 
         // launch the app
-        super::launch::launch_app(&app_to_run, &cli, &db)?;
+        super::launch::launch_app(app_to_run, &cli, &db)?;
     }
 
     // Lock file cleanup is handled by LockGuard

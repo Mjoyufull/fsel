@@ -1,6 +1,6 @@
 [package]
 name = "fsel"
-version = "2.2.3-seedclay"
+version = "2.3.0-seedclay"
 authors = ["Mjoyufull <https://github.com/Mjoyufull>"]
 edition = "2021"
 rust-version = "1.89"
@@ -42,3 +42,5 @@ is-terminal = "0.4"
 strip-ansi-escapes = "0.2"
 base64 = "0.22"
 tokio = { version = "1.0", features = ["process", "rt-multi-thread", "io-util"], default-features = false }
+unicode-width = "0.2.0"
+regex = "1.11"

@@ -47,6 +47,9 @@ impl TerminalGraphics {
 
         result
     }
+
+    // Note: Manual clearing functions removed in favor of ratatui's Clear widget
+    // The Clear widget is more reliable and integrates better with ratatui's rendering pipeline
 }
 
 /// Image display adapter - chooses the right graphics protocol
@@ -169,7 +172,7 @@ impl GraphicsAdapter {
     async fn show_cclip_kitty_image(&self, rowid: &str, area: Rect) -> io::Result<()> {
         // pipe cclip data directly to chafa for kitty graphics with proper positioning
         let mut cclip_child = tokio::process::Command::new("cclip")
-            .args(&["get", rowid])
+            .args(["get", rowid])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()?;
@@ -177,7 +180,7 @@ impl GraphicsAdapter {
         if let Some(cclip_stdout) = cclip_child.stdout.take() {
             let size_arg = format!("{}x{}", area.width, area.height);
             let mut chafa_child = tokio::process::Command::new("chafa")
-                .args(&[
+                .args([
                     "-f",
                     "kitty",
                     "--size",
@@ -223,7 +226,7 @@ impl GraphicsAdapter {
     async fn show_cclip_sixel_image(&self, rowid: &str, area: Rect) -> io::Result<()> {
         // pipe cclip data directly to chafa for sixel graphics
         let mut cclip_child = tokio::process::Command::new("cclip")
-            .args(&["get", rowid])
+            .args(["get", rowid])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
             .spawn()?;
@@ -231,7 +234,7 @@ impl GraphicsAdapter {
         if let Some(cclip_stdout) = cclip_child.stdout.take() {
             let size_arg = format!("{}x{}", area.width, area.height);
             let mut chafa_child = tokio::process::Command::new("chafa")
-                .args(&[
+                .args([
                     "-f",
                     "sixels",
                     "--size",

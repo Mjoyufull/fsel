@@ -150,6 +150,16 @@ pub fn run(cli: &Opts) -> Result<()> {
 
     // Main TUI loop
     loop {
+        // For Foot: use synchronized updates (DECSET 2026) to avoid mid-frame tearing
+        let term_is_foot = std::env::var("TERM")
+            .unwrap_or_default()
+            .starts_with("foot");
+        if term_is_foot {
+            let mut stderr = std::io::stderr();
+            let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026h");
+            let _ = std::io::Write::flush(&mut stderr);
+        }
+
         terminal.draw(|f| {
             // Get effective colors and settings for dmenu mode
             let highlight_color = get_dmenu_color(cli.dmenu_highlight_color, cli.highlight_color);
@@ -348,7 +358,17 @@ pub fn run(cli: &Opts) -> Result<()> {
             .alignment(Alignment::Left)
             .wrap(Wrap { trim: false });
 
-            // Render all components in their dynamic positions
+            // Clear all widget areas FIRST to remove any old content
+            // ONLY for Kitty - Foot/Sixel terminals auto-refresh and clearing causes flashing
+            use ratatui::widgets::Clear;
+            let graphics = crate::ui::GraphicsAdapter::detect();
+            if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
+                f.render_widget(Clear, chunks[content_panel_index]);
+                f.render_widget(Clear, chunks[items_panel_index]);
+                f.render_widget(Clear, chunks[input_panel_index]);
+            }
+
+            // NOW render all components in their dynamic positions
             // Only render content panel if not hide_before_typing or query is not empty
             if !cli.dmenu_hide_before_typing || !ui.query.is_empty() {
                 f.render_widget(content_paragraph, chunks[content_panel_index]);
@@ -359,6 +379,12 @@ pub fn run(cli: &Opts) -> Result<()> {
             }
             f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
+
+        if term_is_foot {
+            let mut stderr = std::io::stderr();
+            let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026l");
+            let _ = std::io::Write::flush(&mut stderr);
+        }
 
         // Handle input events
         match input.next()? {
