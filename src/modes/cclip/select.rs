@@ -8,13 +8,13 @@ impl CclipItem {
     /// Copy this item back to the clipboard (Wayland)
     fn copy_to_clipboard_wayland(&self) -> Result<()> {
         let mut cclip_child = Command::new("cclip")
-            .args(&["get", &self.rowid])
+            .args(["get", &self.rowid])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
 
         let mut wl_copy_child = Command::new("wl-copy")
-            .args(&["-t", &self.mime_type])
+            .args(["-t", &self.mime_type])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -63,7 +63,7 @@ impl CclipItem {
             }
 
             let mut cclip_child = Command::new("cclip")
-                .args(&["get", &self.rowid])
+                .args(["get", &self.rowid])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::null())
                 .spawn()?;
@@ -122,7 +122,7 @@ impl CclipItem {
 
 /// Tag a cclip item using cclip's tag command
 pub fn tag_item(rowid: &str, tag: &str) -> Result<()> {
-    let output = Command::new("cclip").args(&["tag", rowid, tag]).output()?;
+    let output = Command::new("cclip").args(["tag", rowid, tag]).output()?;
 
     if !output.status.success() {
         return Err(eyre!(

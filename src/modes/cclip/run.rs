@@ -199,14 +199,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
     // (Escape is handled manually in the main loop for tag mode cancellation)
     let input = InputConfig {
         exit_key: KeyCode::Null,
-        disable_mouse: disable_mouse,
+        disable_mouse,
         ..InputConfig::default()
     }
     .init();
 
     // Create dmenu UI using cclip settings with inheritance
-    // Default to false for cclip to avoid Foot terminal rendering issues with sixel images
-    let wrap_long_lines = cli.cclip_wrap_long_lines.unwrap_or(false);
+    // Wrapping should be enabled by default for proper text display
+    let wrap_long_lines = cli.cclip_wrap_long_lines.unwrap_or(true);
     let mut ui = DmenuUI::new(items, wrap_long_lines, show_line_numbers);
 
     // Pre-fill search if -ss was provided
@@ -259,16 +259,84 @@ pub async fn run(cli: &Opts) -> Result<()> {
          default: crate::cli::PanelPosition| { cclip_opt.or(dmenu_opt).unwrap_or(default) };
 
     // Update info with image support
-    let content_panel_width = terminal.size()?.width.saturating_sub(2); // Account for borders
-    let content_panel_height = (terminal.size()?.height as f32
-        * get_cclip_u16(
-            cli.cclip_title_panel_height_percent,
-            cli.dmenu_title_panel_height_percent,
-            cli.title_panel_height_percent,
-        ) as f32
-        / 100.0)
-        .round() as u16;
-    let content_panel_height = content_panel_height.max(3).saturating_sub(2); // Account for borders
+    // Calculate layout to get actual chunk width
+    let term_size = terminal.size()?;
+    let terminal_area = ratatui::layout::Rect {
+        x: 0,
+        y: 0,
+        width: term_size.width,
+        height: term_size.height,
+    };
+
+    let content_height_percent = get_cclip_u16(
+        cli.cclip_title_panel_height_percent,
+        cli.dmenu_title_panel_height_percent,
+        cli.title_panel_height_percent,
+    );
+    let content_height =
+        (term_size.height as f32 * content_height_percent as f32 / 100.0).round() as u16;
+    let content_height = content_height.max(3);
+    let input_panel_height = get_cclip_u16(
+        cli.cclip_input_panel_height,
+        cli.dmenu_input_panel_height,
+        cli.input_panel_height,
+    );
+    let content_panel_position = get_cclip_panel_position(
+        cli.cclip_title_panel_position,
+        cli.dmenu_title_panel_position,
+        cli.title_panel_position
+            .unwrap_or(crate::cli::PanelPosition::Top),
+    );
+
+    // Calculate layout to get actual chunk dimensions
+    let (chunks, content_panel_index, _, _) = match content_panel_position {
+        crate::cli::PanelPosition::Top => {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    [
+                        Constraint::Length(content_height),
+                        Constraint::Min(1),
+                        Constraint::Length(input_panel_height),
+                    ]
+                    .as_ref(),
+                )
+                .split(terminal_area);
+            (layout, 0, 1, 2)
+        }
+        crate::cli::PanelPosition::Middle => {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    [
+                        Constraint::Min(1),
+                        Constraint::Length(content_height),
+                        Constraint::Length(input_panel_height),
+                    ]
+                    .as_ref(),
+                )
+                .split(terminal_area);
+            (layout, 1, 0, 2)
+        }
+        crate::cli::PanelPosition::Bottom => {
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints(
+                    [
+                        Constraint::Min(1),
+                        Constraint::Length(input_panel_height),
+                        Constraint::Length(content_height),
+                    ]
+                    .as_ref(),
+                )
+                .split(terminal_area);
+            (layout, 2, 0, 1)
+        }
+    };
+
+    // Use actual chunk width and height from layout
+    let content_panel_width = chunks[content_panel_index].width;
+    let content_panel_height = chunks[content_panel_index].height.saturating_sub(2); // Account for borders
 
     // Get hide image message setting
     let hide_image_message = cli.cclip_hide_inline_image_message.unwrap_or(false);
@@ -288,8 +356,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
     // List state for ratatui
     let mut list_state = ListState::default();
 
-    // Track previous selection state to avoid unnecessary clearing
+    // Track previous image state for conditional clearing
     let mut previous_was_image = false;
+    // Flag to force Ratatui buffer sync after clearing in tag mode
+    let mut force_sixel_sync = false;
 
     // Get effective cursor string with inheritance
     let cursor = cli
@@ -303,52 +373,12 @@ pub async fn run(cli: &Opts) -> Result<()> {
         // Clear expired temporary messages
         ui.clear_expired_message();
 
-        // Update UI content BEFORE drawing to avoid race conditions with graphics clearing
-        let content_panel_width = terminal.size()?.width.saturating_sub(2);
-        let content_panel_height = (terminal.size()?.height as f32
-            * get_cclip_u16(
-                cli.cclip_title_panel_height_percent,
-                cli.dmenu_title_panel_height_percent,
-                cli.title_panel_height_percent,
-            ) as f32
-            / 100.0)
-            .round() as u16;
-        let content_panel_height = content_panel_height.max(3).saturating_sub(2);
+        // Note: Layout and UI content calculation moved INSIDE the draw loop
+        // This ensures wrapping calculations use the SAME dimensions as rendering
 
-        // Update UI based on tag mode
-        match &ui.tag_mode {
-            TagMode::Normal => {
-                ui.info_with_image_support(
-                    get_cclip_color(
-                        cli.cclip_highlight_color,
-                        cli.dmenu_highlight_color,
-                        cli.highlight_color,
-                    ),
-                    image_preview_enabled,
-                    hide_image_message,
-                    content_panel_width,
-                    content_panel_height,
-                );
-            }
-            _ => {
-                // Tag mode UI is handled in dmenu_ui.rs info_with_image_support
-                ui.info_with_image_support(
-                    get_cclip_color(
-                        cli.cclip_highlight_color,
-                        cli.dmenu_highlight_color,
-                        cli.highlight_color,
-                    ),
-                    image_preview_enabled,
-                    hide_image_message,
-                    content_panel_width,
-                    content_panel_height,
-                );
-            }
-        }
-
-        // Check if current item is an image
+        // Check if current item is an image (only when not in tag mode)
         let mut current_is_image = false;
-        if image_preview_enabled {
+        if image_preview_enabled && matches!(ui.tag_mode, TagMode::Normal) {
             if let Some(selected) = ui.selected {
                 if selected < ui.shown.len() {
                     let item = &ui.shown[selected];
@@ -360,48 +390,69 @@ pub async fn run(cli: &Opts) -> Result<()> {
         }
 
         // For Sixel/Foot: Clear when state changes OR when showing different image
-        let needs_clear = if image_preview_enabled {
-            if previous_was_image != current_is_image {
-                // State changed (text↔image)
-                true
-            } else if current_is_image {
-                // Both are images - check if it's a different image
-                if let Some(selected) = ui.selected {
-                    if selected < ui.shown.len() {
-                        if let Some(current_rowid) = ui.get_cclip_rowid(&ui.shown[selected]) {
-                            // Check if this is a different image than what's displayed
-                            let is_different = if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
-                                match &*state {
-                                    crate::ui::DisplayState::Image(_, displayed_rowid) => {
-                                        displayed_rowid != &current_rowid
-                                    }
-                                    _ => true,
-                                }
-                            } else {
-                                true
-                            };
-                            is_different
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
+        // We use terminal.clear() which clears the entire screen, then sync Ratatui's buffer
+        // for all panels using Clear widgets to prevent disappearing text
+        let mut needs_sixel_clear = false;
+        if image_preview_enabled {
+            // Determine whether the currently displayed image (if any) differs
+            let displayed_rowid_opt = if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
+                match &*state {
+                    crate::ui::DisplayState::Image(_, displayed_rowid) => {
+                        Some(displayed_rowid.clone())
                     }
-                } else {
-                    false
+                    _ => None,
                 }
             } else {
-                false
-            }
-        } else {
-            false
-        };
+                None
+            };
 
-        if needs_clear {
+            let current_rowid_opt = if current_is_image {
+                if let Some(selected) = ui.selected {
+                    if selected < ui.shown.len() {
+                        ui.get_cclip_rowid(&ui.shown[selected])
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Decide if we need to clear the content panel area based on state transitions
+            let need_area_clear = match (previous_was_image, current_is_image) {
+                // image -> text: must clear to remove sixel
+                (true, false) => true,
+                // text -> image: clear to avoid any leftover artifacts before drawing image
+                (false, true) => true,
+                // image -> image: clear only if different rowid
+                (true, true) => displayed_rowid_opt.as_deref() != current_rowid_opt.as_deref(),
+                // text -> text: never clear (this prevents text from disappearing)
+                (false, false) => false,
+            };
+
+            // Decide graphics adapter once
             let graphics = crate::ui::GraphicsAdapter::detect();
-            if matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
+
+            // For Sixel: use terminal.clear() when transitioning states to properly clear images
+            // This clears the entire screen, so we'll need to sync Ratatui's buffer for all panels
+            if need_area_clear && matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
+                // Clear entire terminal to remove lingering Sixel images
                 let _ = terminal.clear();
+                // Flag that we need to sync Ratatui's buffer for all panels
+                needs_sixel_clear = true;
             }
+        }
+
+        // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
+        let term_is_foot = std::env::var("TERM")
+            .unwrap_or_default()
+            .starts_with("foot");
+        if term_is_foot {
+            let mut stderr = std::io::stderr();
+            let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026h");
+            let _ = std::io::Write::flush(&mut stderr);
         }
 
         terminal.draw(|f| {
@@ -525,6 +576,41 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     }
                 };
 
+            // NOW calculate UI content using the ACTUAL chunks that will be used for rendering
+            // This ensures wrapping calculations match the actual render area
+            let content_panel_width = chunks[content_panel_index].width;
+            let content_panel_height = chunks[content_panel_index].height.saturating_sub(2);
+
+            match &ui.tag_mode {
+                TagMode::Normal => {
+                    ui.info_with_image_support(
+                        get_cclip_color(
+                            cli.cclip_highlight_color,
+                            cli.dmenu_highlight_color,
+                            cli.highlight_color,
+                        ),
+                        image_preview_enabled,
+                        hide_image_message,
+                        content_panel_width,
+                        content_panel_height,
+                    );
+                }
+                _ => {
+                    // While in tag modes, suspend inline image preview completely
+                    ui.info_with_image_support(
+                        get_cclip_color(
+                            cli.cclip_highlight_color,
+                            cli.dmenu_highlight_color,
+                            cli.highlight_color,
+                        ),
+                        false,
+                        hide_image_message,
+                        content_panel_width,
+                        content_panel_height,
+                    );
+                }
+            }
+
             // Border type
             let border_type = if rounded_borders {
                 BorderType::Rounded
@@ -544,13 +630,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 .border_type(border_type)
                 .border_style(Style::default().fg(main_border_color));
 
-            // Create paragraph - NEVER use .wrap() to prevent Foot terminal rendering issues
-            // Text wrapping is handled manually in dmenu_ui.rs by splitting into multiple Lines
+            // Create paragraph WITH wrapping as safety net
+            // Text is pre-wrapped manually, but Paragraph wrap prevents ANY overflow
             let content_paragraph = Paragraph::new(ui.text.clone())
                 .block(content_block)
                 .style(Style::default().fg(main_text_color))
                 .alignment(Alignment::Left)
-                .scroll((0, 0)); // Explicitly set scroll to prevent any automatic scrolling
+                .wrap(Wrap { trim: false })
+                .scroll((0, 0));
 
             // Items panel
             let items_panel_height = chunks[items_panel_index].height;
@@ -701,11 +788,43 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 .alignment(Alignment::Left)
                 .wrap(Wrap { trim: false });
 
-            // Render all components in their dynamic positions
+            // Clear widget areas
+            // - Kitty: always clear all panels (Kitty needs explicit clearing)
+            // - Sixel: clear ALL panels when we did terminal.clear() to sync Ratatui's buffer
+            //   This prevents disappearing text because Ratatui knows all panels were cleared
+            use ratatui::widgets::Clear;
+            let graphics_runtime = crate::ui::GraphicsAdapter::detect();
+
+            if matches!(graphics_runtime, crate::ui::GraphicsAdapter::Kitty) {
+                // Kitty: Use Clear widget for all panels (Kitty requires explicit clearing)
+                f.render_widget(Clear, chunks[content_panel_index]);
+                f.render_widget(Clear, chunks[items_panel_index]);
+                f.render_widget(Clear, chunks[input_panel_index]);
+            } else if needs_sixel_clear || force_sixel_sync {
+                // Sixel: Clear ALL panels to sync Ratatui's buffer with terminal state
+                // terminal.clear() wiped the entire screen, so we need to tell Ratatui
+                // that all panels were cleared so it will redraw them properly
+                f.render_widget(Clear, chunks[content_panel_index]);
+                f.render_widget(Clear, chunks[items_panel_index]);
+                f.render_widget(Clear, chunks[input_panel_index]);
+                // Reset flag after using it
+                force_sixel_sync = false;
+            }
+
+            // NOW render all components in their dynamic positions
             f.render_widget(content_paragraph, chunks[content_panel_index]);
             f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
             f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
+
+        if term_is_foot {
+            let mut stderr = std::io::stderr();
+            let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026l");
+            let _ = std::io::Write::flush(&mut stderr);
+        }
+
+        // Note: Post-draw clearing removed - using Clear widget inside draw loop instead
+        // Clear widget ensures all widget areas are cleaned before rendering new content
 
         // After ratatui draws, handle image display
         if image_preview_enabled && current_is_image {
@@ -825,12 +944,36 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     use crossterm::event::read;
                                     let _ = read();
                                     terminal.clear().wrap_err("Failed to clear terminal")?;
+                                    // Reset display state to force refresh of inline preview when returning
+                                    if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                        *state = crate::ui::DisplayState::Empty;
+                                    }
+                                    // Reset previous_was_image so next iteration will detect state change
+                                    // and sync Ratatui's buffer properly after terminal.clear()
+                                    previous_was_image = false;
                                 }
                             }
                         }
                     }
                     // Tag keybind (Ctrl+T)
                     (code, mods) if cli.keybinds.matches_tag(code, mods) => {
+                        // Clear any displayed image when entering tag mode
+                        let graphics = crate::ui::GraphicsAdapter::detect();
+                        if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
+                            // For Kitty: use graphics protocol to clear images
+                            graphics.image_hide().ok();
+                        } else if matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
+                            // For Sixel/Foot: clear entire screen to remove any lingering images
+                            let _ = terminal.clear();
+                            // Force Ratatui buffer sync on next draw
+                            force_sixel_sync = true;
+                        }
+                        // Reset display state
+                        if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                            *state = crate::ui::DisplayState::Empty;
+                        }
+                        previous_was_image = false;
+
                         if ui.selected.is_some() && !ui.shown.is_empty() {
                             let selected_idx = ui.selected.unwrap();
                             if selected_idx < ui.shown.len() {
@@ -1189,7 +1332,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     {
                                                         ui.selected = Some(pos);
                                                         // Restore scroll offset, ensuring selected item is visible
-                                                        ui.scroll_offset = old_scroll_offset.min(pos);
+                                                        ui.scroll_offset =
+                                                            old_scroll_offset.min(pos);
                                                     } else if !ui.shown.is_empty() {
                                                         ui.selected = Some(0);
                                                         ui.scroll_offset = 0;
@@ -1222,7 +1366,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                 // wayland
                                                 let cclip_child =
                                                     std::process::Command::new("cclip")
-                                                        .args(&["get", rowid])
+                                                        .args(["get", rowid])
                                                         .stdout(std::process::Stdio::piped())
                                                         .stderr(std::process::Stdio::null())
                                                         .spawn();
@@ -1232,7 +1376,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     {
                                                         let wl_copy =
                                                             std::process::Command::new("wl-copy")
-                                                                .args(&["-t", mime_type])
+                                                                .args(["-t", mime_type])
                                                                 .stdin(std::process::Stdio::piped())
                                                                 .stdout(std::process::Stdio::null())
                                                                 .stderr(std::process::Stdio::null())
@@ -1285,7 +1429,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                 for (tool, args) in &x11_tools {
                                                     let cclip_child =
                                                         std::process::Command::new("cclip")
-                                                            .args(&["get", rowid])
+                                                            .args(["get", rowid])
                                                             .stdout(std::process::Stdio::piped())
                                                             .stderr(std::process::Stdio::null())
                                                             .spawn();
@@ -1688,7 +1832,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     let copy_result = if std::env::var("WAYLAND_DISPLAY").is_ok() {
                                         // wayland
                                         let cclip_child = std::process::Command::new("cclip")
-                                            .args(&["get", rowid])
+                                            .args(["get", rowid])
                                             .stdout(std::process::Stdio::piped())
                                             .stderr(std::process::Stdio::null())
                                             .spawn();
@@ -1696,7 +1840,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         if let Ok(mut cclip) = cclip_child {
                                             if let Some(cclip_stdout) = cclip.stdout.take() {
                                                 let wl_copy = std::process::Command::new("wl-copy")
-                                                    .args(&["-t", mime_type])
+                                                    .args(["-t", mime_type])
                                                     .stdin(std::process::Stdio::piped())
                                                     .stdout(std::process::Stdio::null())
                                                     .stderr(std::process::Stdio::null())
@@ -1741,7 +1885,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         let mut result = None;
                                         for (tool, args) in &x11_tools {
                                             let cclip_child = std::process::Command::new("cclip")
-                                                .args(&["get", rowid])
+                                                .args(["get", rowid])
                                                 .stdout(std::process::Stdio::piped())
                                                 .stderr(std::process::Stdio::null())
                                                 .spawn();

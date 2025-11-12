@@ -3,16 +3,11 @@ use serde::Deserialize;
 use std::str::FromStr;
 use std::{env, fs, io, path, process};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum MatchMode {
     Exact,
+    #[default]
     Fuzzy,
-}
-
-impl Default for MatchMode {
-    fn default() -> Self {
-        MatchMode::Fuzzy
-    }
 }
 
 fn usage() -> ! {
@@ -830,14 +825,14 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     // Parse layout configuration with validation
     if let Some(height) = file_conf.title_panel_height_percent {
-        if height >= 10 && height <= 70 {
+        if (10..=70).contains(&height) {
             default.title_panel_height_percent = height;
         } else {
             eprintln!("Warning: title_panel_height_percent must be between 10-70%, using default");
         }
     }
     if let Some(height) = file_conf.input_panel_height {
-        if height >= 1 && height <= 10 {
+        if (1..=10).contains(&height) {
             default.input_panel_height = height;
         } else {
             eprintln!("Warning: input_panel_height must be between 1-10 lines, using default");
@@ -913,14 +908,14 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
         // Load dmenu layout
         if let Some(height) = dmenu_conf.title_panel_height_percent {
-            if height >= 10 && height <= 70 {
+            if (10..=70).contains(&height) {
                 default.dmenu_title_panel_height_percent = Some(height);
             } else {
                 eprintln!("Warning: dmenu title_panel_height_percent must be between 10-70%, using default");
             }
         }
         if let Some(height) = dmenu_conf.input_panel_height {
-            if height >= 1 && height <= 10 {
+            if (1..=10).contains(&height) {
                 default.dmenu_input_panel_height = Some(height);
             } else {
                 eprintln!(
@@ -929,7 +924,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
         }
         if let Some(position) = &dmenu_conf.title_panel_position {
-            default.dmenu_title_panel_position = Some(position.clone());
+            default.dmenu_title_panel_position = Some(*position);
         }
 
         // Load other dmenu options
@@ -1045,14 +1040,14 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
         // Load cclip layout
         if let Some(height) = cclip_conf.title_panel_height_percent {
-            if height >= 10 && height <= 70 {
+            if (10..=70).contains(&height) {
                 default.cclip_title_panel_height_percent = Some(height);
             } else {
                 eprintln!("Warning: cclip title_panel_height_percent must be between 10-70%, using default");
             }
         }
         if let Some(height) = cclip_conf.input_panel_height {
-            if height >= 1 && height <= 10 {
+            if (1..=10).contains(&height) {
                 default.cclip_input_panel_height = Some(height);
             } else {
                 eprintln!(
@@ -1061,7 +1056,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             }
         }
         if let Some(position) = &cclip_conf.title_panel_position {
-            default.cclip_title_panel_position = Some(position.clone());
+            default.cclip_title_panel_position = Some(*position);
         }
 
         // Load other cclip options
@@ -1164,21 +1159,16 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 }
 
 /// Title panel position
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PanelPosition {
     /// Panel at the top (default behavior)
+    #[default]
     Top,
     /// Panel in the middle (where results/apps usually are)
     Middle,
     /// Panel at the bottom (above input field)
     Bottom,
-}
-
-impl Default for PanelPosition {
-    fn default() -> Self {
-        PanelPosition::Top
-    }
 }
 
 impl FromStr for PanelPosition {
@@ -1346,12 +1336,40 @@ impl FileConf {
             Err(e) => {
                 let error_msg = e.message();
 
+                // Duplicate key/table handling with actionable guidance
+                if error_msg.contains("duplicate key")
+                    || error_msg.contains("duplicate field")
+                    || error_msg.contains("redefinition of table")
+                {
+                    // Try to extract the duplicated key if present in backticks
+                    let duplicated = error_msg.find('`').and_then(|start| {
+                        let rest = &error_msg[start + 1..];
+                        rest.find('`').map(|end| &rest[..end])
+                    });
+
+                    let mut msg = String::from("Config Error: Duplicate setting detected");
+                    if let Some(key) = duplicated {
+                        msg.push_str(&format!("\nKey: '{}'", key));
+                    }
+
+                    msg.push_str(
+                        "\n\nEach key can appear at most once within the same section.\n\
+If you want to set a key for multiple modes, define it under distinct sections:\n\
+  - [dmenu] → keys for dmenu mode\n\
+  - [cclip] → keys for cclip mode\n\
+  - root (top-level) → defaults for all modes\n\
+Avoid repeating the same section multiple times; merge options under a single [dmenu] or [cclip].",
+                    );
+
+                    return Err(msg);
+                }
+
                 // Check if it's an unknown field error and provide helpful guidance
                 if error_msg.contains("unknown field") {
                     let enhanced_msg = Self::enhance_unknown_field_error(error_msg);
                     Err(enhanced_msg)
                 } else {
-                    Err(format!("{}", error_msg))
+                    Err(error_msg.to_string())
                 }
             }
         }
@@ -1359,16 +1377,12 @@ impl FileConf {
 
     fn enhance_unknown_field_error(original_error: &str) -> String {
         // Extract the unknown field name from the error message
-        let unknown_field = if let Some(start) = original_error.find("unknown field `") {
+        let unknown_field = original_error.find("unknown field `").and_then(|start| {
             let start = start + "unknown field `".len();
-            if let Some(end) = original_error[start..].find('`') {
-                Some(&original_error[start..start + end])
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+            original_error[start..]
+                .find('`')
+                .map(|end| &original_error[start..start + end])
+        });
 
         // Determine section and provide targeted help
         if original_error.contains("expected one of") && original_error.contains("filter_desktop") {

@@ -78,10 +78,8 @@ impl Input {
                                 }
                             }
                             CrosstermEvent::Mouse(mouse) => {
-                                if !config.disable_mouse {
-                                    if tx.send(Event::Mouse(mouse)).is_err() {
-                                        return;
-                                    }
+                                if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
+                                    return;
                                 }
                             }
                             _ => {}

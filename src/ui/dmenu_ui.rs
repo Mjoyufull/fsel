@@ -478,22 +478,95 @@ impl<'a> DmenuUI<'a> {
                     safe_content
                 };
 
-                // ALWAYS replace newlines to prevent Foot terminal rendering issues
-                // Foot's ascii_printer_generic mode (used with sixel images) breaks with newlines
-                display_content = display_content.replace('\n', " ");
+                // Sanitize content to prevent rendering issues
+                // Remove/replace special characters that can cause glitches
+                display_content = display_content
+                    .replace('\n', " ") // Newlines → spaces (Foot compatibility)
+                    .replace('\t', "    ") // Tabs → 4 spaces
+                    .replace(['\r', '\0'], ""); // Remove carriage returns and nulls
+
+                // Strip ANSI escape codes (basic pattern)
+                // Matches: ESC [ ... m
+                if display_content.contains('\x1b') {
+                    let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+                    display_content = re.replace_all(&display_content, "").to_string();
+                }
 
                 if self.wrap_long_lines {
-                    // Wrap by actual panel width (accounting for borders and padding)
-                    let max_width = (panel_width.saturating_sub(4)) as usize; // -2 for borders, -2 for padding
-                    let max_width = max_width.max(20); // Minimum 20 chars
+                    // Wrap by actual panel width (accounting for borders only)
+                    // panel_width is the OUTER chunk width, -2 for left and right borders
+                    let max_width = (panel_width.saturating_sub(2)) as usize;
+                    let max_width = max_width.max(20); // Minimum 20 cells
 
-                    let chars: Vec<char> = display_content.chars().collect();
-                    let mut start = 0;
-                    while start < chars.len() {
-                        let end = std::cmp::min(start + max_width, chars.len());
-                        let chunk: String = chars[start..end].iter().collect();
-                        lines.push(Line::from(Span::raw(chunk)));
-                        start = end;
+                    // Use unicode-width to measure actual display width (cells), not character count
+                    // This ensures wide Unicode characters (emojis, CJK) are handled correctly
+                    use unicode_width::UnicodeWidthStr;
+
+                    let mut current_pos = 0;
+                    while current_pos < display_content.len() {
+                        // Find the split point by measuring display width
+                        // We need to ensure the line width is strictly less than max_width to prevent overflow
+                        let mut split_pos = current_pos;
+
+                        // Iterate through remaining characters to find where to split
+                        let remaining = &display_content[current_pos..];
+                        for (char_byte_pos, ch) in remaining.char_indices() {
+                            // Include this character in the candidate string
+                            let candidate = &remaining[..char_byte_pos + ch.len_utf8()];
+                            let candidate_width = candidate.width();
+
+                            // Stop when we reach or exceed max_width (strictly less than)
+                            if candidate_width >= max_width {
+                                break;
+                            }
+
+                            // Update split_pos to include this character
+                            split_pos = current_pos + char_byte_pos + ch.len_utf8();
+                        }
+
+                        // If we didn't find a good split point (single wide character), take at least one char
+                        if split_pos == current_pos {
+                            // Take at least one character to avoid infinite loop
+                            if let Some((next_byte_pos, ch)) = remaining.char_indices().next() {
+                                split_pos = current_pos + next_byte_pos + ch.len_utf8();
+                            } else {
+                                break;
+                            }
+                        }
+
+                        let chunk = &display_content[current_pos..split_pos];
+                        // Verify the chunk width is safe (should always be < max_width due to our >= check above)
+                        let chunk_width = chunk.width();
+                        if chunk_width >= max_width {
+                            // This should never happen with our logic, but if it does, truncate to be safe
+                            // Find a safe split point by going backwards
+                            let mut safe_split = current_pos;
+                            for (char_byte_pos, ch) in remaining.char_indices() {
+                                let test_candidate = &remaining[..char_byte_pos + ch.len_utf8()];
+                                if test_candidate.width() < max_width {
+                                    safe_split = current_pos + char_byte_pos + ch.len_utf8();
+                                } else {
+                                    break;
+                                }
+                            }
+                            if safe_split > current_pos {
+                                split_pos = safe_split;
+                                let safe_chunk = &display_content[current_pos..split_pos];
+                                lines.push(Line::from(Span::raw(safe_chunk.to_string())));
+                            } else {
+                                // Last resort: take just one character to avoid infinite loop
+                                if let Some((next_byte_pos, ch)) = remaining.char_indices().next() {
+                                    split_pos = current_pos + next_byte_pos + ch.len_utf8();
+                                    let safe_chunk = &display_content[current_pos..split_pos];
+                                    lines.push(Line::from(Span::raw(safe_chunk.to_string())));
+                                } else {
+                                    break; // No more characters
+                                }
+                            }
+                        } else {
+                            lines.push(Line::from(Span::raw(chunk.to_string())));
+                        }
+                        current_pos = split_pos;
                     }
                 } else {
                     // Keep as single line
@@ -505,11 +578,15 @@ impl<'a> DmenuUI<'a> {
                     lines.push(Line::from(Span::raw("[No content]")));
                 }
 
-                // For Sixel/Foot: Pad with empty lines to fill the entire panel height
-                // This ensures text overwrites the ENTIRE sixel area, not just where text is
-                let target_height = (_panel_height as usize).saturating_sub(2); // Account for borders
+                // ALWAYS pad with full-width empty lines to fill panel height
+                // This ensures text overwrites ALL previous content in Kitty
+                // Note: _panel_height is already adjusted for borders in cclip/run.rs
+                let target_height = _panel_height as usize;
+                // Create full-width blank line (Paragraph.wrap will clip if too wide)
+                let blank_width = (panel_width.saturating_sub(2)) as usize;
+                let blank_line = " ".repeat(blank_width);
                 while lines.len() < target_height {
-                    lines.push(Line::from(Span::raw(" "))); // Empty line with space
+                    lines.push(Line::from(Span::raw(blank_line.clone())));
                 }
 
                 self.text = lines;
@@ -567,7 +644,7 @@ impl<'a> DmenuUI<'a> {
 
             // Always try to get the full content - no filtering, show everything
             if let Ok(output) = std::process::Command::new("cclip")
-                .args(&["get", rowid])
+                .args(["get", rowid])
                 .output()
             {
                 if output.status.success() {
@@ -616,7 +693,7 @@ impl<'a> DmenuUI<'a> {
         }
 
         let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
-        if parts.len() >= 1 {
+        if !parts.is_empty() {
             Some(parts[0].trim().to_string())
         } else {
             None
@@ -626,13 +703,14 @@ impl<'a> DmenuUI<'a> {
     /// Display image directly to terminal, bypassing ratatui
     /// Returns true if image was displayed successfully
     pub fn display_image_to_terminal(&self, item: &crate::common::Item) -> bool {
+        use std::io::Write;
         if !self.is_cclip_image_item(item) {
             return false;
         }
 
         // Parse the tab-separated cclip format to get rowid
         let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
-        if parts.len() >= 1 {
+        if !parts.is_empty() {
             let rowid = parts[0].trim();
 
             // Detect terminal and choose appropriate format for fullscreen display
@@ -655,24 +733,56 @@ impl<'a> DmenuUI<'a> {
                 (80, 24) // fallback
             };
 
-            // Use most of the terminal but leave some padding
-            let image_width = (term_width * 90 / 100).max(40); // 90% of width, minimum 40
-            let image_height = (term_height * 85 / 100).max(20); // 85% of height, minimum 20
+            // Size policy:
+            // - Kitty: almost full-screen (keeps small margins)
+            // - Foot/Sixel: true full-screen to avoid any alignment quirks
+            let is_foot = terminal_type.starts_with("foot");
+
+            let (image_width, image_height) = if is_foot {
+                (term_width, term_height) // fill entire screen for foot
+            } else {
+                (
+                    (term_width * 90 / 100).max(40),  // 90% width
+                    (term_height * 85 / 100).max(20), // 85% height
+                )
+            };
+
+            // Clear any existing inline images before showing fullscreen
+            let graphics = crate::ui::GraphicsAdapter::detect();
+            if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
+                // For Kitty: use graphics protocol to clear images
+                graphics.image_hide().ok();
+            } else if matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
+                // For Sixel/Foot: clear entire screen to remove any lingering images
+                use crossterm::execute;
+                use crossterm::terminal::Clear as TerminalClear;
+                use crossterm::terminal::ClearType;
+                let mut stderr = std::io::stderr();
+                let _ = execute!(stderr, TerminalClear(ClearType::All));
+                let _ = stderr.flush();
+            }
 
             // try multiple formats until one works
             let mut success = false;
 
             for format in formats {
-                // Clear screen - skip for Foot terminal to avoid rendering issues
-                if !terminal_type.starts_with("foot") {
-                    let _ = std::process::Command::new("clear")
-                        .env("TERM", "xterm-256color")
-                        .status();
+                // Clear screen completely for both Kitty and Foot to show clean fullscreen image
+                {
+                    use crossterm::cursor::MoveTo;
+                    use crossterm::execute;
+                    use crossterm::terminal::Clear as TerminalClear;
+                    use crossterm::terminal::ClearType;
+                    let mut stderr = std::io::stderr();
+                    // Clear entire screen
+                    let _ = execute!(stderr, TerminalClear(ClearType::All));
+                    // Move cursor to top-left for clean fullscreen display
+                    let _ = execute!(stderr, MoveTo(0, 0));
+                    let _ = stderr.flush();
                 }
 
                 // pipe cclip output to chafa
                 let cclip_child = std::process::Command::new("cclip")
-                    .args(&["get", rowid])
+                    .args(["get", rowid])
                     .stdout(std::process::Stdio::piped())
                     .stderr(std::process::Stdio::null())
                     .spawn();
@@ -680,8 +790,31 @@ impl<'a> DmenuUI<'a> {
                 if let Ok(mut cclip) = cclip_child {
                     if let Some(cclip_stdout) = cclip.stdout.take() {
                         let size_arg = format!("{}x{}", image_width, image_height);
+
+                        // Reposition cursor for centering/fullscreen before spawning chafa
+                        // - For foot: top-left for true fullscreen
+                        // - For others: best-effort centering using MoveTo
+                        {
+                            use crossterm::cursor::MoveTo;
+                            use crossterm::execute;
+                            use std::io::Write;
+                            let mut stderr = std::io::stderr();
+                            let start_x = if is_foot {
+                                0
+                            } else {
+                                term_width.saturating_sub(image_width) / 2
+                            } as u16;
+                            let start_y = if is_foot {
+                                0
+                            } else {
+                                term_height.saturating_sub(image_height) / 2
+                            } as u16;
+                            let _ = execute!(stderr, MoveTo(start_x, start_y));
+                            let _ = stderr.flush();
+                        }
+
                         let chafa_child = std::process::Command::new("chafa")
-                            .args(&["--size", &size_arg, "--align", "center", "-f", format, "-"])
+                            .args(["--size", &size_arg, "--align", "center", "-f", format, "-"])
                             .stdin(std::process::Stdio::piped())
                             .stdout(std::process::Stdio::inherit())
                             .stderr(std::process::Stdio::null())

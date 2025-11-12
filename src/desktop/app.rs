@@ -567,7 +567,7 @@ impl App {
                             entry_type = Some(value.to_string());
                         }
                         "Name" => {
-                            if let Some(val) = get_localized_value(key, value, &name, &locales) {
+                            if let Some(val) = get_localized_value(key, value, &name, locales) {
                                 name = Some(if let Some(a) = &action {
                                     format!("{} ({})", &a.from, val)
                                 } else {
@@ -577,14 +577,14 @@ impl App {
                         }
                         "GenericName" => {
                             if let Some(val) =
-                                get_localized_value(key, value, &generic_name, &locales)
+                                get_localized_value(key, value, &generic_name, locales)
                             {
                                 generic_name = Some(val);
                             }
                         }
                         "Comment" => {
                             if let Some(val) =
-                                get_localized_value(key, value, &description, &locales)
+                                get_localized_value(key, value, &description, locales)
                             {
                                 description = Some(val);
                             }

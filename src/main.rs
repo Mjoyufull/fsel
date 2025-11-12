@@ -91,14 +91,30 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
 
     // Skip lock check for non-interactive commands (tag clear, tag list)
     let is_non_interactive = cli.cclip_clear_tags || cli.cclip_tag_list;
-    
+
     if !contents.is_empty() && !is_non_interactive {
         if cli.replace {
             let pid: i32 = contents
                 .parse()
                 .wrap_err("Failed to parse cclip lockfile contents")?;
-            process::kill_process_sigterm(pid);
-            fs::remove_file(&lock_path)?;
+            match process::kill_process_sigterm_result(pid) {
+                Ok(()) => {
+                    // Process killed, remove lock
+                    fs::remove_file(&lock_path)?;
+                }
+                Err(e) if e.raw_os_error() == Some(libc::ESRCH) => {
+                    // Process does not exist, remove lock
+                    fs::remove_file(&lock_path)?;
+                }
+                Err(e) => {
+                    // Other error, don't remove lock
+                    return Err(eyre!(
+                        "Failed to kill existing fsel cclip process (pid {}): {}",
+                        pid,
+                        e
+                    ));
+                }
+            }
             std::thread::sleep(std::time::Duration::from_millis(200));
         } else {
             return Err(eyre!("Fsel cclip mode is already running"));

@@ -18,7 +18,7 @@ impl CclipItem {
     /// Get the content for preview in the content panel
     pub fn get_content_for_preview(&self) -> Result<Vec<u8>> {
         let output = Command::new("cclip")
-            .args(&["get", &self.rowid])
+            .args(["get", &self.rowid])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?
