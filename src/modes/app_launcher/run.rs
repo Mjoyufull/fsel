@@ -3,25 +3,22 @@
 use crate::cli::Opts;
 use eyre::{eyre, Result, WrapErr};
 
-use crate::core::database;
-use crate::desktop;
-use crate::ui::{InputConfig, InputEvent as Event, UI};
+use crate::ui::{InputConfig, UI, InputEvent as Event};
 
-use crossterm::event::{MouseButton, MouseEventKind};
 use directories::ProjectDirs;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 use redb::ReadableTable;
 use scopeguard::defer;
 use std::collections::BTreeSet;
 use std::{env, fs, io, path};
+use std::time::Duration;
+use crate::core::state::{State, Message, sort_by_frecency};
+
+use crossterm::event::{MouseButton, MouseEventKind};
 
 /// Run application launcher mode
-pub fn run(cli: Opts) -> Result<()> {
+pub async fn run(cli: Opts) -> Result<()> {
     use crossterm::event::KeyCode;
 
     // Handle direct launch mode (bypass TUI)
@@ -334,9 +331,27 @@ pub fn run(cli: Opts) -> Result<()> {
         }
     }
 
-    // Read applications with filtering options
-    let apps =
-        desktop::read_with_options(dirs, &db, cli.filter_desktop, cli.list_executables_in_path);
+    // Load database and cache (Blocking I/O - Keep for now)
+    // gotta load everything up front or it looks janky af
+    // no one wants to see apps popping in one by one like its 1999
+    let filter_desktop = cli.filter_desktop;
+    let list_executables = cli.list_executables_in_path;
+    
+    let apps_rx = crate::desktop::read_with_options(
+        dirs.clone(),
+        &db,
+        filter_desktop,
+        list_executables,
+    );
+    
+    let mut all_apps = Vec::with_capacity(500);
+    while let Ok(app) = apps_rx.recv() {
+        all_apps.push(app);
+    }
+    
+    // Sort by frecency ONCE
+    let frecency_data = crate::core::database::load_frecency(&db);
+    sort_by_frecency(&mut all_apps, &frecency_data);
 
     // Initialize the terminal with crossterm backend using stderr
     let backend = CrosstermBackend::new(io::stderr());
@@ -344,501 +359,256 @@ pub fn run(cli: Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
-    // Input handler with fast tick rate for instant app loading
-    let input = InputConfig {
-        disable_mouse: cli.disable_mouse,
-        tick_rate: std::time::Duration::from_millis(16), // ~60fps for instant updates
-        exit_key: KeyCode::Null, // Use Null key to prevent accidental input thread termination
-        ..InputConfig::default()
+    // Initialize State with ALL apps loaded
+    let mut state = State::new(all_apps, cli.match_mode);
+    
+    // Pre-fill search
+    if let Some(ref s) = cli.search_string {
+        state.query = s.clone();
     }
-    .init();
-
-    // PERFORMANCE FIX: Load ALL apps FIRST, then filter ONCE (eliminates "populating" effect)
-    let mut all_apps = Vec::with_capacity(500);
-    while let Ok(app) = apps.recv() {
-        all_apps.push(app);
-    }
-
-    // Create UI with ALL apps loaded
-    let mut ui = UI::new(all_apps);
-
-    // Set user-defined verbosity level
-    if let Some(level) = cli.verbose {
-        ui.verbosity(level);
-    }
-
-    // Pre-fill search string if provided
-    if let Some(ref search_str) = cli.search_string {
-        ui.query = search_str.clone();
-    }
-
+    
     // Filter ONCE with all apps loaded - INSTANT display
-    ui.filter(cli.match_mode);
-    ui.info(cli.highlight_color, cli.fancy_mode);
+    state.filter();
+    state.update_info(cli.highlight_color, cli.fancy_mode, cli.verbose.unwrap_or(0));
 
-    // App list
-    let mut app_state = ListState::default();
+    // Initialize Async Input
+    let mut input = InputConfig {
+        disable_mouse: cli.disable_mouse,
+        tick_rate: Duration::from_millis(16),
+        exit_key: KeyCode::Null, // Handle exit manually
+        ..InputConfig::default()
+    }.init_async();
 
+    // App Loop
     loop {
-        // Draw UI
+        // Render
         terminal.draw(|f| {
-            // Calculate layout based on configuration
-            let total_height = f.area().height;
-            let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0)
-                .round() as u16;
-            let input_height = cli.input_panel_height;
-
-            // Get title panel position (defaults to Top if not set)
-            let title_panel_position = cli
-                .title_panel_position
-                .unwrap_or(crate::cli::PanelPosition::Top);
-
-            // Split the window into three parts based on title panel position
-            let (window, title_panel_index, apps_panel_index, input_panel_index) =
-                match title_panel_position {
-                    crate::cli::PanelPosition::Top => {
-                        // Top: title, apps, input (original layout)
-                        let layout = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Length(title_height.max(3)), // Title panel (min 3 lines)
-                                    Constraint::Min(1), // Apps panel (remaining space)
-                                    Constraint::Length(input_height), // Input panel
-                                ]
-                                .as_ref(),
-                            )
-                            .split(f.area());
-                        (layout, 0, 1, 2)
-                    }
-                    crate::cli::PanelPosition::Middle => {
-                        // Middle: apps, title, input
-                        let layout = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),                      // Apps panel (remaining space)
-                                    Constraint::Length(title_height.max(3)), // Title panel
-                                    Constraint::Length(input_height),        // Input panel
-                                ]
-                                .as_ref(),
-                            )
-                            .split(f.area());
-                        (layout, 1, 0, 2)
-                    }
-                    crate::cli::PanelPosition::Bottom => {
-                        // Bottom: apps, input, title
-                        let layout = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),                      // Apps panel (remaining space)
-                                    Constraint::Length(input_height),        // Input panel
-                                    Constraint::Length(title_height.max(3)), // Title panel at bottom
-                                ]
-                                .as_ref(),
-                            )
-                            .split(f.area());
-                        (layout, 2, 0, 1)
-                    }
-                };
-
-            // Create blocks with configurable colors and borders
-            let border_type = if cli.rounded_borders {
-                BorderType::Rounded
-            } else {
-                BorderType::Plain
-            };
-
-            let create_main_block = |title: String| {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(Span::styled(
-                        format!(" {} ", title), // Add spaces around title
-                        Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(cli.header_title_color),
-                    ))
-                    .border_type(border_type)
-                    .border_style(Style::default().fg(cli.main_border_color))
-            };
-
-            let create_apps_block = |title: String| {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(Span::styled(
-                        format!(" {} ", title), // Add spaces around title
-                        Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(cli.header_title_color),
-                    ))
-                    .border_type(border_type)
-                    .border_style(Style::default().fg(cli.apps_border_color))
-            };
-
-            let create_input_block = |title: String| {
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(Span::styled(
-                        format!(" {} ", title), // Add spaces around title
-                        Style::default()
-                            .add_modifier(Modifier::BOLD)
-                            .fg(cli.header_title_color),
-                    ))
-                    .border_type(border_type)
-                    .border_style(Style::default().fg(cli.input_border_color))
-            };
-
-            // Determine panel titles based on fancy mode
-            let (main_title, apps_title) = if cli.fancy_mode
-                && ui.selected.is_some()
-                && !ui.shown.is_empty()
-                && ui.selected.unwrap() < ui.shown.len()
-            {
-                let selected_app = &ui.shown[ui.selected.unwrap()];
-                // In fancy mode: main panel shows app name, apps panel shows "Apps"
-                (selected_app.name.clone(), "Apps".to_string())
-            } else {
-                // Normal mode: static titles
-                ("Fsel".to_string(), "Apps".to_string())
-            };
-
-            // Description of the current app
-            let description = Paragraph::new(ui.text.clone())
-                .block(create_main_block(main_title))
-                .style(Style::default().fg(cli.main_text_color))
-                // Don't trim leading spaces when wrapping
-                .wrap(Wrap { trim: false })
-                .alignment(Alignment::Left);
-
-            // Calculate apps panel height - account for borders (2 rows: top + bottom)
-            let apps_panel_height = window[apps_panel_index].height;
-            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for top/bottom borders
-
-            // get the visible slice of apps based on scroll offset
-            let visible_apps = ui
-                .shown
-                .iter()
-                .skip(ui.scroll_offset)
-                .take(max_visible)
-                .map(|app| {
-                    if app.pinned {
-                        // add pin icon with color
-                        let pin_span = Span::styled(
-                            format!("{} ", cli.pin_icon),
-                            Style::default().fg(cli.pin_color),
-                        );
-                        let name_span = Span::raw(&app.name);
-                        ListItem::new(Line::from(vec![pin_span, name_span]))
-                    } else {
-                        ListItem::new(app.name.clone())
-                    }
-                })
-                .collect::<Vec<ListItem>>();
-
-            // App list (stateful widget) with borders
-            let list = List::new(visible_apps)
-                .block(create_apps_block(apps_title))
-                .style(Style::default().fg(cli.apps_text_color))
-                // Bold & colorized selection
-                .highlight_style(
-                    Style::default()
-                        .fg(cli.highlight_color)
-                        .add_modifier(Modifier::BOLD),
-                )
-                // Prefixed before the list item
-                .highlight_symbol("> ");
-
-            // Ensure we always have a valid selection when rendering
-            if !ui.shown.is_empty() {
-                match ui.selected {
-                    None => {
-                        // No selection at all, default to first visible item
-                        ui.selected = Some(ui.scroll_offset.min(ui.shown.len() - 1));
-                    }
-                    Some(sel) if sel >= ui.shown.len() => {
-                        // Selection is out of bounds, clamp to valid range
-                        ui.selected = Some((ui.shown.len() - 1).min(sel));
-                    }
-                    _ => {
-                        // Selection is valid, keep it
-                    }
-                }
-            }
-
-            // Update selection - adjust for scroll offset
-            let visible_selection = ui.selected.and_then(|sel| {
-                if sel >= ui.scroll_offset && sel < ui.scroll_offset + max_visible {
-                    Some(sel - ui.scroll_offset)
-                } else {
-                    None
-                }
-            });
-            app_state.select(visible_selection);
-
-            // Query
-            let query = Paragraph::new(Line::from(vec![
-                // Format: (10/51) >> query
-                Span::styled("(", Style::default().fg(cli.input_text_color)),
-                Span::styled(
-                    (ui.selected.map_or(0, |v| v + 1)).to_string(),
-                    Style::default().fg(cli.highlight_color),
-                ),
-                Span::styled("/", Style::default().fg(cli.input_text_color)),
-                Span::styled(
-                    ui.shown.len().to_string(),
-                    Style::default().fg(cli.input_text_color),
-                ),
-                Span::styled(") ", Style::default().fg(cli.input_text_color)),
-                Span::styled(">", Style::default().fg(cli.highlight_color)),
-                Span::styled("> ", Style::default().fg(cli.input_text_color)),
-                Span::styled(&ui.query, Style::default().fg(cli.input_text_color)),
-                Span::styled(&cli.cursor, Style::default().fg(cli.highlight_color)),
-            ]))
-            .block(create_input_block("Input".to_string()))
-            .style(Style::default().fg(cli.input_text_color))
-            .alignment(Alignment::Left)
-            .wrap(ratatui::widgets::Wrap { trim: false });
-
-            // Render panels in their dynamic positions
-            f.render_widget(description, window[title_panel_index]);
-            // Only render app list if not hide_before_typing or query is not empty
-            if !cli.hide_before_typing || !ui.query.is_empty() {
-                f.render_stateful_widget(list, window[apps_panel_index], &mut app_state);
-            }
-            f.render_widget(query, window[input_panel_index]);
+            let ui = UI::new();
+            ui.render(f, &state, &cli);
         })?;
 
-        // Handle user input
-        match input.next()? {
-            Event::Input(key) => {
-                use crossterm::event::KeyCode;
+        // Handle Events
+        tokio::select! {
+            // Input Event
+            Some(event) = input.next() => {
+                match event {
+                    Event::Input(key) => {
+                         // figure out how many items actually fit on screen
+                         let total_height = terminal.size()?.height;
+                         let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
+                         let input_height = cli.input_panel_height;
+                         let apps_panel_height = total_height.saturating_sub(title_height + input_height);
+                         let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for borders
 
-                // check keybinds
-                if cli.keybinds.matches_exit(key.code, key.modifiers) {
-                    ui.selected = None;
-                    break;
-                } else if cli.keybinds.matches_select(key.code, key.modifiers) {
-                    break;
-                } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
-                    if let Some(selected) = ui.selected {
-                        if selected < ui.shown.len() {
-                            let app_name = ui.shown[selected].name.clone();
-                            if let Ok(is_pinned) = database::toggle_pin(&db, &app_name) {
-                                // Update all apps with same name (handles duplicates like 2x Alacritty)
-                                for app in &mut ui.shown {
-                                    if app.name == app_name {
-                                        app.pinned = is_pinned;
+                         // Map cursor/keys to Message using configured keybinds
+                         let msg = if cli.keybinds.matches_exit(key.code, key.modifiers) {
+                             Message::Exit
+                         } else if cli.keybinds.matches_select(key.code, key.modifiers) {
+                             Message::Select
+                         } else if cli.keybinds.matches_up(key.code, key.modifiers) {
+                             Message::MoveUp
+                         } else if cli.keybinds.matches_down(key.code, key.modifiers) {
+                             Message::MoveDown
+                         } else if cli.keybinds.matches_left(key.code, key.modifiers) {
+                             Message::MoveUp // Left mapped to Up for list navigation consistency if desired, or change logic
+                         } else if cli.keybinds.matches_right(key.code, key.modifiers) {
+                             Message::MoveDown // Right mapped to Down
+                         } else if cli.keybinds.matches_backspace(key.code, key.modifiers) {
+                             Message::Backspace
+                         } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
+                             // Handle Pin toggling directly here as it requires DB access, 
+                             // or emit Message::TogglePin which we intercept below.
+                             // Let's emit Message::TogglePin to keep it clean, and handle it in the State update post-check?
+                             // Actually, State update doesn't have DB access.
+                             // So we handle it here and return Tick.
+                             // Check if we need to manually toggle logic here.
+                             if let Some(idx) = state.selected {
+                                 if let Some(app) = state.shown.get(idx).cloned() {
+                                     if let Ok(is_pinned) = crate::core::database::toggle_pin(&db, &app.name) {
+                                        // Update app in lists
+                                        for a in &mut state.apps {
+                                            if a.name == app.name {
+                                                a.pinned = is_pinned;
+                                            }
+                                        }
+                                        // Re-sort so pinned apps move to top
+                                        let frecency_data = crate::core::database::load_frecency(&db);
+                                        crate::core::state::sort_by_frecency(&mut state.apps, &frecency_data);
+                                        state.filter();
+                                     }
+                                 }
+                             }
+                             Message::Tick
+                         } else {
+                             match key.code {
+                                 KeyCode::Char(c) if !key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => Message::CharInput(c),
+                                 KeyCode::Home => Message::MoveFirst,
+                                 KeyCode::End => Message::MoveLast,
+                                 KeyCode::Tab => Message::MoveDown,
+                                 KeyCode::BackTab => Message::MoveUp,
+                                 _ => Message::Tick,
+                             }
+                         };
+                         
+                         // Special case for Ctrl+C if not handled by keybinds (though it's usually in exit)
+                         if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') && !cli.keybinds.matches_exit(key.code, key.modifiers) {
+                             state.should_exit = true;
+                         }
+
+                         crate::core::state::update(&mut state, msg, cli.hard_stop, max_visible);
+                         
+                         // Post-update: Check text (update info)
+                         let fancy = cli.fancy_mode;
+                         state.update_info(cli.highlight_color, fancy, cli.verbose.unwrap_or(0));
+                    }
+                    Event::Tick => {
+                        // Animation frame
+                    }
+                    Event::Render => {
+                        // Trigger redraw
+                        // Handled by loop start
+                    }
+                    Event::Mouse(mouse_event) => {
+                        let mouse_row = mouse_event.row;
+
+                        // Calculate panel positions based on title_panel_position
+                        let total_height = terminal.size()?.height;
+                        let title_height = (total_height as f32 * cli.title_panel_height_percent as f32
+                            / 100.0)
+                            .round() as u16;
+                        let input_height = cli.input_panel_height;
+                        let title_panel_position = cli
+                            .title_panel_position
+                            .unwrap_or(crate::ui::PanelPosition::Top);
+
+                        // Calculate apps panel coordinates based on layout
+                        let (apps_panel_start, apps_panel_height) = match title_panel_position {
+                            crate::ui::PanelPosition::Top => {
+                                // Top: title, apps, input - apps start after title
+                                (title_height, total_height.saturating_sub(title_height + input_height))
+                            }
+                            crate::ui::PanelPosition::Middle => {
+                                // Middle: apps, title, input - apps start at top
+                                (0, total_height.saturating_sub(title_height + input_height))
+                            }
+                            crate::ui::PanelPosition::Bottom => {
+                                // Bottom: apps, input, title - apps start at top
+                                (0, total_height.saturating_sub(title_height + input_height))
+                            }
+                        };
+                        
+                        // List content area (inside the borders) - first item starts 1 row down from panel start
+                        let list_content_start = apps_panel_start + 1; 
+                        let max_visible_rows = apps_panel_height.saturating_sub(2); // -2 for top/bottom borders
+                        let list_content_end = list_content_start + max_visible_rows;
+
+                        // Helper to calculate index from row
+                        let get_app_index = |row: u16| -> Option<usize> {
+                            if row >= list_content_start && row < list_content_end {
+                                let row_in_content = row - list_content_start;
+                                let index = state.scroll_offset + row_in_content as usize;
+                                if index < state.shown.len() {
+                                    return Some(index);
+                                }
+                            }
+                            None
+                        };
+
+                        let msg = match mouse_event.kind {
+                            MouseEventKind::Down(MouseButton::Left) => {
+                                if let Some(idx) = get_app_index(mouse_row) {
+                                    crate::core::state::update(&mut state, Message::SelectIndex(idx), cli.hard_stop, max_visible_rows as usize);
+                                    Message::Select
+                                } else {
+                                    Message::Tick
+                                }
+                            },
+                            MouseEventKind::Moved => {
+                                if let Some(idx) = get_app_index(mouse_row) {
+                                    Message::SelectIndex(idx)
+                                } else {
+                                    Message::Tick
+                                }
+                            },
+                            // scrollin scrollin scrollin, keep that cursor rollin
+                            MouseEventKind::ScrollDown => {
+                                if mouse_row >= list_content_start && mouse_row < list_content_end && !state.shown.is_empty() {
+                                    let max_visible = max_visible_rows as usize;
+                                    if state.scroll_offset + max_visible < state.shown.len() {
+                                        state.scroll_offset += 1;
+                                        // snap cursor to wherever the mouse is chillin
+                                        let row_in_content = mouse_row - list_content_start;
+                                        let new_idx = state.scroll_offset + row_in_content as usize;
+                                        if new_idx < state.shown.len() {
+                                            state.selected = Some(new_idx);
+                                            state.update_info(cli.highlight_color, cli.fancy_mode, cli.verbose.unwrap_or(0));
+                                        }
                                     }
                                 }
-                                ui.filter(cli.match_mode);
-                                // Cursor stays put, app moves to top
-                            }
-                        }
-                    }
-                } else if cli.keybinds.matches_backspace(key.code, key.modifiers) {
-                    ui.query.pop();
-                    ui.filter(cli.match_mode);
-                } else if cli.keybinds.matches_left(key.code, key.modifiers) {
-                    if !ui.shown.is_empty() {
-                        ui.selected = Some(0);
-                    }
-                } else if cli.keybinds.matches_right(key.code, key.modifiers) {
-                    if !ui.shown.is_empty() {
-                        ui.selected = Some(ui.shown.len() - 1);
-                    }
-                } else if cli.keybinds.matches_down(key.code, key.modifiers) {
-                    if let Some(selected) = ui.selected {
-                        ui.selected = if selected < ui.shown.len() - 1 {
-                            Some(selected + 1)
-                        } else if !cli.hard_stop {
-                            Some(0)
-                        } else {
-                            Some(selected)
+                                Message::Tick
+                            },
+                            MouseEventKind::ScrollUp => {
+                                if mouse_row >= list_content_start && mouse_row < list_content_end && !state.shown.is_empty() && state.scroll_offset > 0 {
+                                    state.scroll_offset -= 1;
+                                    // same deal, keep cursor under mouse
+                                    let row_in_content = mouse_row - list_content_start;
+                                    let new_idx = state.scroll_offset + row_in_content as usize;
+                                    if new_idx < state.shown.len() {
+                                        state.selected = Some(new_idx);
+                                        state.update_info(cli.highlight_color, cli.fancy_mode, cli.verbose.unwrap_or(0));
+                                    }
+                                }
+                                Message::Tick
+                            },
+                            _ => Message::Tick,
                         };
 
-                        // Auto-scroll to keep selection visible
-                        if let Some(new_selected) = ui.selected {
-                            let total_height = terminal.size()?.height;
-                            let title_height = (total_height as f32
-                                * cli.title_panel_height_percent as f32
-                                / 100.0)
-                                .round() as u16;
-                            let input_height = cli.input_panel_height;
-                            let apps_panel_height = total_height - title_height - input_height;
-                            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for borders
-
-                            // Scroll down if selection is below visible area
-                            if new_selected >= ui.scroll_offset + max_visible {
-                                ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-                            }
-                            // Scroll up if selection is above visible area (happens when wrapping to top)
-                            else if new_selected < ui.scroll_offset {
-                                ui.scroll_offset = new_selected;
-                            }
-                        }
-                    }
-                } else if cli.keybinds.matches_up(key.code, key.modifiers) {
-                    if let Some(selected) = ui.selected {
-                        ui.selected = if selected > 0 {
-                            Some(selected - 1)
-                        } else if !cli.hard_stop {
-                            Some(ui.shown.len() - 1)
+                        if let Message::Tick = msg {
+                            // Don't update for ignored mouse events
                         } else {
-                            Some(selected)
-                        };
+                            crate::core::state::update(&mut state, msg, cli.hard_stop, max_visible_rows as usize);
 
-                        // Auto-scroll to keep selection visible
-                        if let Some(new_selected) = ui.selected {
-                            let total_height = terminal.size()?.height;
-                            let title_height = (total_height as f32
-                                * cli.title_panel_height_percent as f32
-                                / 100.0)
-                                .round() as u16;
-                            let input_height = cli.input_panel_height;
-                            let apps_panel_height = total_height - title_height - input_height;
-                            let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for borders
-
-                            // Scroll up if selection is above visible area
-                            if new_selected < ui.scroll_offset {
-                                ui.scroll_offset = new_selected;
-                            }
-                            // Scroll down if selection is below visible area (happens when wrapping to bottom)
-                            else if new_selected >= ui.scroll_offset + max_visible {
-                                ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-                            }
+                            // Post-update: Check text (update info)
+                            let fancy = cli.fancy_mode;
+                            state.update_info(cli.highlight_color, fancy, cli.verbose.unwrap_or(0));
                         }
-                    }
-                } else {
-                    // regular character input
-                    match (key.code, key.modifiers) {
-                        (KeyCode::Char(c), crossterm::event::KeyModifiers::NONE)
-                        | (KeyCode::Char(c), crossterm::event::KeyModifiers::SHIFT) => {
-                            ui.query.push(c);
-                            ui.filter(cli.match_mode);
-                        }
-                        _ => {}
                     }
                 }
-
-                ui.info(cli.highlight_color, cli.fancy_mode);
             }
-            Event::Mouse(mouse_event) => {
-                let mouse_row = mouse_event.row;
+        }
 
-                // Calculate panel positions based on title_panel_position
-                let total_height = terminal.size()?.height;
-                let title_height = (total_height as f32 * cli.title_panel_height_percent as f32
-                    / 100.0)
-                    .round() as u16;
-                let input_height = cli.input_panel_height;
-                let title_panel_position = cli
-                    .title_panel_position
-                    .unwrap_or(crate::cli::PanelPosition::Top);
+        if state.should_exit {
+            break;
+        }
 
-                // Calculate apps panel coordinates based on layout
-                let (apps_panel_start, apps_panel_height) = match title_panel_position {
-                    crate::cli::PanelPosition::Top => {
-                        // Top: title, apps, input - apps start after title
-                        (title_height, total_height - title_height - input_height)
-                    }
-                    crate::cli::PanelPosition::Middle => {
-                        // Middle: apps, title, input - apps start at top
-                        (0, total_height - title_height - input_height)
-                    }
-                    crate::cli::PanelPosition::Bottom => {
-                        // Bottom: apps, input, title - apps start at top
-                        (0, total_height - title_height - input_height)
-                    }
-                };
+        if state.should_launch {
+            if let Some(selected_idx) = state.selected {
+                 if let Some(app) = state.shown.get(selected_idx) {
+                     // Record access in frecency
+                     if let Err(e) = crate::core::database::record_access(&db, &app.name) {
+                         eprintln!("Failed to record access: {}", e);
+                     }
 
-                // List content area (inside the borders) - first item starts 1 row down from panel start
-                let list_content_start = apps_panel_start + 1; // +1 for top border
-                let max_visible_rows = apps_panel_height.saturating_sub(2); // -2 for top/bottom borders
-                let list_content_end = list_content_start + max_visible_rows;
-
-                let update_selection_for_mouse_pos = |ui: &mut UI, mouse_row: u16| {
-                    if !ui.shown.is_empty()
-                        && mouse_row >= list_content_start
-                        && mouse_row < list_content_end
-                    {
-                        let row_in_content = mouse_row - list_content_start;
-                        let hovered_app_index = ui.scroll_offset + row_in_content as usize;
-                        if hovered_app_index < ui.shown.len() {
-                            ui.selected = Some(hovered_app_index);
-                            ui.info(cli.highlight_color, cli.fancy_mode);
-                        }
-                    }
-                };
-
-                match mouse_event.kind {
-                    // Handle mouse movement for hover highlighting
-                    MouseEventKind::Moved => {
-                        update_selection_for_mouse_pos(&mut ui, mouse_row);
-                    }
-                    // Handle left mouse button clicks to launch
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        // Check if click is within the list content area
-                        if mouse_row >= list_content_start
-                            && mouse_row < list_content_end
-                            && !ui.shown.is_empty()
-                        {
-                            let row_in_content = mouse_row - list_content_start;
-                            let clicked_app_index = ui.scroll_offset + row_in_content as usize;
-
-                            if clicked_app_index < ui.shown.len() {
-                                ui.selected = Some(clicked_app_index);
-                                ui.info(cli.highlight_color, cli.fancy_mode);
-                                break; // Launch the clicked app
-                            }
-                        }
-                    }
-                    // Handle scroll wheel only when mouse is over the apps list
-                    MouseEventKind::ScrollUp => {
-                        if mouse_row >= list_content_start
-                            && mouse_row < list_content_end
-                            && !ui.shown.is_empty()
-                            && ui.scroll_offset > 0
-                        {
-                            ui.scroll_offset -= 1;
-                            update_selection_for_mouse_pos(&mut ui, mouse_row);
-                        }
-                    }
-                    MouseEventKind::ScrollDown => {
-                        if mouse_row >= list_content_start
-                            && mouse_row < list_content_end
-                            && !ui.shown.is_empty()
-                        {
-                            let max_visible = max_visible_rows as usize;
-                            if ui.scroll_offset + max_visible < ui.shown.len() {
-                                ui.scroll_offset += 1;
-                                update_selection_for_mouse_pos(&mut ui, mouse_row);
-                            }
-                        }
-                    }
-                    _ => {} // Ignore other mouse events
-                }
+                     crate::shutdown_terminal(cli.disable_mouse)?;
+                     
+                     // Launch
+                     // Handle --no-exec
+                     if cli.no_exec {
+                         println!("{}", app.command);
+                         return Ok(());
+                     }
+                     
+                     super::launch::launch_app(app, &cli, &db)?;
+                 }
             }
-            Event::Tick => {}
+            break;
         }
     }
 
-    // Clean terminal exit (defer handles the rest)
-    terminal.show_cursor().wrap_err("Failed to show cursor")?;
-
-    if let Some(selected) = ui.selected {
-        let app_to_run = &ui.shown[selected];
-
-        // Handle --no-exec: print command and exit cleanly
-        if cli.no_exec {
-            println!("{}", app_to_run.command);
-            return Ok(());
-        }
-
-        // launch the app
-        super::launch::launch_app(app_to_run, &cli, &db)?;
+    if !state.should_launch {
+        crate::shutdown_terminal(cli.disable_mouse)?;
     }
-
-    // Lock file cleanup is handled by LockGuard
+    
+    // Lock file cleanup handled by Guard
     Ok(())
 }

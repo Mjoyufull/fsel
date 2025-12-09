@@ -88,7 +88,7 @@ pub fn launch_app(
 
     exec.spawn()?;
 
-    // update history
+    // log it for history
     let value = app.history + 1;
     let write_txn = db.begin_write()?;
     {
@@ -96,6 +96,11 @@ pub fn launch_app(
         table.insert(app.name.as_str(), value)?;
     }
     write_txn.commit()?;
+
+    // Update frecency (modern usage tracking)
+    if let Err(e) = crate::core::database::record_access(db, &app.name) {
+        eprintln!("Warning: Failed to update frecency: {}", e);
+    }
 
     Ok(())
 }

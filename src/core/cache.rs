@@ -15,6 +15,7 @@ pub const NAME_INDEX_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new(
 pub const FILE_LIST_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("file_list_cache");
 pub const HISTORY_TABLE: TableDefinition<&str, u64> = TableDefinition::new("history");
 pub const PINNED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("pinned_apps");
+pub const FRECENCY_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("frecency");
 
 /// Cache entry for a desktop file
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,8 +39,9 @@ pub struct DesktopCache {
 struct FileListCache {
     /// List of all desktop file paths
     paths: Vec<PathBuf>,
-    /// Last time we scanned directories
-    last_scan: SystemTime,
+    /// Last modified times of the directories we scanned
+    /// Maps directory path -> mtime
+    dir_mtimes: HashMap<PathBuf, SystemTime>,
 }
 
 impl DesktopCache {
@@ -60,21 +62,47 @@ impl DesktopCache {
     }
 
     /// Get cached file list (avoids directory walk)
-    /// Returns None if cache is stale (older than 5 minutes)
+    /// Checks mtime of all `dirs` to ensure cache is fresh
     #[allow(dead_code)]
-    pub fn get_file_list(&self) -> Result<Option<Vec<PathBuf>>> {
+    pub fn get_file_list(&self, dirs: &[PathBuf]) -> Result<Option<Vec<PathBuf>>> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(FILE_LIST_TABLE)?;
 
         if let Some(data) = table.get("paths")? {
             if let Ok(cache) = bincode::deserialize::<FileListCache>(data.value()) {
-                // Check if cache is fresh (less than 5 minutes old)
-                if let Ok(elapsed) = SystemTime::now().duration_since(cache.last_scan) {
-                    if elapsed.as_secs() < 300 {
-                        // 5 minutes
-                        return Ok(Some(cache.paths));
+                // Check if any directory has been modified since we cached it
+                for dir in dirs {
+                    if let Some(cached_mtime) = cache.dir_mtimes.get(dir) {
+                        // Check current mtime
+                        if let Ok(metadata) = fs::metadata(dir) {
+                            if let Ok(current_mtime) = metadata.modified() {
+                                // If directory modified time is different, cache is stale
+                                // Note: We use != because mtime could be newer OR older (if restored from backup etc)
+                                // But usually it's newer.
+                                if current_mtime != *cached_mtime {
+                                    return Ok(None);
+                                }
+                            } else {
+                                // Can't read mtime, assume stale
+                                return Ok(None);
+                            }
+                        } else {
+                            // Directory might not exist anymore, assume stale
+                            return Ok(None);
+                        }
+                    } else {
+                        // Directory wasn't in our cache (new dir added to config?), assume stale
+                        return Ok(None);
                     }
                 }
+                
+                // Also check if we have extra directories in cache that are no longer requested
+                if cache.dir_mtimes.len() != dirs.len() {
+                    return Ok(None);
+                }
+
+                // All directories match and are unmodified!
+                return Ok(Some(cache.paths));
             }
         }
         Ok(None)
@@ -140,12 +168,21 @@ impl DesktopCache {
         Ok(())
     }
 
-    /// Store file list in cache
+    /// Store file list in cache along with directory mtimes
     #[allow(dead_code)]
-    pub fn set_file_list(&self, paths: Vec<PathBuf>) -> Result<()> {
+    pub fn set_file_list(&self, paths: Vec<PathBuf>, scanned_dirs: &[PathBuf]) -> Result<()> {
+        let mut dir_mtimes = HashMap::new();
+        for dir in scanned_dirs {
+            if let Ok(metadata) = fs::metadata(dir) {
+                if let Ok(mtime) = metadata.modified() {
+                    dir_mtimes.insert(dir.clone(), mtime);
+                }
+            }
+        }
+
         let cache = FileListCache {
             paths,
-            last_scan: SystemTime::now(),
+            dir_mtimes,
         };
         let data = bincode::serialize(&cache)?;
 

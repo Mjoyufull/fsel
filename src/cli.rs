@@ -1,7 +1,6 @@
-use directories::ProjectDirs;
-use serde::Deserialize;
-use std::str::FromStr;
-use std::{env, fs, io, path, process};
+#![allow(clippy::field_reassign_with_default)]
+use std::{env, path};
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum MatchMode {
@@ -97,6 +96,7 @@ Usage:
 │  ├─ --tag list                   List all tags
 │  ├─ --tag list <NAME>            List items with specific tag
 │  ├─ --tag clear                  Clear tag metadata from fsel database
+│  ├─ --tag wipe                   Wipe ALL tags from cclip entries (cclip 3.2+)
 │  └─ --cclip-show-tag-color-names Show tag color names in display
 │
 └─ General
@@ -199,6 +199,8 @@ pub struct Opts {
     pub cclip_tag_list: bool,
     /// Clear all tags and metadata
     pub cclip_clear_tags: bool,
+    /// Wipe ALL tags from cclip entries (cclip 3.2.0+)
+    pub cclip_wipe_tags: bool,
     /// App launcher settings
     pub filter_desktop: bool,
     pub list_executables_in_path: bool,
@@ -305,6 +307,7 @@ impl Default for Opts {
             cclip_tag: None,
             cclip_tag_list: false,
             cclip_clear_tags: false,
+            cclip_wipe_tags: false,
             // App launcher defaults
             filter_desktop: true,
             list_executables_in_path: false,
@@ -354,21 +357,192 @@ impl Default for Opts {
 /// Parses the cli arguments
 pub fn parse() -> Result<Opts, lexopt::Error> {
     use lexopt::prelude::*;
-    let mut parser = lexopt::Parser::from_env();
-    let mut default = Opts::default();
-    let mut config_file: Option<path::PathBuf> = None;
-
-    if let Ok(_socket) = env::var("SWAYSOCK") {
-        default.sway = true;
-    }
-
-    // Check if invoked as dmenu
-    if let Some(arg0) = env::args().next() {
-        if arg0.ends_with("dmenu") {
-            default.dmenu_mode = true;
+    
+    // 1. First pass to find config file location
+    let mut config_path_cli: Option<path::PathBuf> = None;
+    let mut args_for_config_check = env::args().skip(1);
+    while let Some(arg) = args_for_config_check.next() {
+        if arg == "-c" || arg == "--config" {
+            if let Some(val) = args_for_config_check.next() {
+                 config_path_cli = Some(path::PathBuf::from(val));
+            }
         }
     }
 
+    // 2. Load Config from Files / Env
+    let fsel_config = match crate::config::FselConfig::new(config_path_cli.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // 3. Initialize Opts with defaults from Config
+    #[allow(clippy::field_reassign_with_default)]
+    let mut default = Opts::default();
+    
+    // Map General Config
+    default.terminal_launcher = fsel_config.general.terminal_launcher;
+    default.filter_desktop = fsel_config.general.filter_desktop;
+    default.list_executables_in_path = fsel_config.general.list_executables_in_path;
+    default.hide_before_typing = fsel_config.general.hide_before_typing;
+    default.match_mode = match fsel_config.general.match_mode.as_str() {
+        "exact" => MatchMode::Exact,
+        _ => MatchMode::Fuzzy,
+    };
+    default.sway = fsel_config.general.sway;
+    default.systemd_run = fsel_config.general.systemd_run;
+    default.uwsm = fsel_config.general.uwsm;
+    default.detach = fsel_config.general.detach;
+    default.no_exec = fsel_config.general.no_exec;
+    default.confirm_first_launch = fsel_config.general.confirm_first_launch;
+
+    // apply [app_launcher] section overrides if they exist
+    if let Some(filter) = fsel_config.app_launcher.filter_desktop {
+        default.filter_desktop = filter;
+    }
+    if let Some(list_exec) = fsel_config.app_launcher.list_executables_in_path {
+        default.list_executables_in_path = list_exec;
+    }
+    if let Some(hide) = fsel_config.app_launcher.hide_before_typing {
+        default.hide_before_typing = hide;
+    }
+    if let Some(ref mode) = fsel_config.app_launcher.match_mode {
+        default.match_mode = match mode.as_str() {
+            "exact" => MatchMode::Exact,
+            _ => MatchMode::Fuzzy,
+        };
+    }
+    if let Some(confirm) = fsel_config.app_launcher.confirm_first_launch {
+        default.confirm_first_launch = confirm;
+    }
+
+    // Map UI Config
+    if let Ok(c) = string_to_color(&fsel_config.ui.highlight_color) { default.highlight_color = c; }
+    default.cursor = fsel_config.ui.cursor;
+    default.hard_stop = fsel_config.ui.hard_stop;
+    default.rounded_borders = fsel_config.ui.rounded_borders;
+    default.disable_mouse = fsel_config.ui.disable_mouse;
+    if let Ok(c) = string_to_color(&fsel_config.ui.main_border_color) { default.main_border_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.apps_border_color) { default.apps_border_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.input_border_color) { default.input_border_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.main_text_color) { default.main_text_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.apps_text_color) { default.apps_text_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.input_text_color) { default.input_text_color = c; }
+    default.fancy_mode = fsel_config.ui.fancy_mode;
+    if let Ok(c) = string_to_color(&fsel_config.ui.header_title_color) { default.header_title_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.pin_color) { default.pin_color = c; }
+    default.pin_icon = fsel_config.ui.pin_icon;
+    default.keybinds = fsel_config.ui.keybinds;
+
+    // Map Layout Config
+    default.title_panel_height_percent = fsel_config.layout.title_panel_height_percent;
+    default.input_panel_height = fsel_config.layout.input_panel_height;
+    default.title_panel_position = match fsel_config.layout.title_panel_position.to_lowercase().as_str() {
+        "bottom" => Some(PanelPosition::Bottom),
+        "middle" => Some(PanelPosition::Middle),
+        "top" => Some(PanelPosition::Top),
+        _ => None,
+    };
+    
+    // Map Dmenu Config
+    if let Some(d) = fsel_config.dmenu.delimiter { default.dmenu_delimiter = d; }
+    if let Some(c) = fsel_config.dmenu.password_character { default.dmenu_password_character = c; }
+    if let Some(show_line_numbers) = fsel_config.dmenu.show_line_numbers { default.dmenu_show_line_numbers = show_line_numbers; }
+    if let Some(wrap_long_lines) = fsel_config.dmenu.wrap_long_lines { default.dmenu_wrap_long_lines = wrap_long_lines; }
+    if let Some(exit_if_empty) = fsel_config.dmenu.exit_if_empty { default.dmenu_exit_if_empty = exit_if_empty; }
+    if let Some(disable_mouse) = fsel_config.dmenu.disable_mouse { default.dmenu_disable_mouse = Some(disable_mouse); }
+    if let Some(hard_stop) = fsel_config.dmenu.hard_stop { default.dmenu_hard_stop = Some(hard_stop); }
+    if let Some(rounded_borders) = fsel_config.dmenu.rounded_borders { default.dmenu_rounded_borders = Some(rounded_borders); }
+    if let Some(cursor) = fsel_config.dmenu.cursor { default.dmenu_cursor = Some(cursor); }
+    if let Some(color_str) = fsel_config.dmenu.highlight_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_highlight_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.dmenu.main_border_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_main_border_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.dmenu.items_border_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_items_border_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.dmenu.input_border_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_input_border_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.dmenu.main_text_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_main_text_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.dmenu.items_text_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_items_text_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.dmenu.input_text_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_input_text_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.dmenu.header_title_color {
+        if let Ok(c) = string_to_color(&color_str) { default.dmenu_header_title_color = Some(c); }
+    }
+    if let Some(height) = fsel_config.dmenu.title_panel_height_percent {
+        default.dmenu_title_panel_height_percent = Some(height);
+    }
+    if let Some(height) = fsel_config.dmenu.input_panel_height {
+        default.dmenu_input_panel_height = Some(height);
+    }
+    if let Some(position_str) = fsel_config.dmenu.title_panel_position {
+        default.dmenu_title_panel_position = match position_str.as_str() {
+            "bottom" => Some(PanelPosition::Bottom),
+            _ => None,
+        };
+    }
+
+    // Map Cclip Config
+    if let Some(image_preview) = fsel_config.cclip.image_preview { default.cclip_image_preview = Some(image_preview); }
+    if let Some(hide_inline_image_message) = fsel_config.cclip.hide_inline_image_message { default.cclip_hide_inline_image_message = Some(hide_inline_image_message); }
+    if let Some(show_tag_color_names) = fsel_config.cclip.show_tag_color_names { default.cclip_show_tag_color_names = Some(show_tag_color_names); }
+    if let Some(show_line_numbers) = fsel_config.cclip.show_line_numbers { default.cclip_show_line_numbers = Some(show_line_numbers); }
+    if let Some(wrap_long_lines) = fsel_config.cclip.wrap_long_lines { default.cclip_wrap_long_lines = Some(wrap_long_lines); }
+    if let Some(disable_mouse) = fsel_config.cclip.disable_mouse { default.cclip_disable_mouse = Some(disable_mouse); }
+    if let Some(hard_stop) = fsel_config.cclip.hard_stop { default.cclip_hard_stop = Some(hard_stop); }
+    if let Some(rounded_borders) = fsel_config.cclip.rounded_borders { default.cclip_rounded_borders = Some(rounded_borders); }
+    if let Some(cursor) = fsel_config.cclip.cursor { default.cclip_cursor = Some(cursor); }
+    if let Some(color_str) = fsel_config.cclip.highlight_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_highlight_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.cclip.main_border_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_main_border_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.cclip.items_border_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_items_border_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.cclip.input_border_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_input_border_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.cclip.main_text_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_main_text_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.cclip.items_text_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_items_text_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.cclip.input_text_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_input_text_color = Some(c); }
+    }
+    if let Some(color_str) = fsel_config.cclip.header_title_color {
+        if let Ok(c) = string_to_color(&color_str) { default.cclip_header_title_color = Some(c); }
+    }
+    if let Some(height) = fsel_config.cclip.title_panel_height_percent {
+        default.cclip_title_panel_height_percent = Some(height);
+    }
+    if let Some(height) = fsel_config.cclip.input_panel_height {
+        default.cclip_input_panel_height = Some(height);
+    }
+    if let Some(position_str) = fsel_config.cclip.title_panel_position {
+        default.cclip_title_panel_position = match position_str.as_str() {
+            "bottom" => Some(PanelPosition::Bottom),
+            _ => None,
+        };
+    }
+
+    // 4. Parse CLI Overrides
+    let mut parser = lexopt::Parser::from_env();
+    
     // Check for -ss option first and handle it specially
     let args: Vec<String> = env::args().collect();
     if let Some(ss_pos) = args.iter().position(|arg| arg == "-ss") {
@@ -390,6 +564,18 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
     }
 
+    // Check if invoked as dmenu (this should override config if present)
+    if let Some(arg0) = env::args().next() {
+        if arg0.ends_with("dmenu") {
+            default.dmenu_mode = true;
+        }
+    }
+
+    // Check for SWAYSOCK (this should override config if present)
+    if let Ok(_socket) = env::var("SWAYSOCK") {
+        default.sway = true;
+    }
+
     while let Some(arg) = parser.next()? {
         match arg {
             Short('s') | Long("nosway") => {
@@ -399,7 +585,8 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 default.replace = true;
             }
             Short('c') | Long("config") => {
-                config_file = Some(path::PathBuf::from(parser.value()?));
+                 // Already handled in pre-pass, but consume it
+                 let _ = parser.value()?;
             }
             Long("clear-history") => {
                 default.clear_history = true;
@@ -444,6 +631,8 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                     }
                 } else if tag_arg == "clear" {
                     default.cclip_clear_tags = true;
+                } else if tag_arg == "wipe" {
+                    default.cclip_wipe_tags = true;
                 } else {
                     default.cclip_tag = Some(tag_arg);
                 }
@@ -644,442 +833,6 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
     }
 
-    let mut file_conf: Option<FileConf> = None;
-
-    // Read config file: First command line, then config dir
-    {
-        if config_file.is_none() {
-            if let Some(proj_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
-                let mut tmp = proj_dirs.config_dir().to_path_buf();
-                tmp.push("config.toml");
-                config_file = Some(tmp);
-            }
-        }
-
-        if let Some(f) = config_file {
-            match fs::read_to_string(&f) {
-                Ok(content) => match FileConf::read_with_enhanced_errors(&content) {
-                    Ok(conf) => {
-                        file_conf = Some(conf);
-                    }
-                    Err(e) => {
-                        println!("Error reading config file {}:\n{}", f.display(), e);
-                        process::exit(1);
-                    }
-                },
-                Err(e) => {
-                    if io::ErrorKind::NotFound == e.kind() {
-                        // Config file doesn't exist, create a default one
-                        if let Some(parent) = f.parent() {
-                            if let Err(mkdir_err) = fs::create_dir_all(parent) {
-                                println!(
-                                    "Warning: Could not create config directory {}: {}",
-                                    parent.display(),
-                                    mkdir_err
-                                );
-                            } else {
-                                // Create default config
-                                let default_config = include_str!("../config.toml");
-                                if let Err(write_err) = fs::write(&f, default_config) {
-                                    println!(
-                                        "Warning: Could not create default config file {}: {}",
-                                        f.display(),
-                                        write_err
-                                    );
-                                } else {
-                                    println!("Created default config file: {}", f.display());
-
-                                    // Also create default keybinds.toml for reference
-                                    let mut keybinds_path = f.clone();
-                                    keybinds_path.set_file_name("keybinds.toml");
-                                    let default_keybinds = include_str!("../keybinds.toml");
-                                    if let Err(keybind_err) =
-                                        fs::write(&keybinds_path, default_keybinds)
-                                    {
-                                        println!("Warning: Could not create default keybinds file {}: {}", keybinds_path.display(), keybind_err);
-                                    } else {
-                                        println!(
-                                            "Created default keybinds file: {}",
-                                            keybinds_path.display()
-                                        );
-                                    }
-
-                                    // Try to read the newly created config
-                                    if let Ok(content) = fs::read_to_string(&f) {
-                                        if let Ok(conf) =
-                                            FileConf::read_with_enhanced_errors(&content)
-                                        {
-                                            file_conf = Some(conf);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        println!("Error reading config file {}:\n\t{}", f.display(), e);
-                        process::exit(1);
-                    }
-                }
-            }
-        }
-    }
-
-    let file_conf = file_conf.unwrap_or_default();
-
-    if let Some(color) = file_conf.highlight_color {
-        match string_to_color(color) {
-            Ok(color) => default.highlight_color = color,
-            Err(e) => {
-                // Improve error messages in future version
-                eprintln!("Error parsing config file: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
-
-    if let Some(command) = file_conf.terminal_launcher {
-        default.terminal_launcher = command;
-    }
-
-    if let Some(c) = file_conf.cursor {
-        default.cursor = c;
-    }
-
-    if let Some(h) = file_conf.hard_stop {
-        default.hard_stop = h;
-    }
-
-    if let Some(rb) = file_conf.rounded_borders {
-        default.rounded_borders = rb;
-    }
-
-    if let Some(dm) = file_conf.disable_mouse {
-        default.disable_mouse = dm;
-    }
-
-    // Parse border colors
-    if let Some(color) = file_conf.main_border_color {
-        match string_to_color(color) {
-            Ok(c) => default.main_border_color = c,
-            Err(_) => eprintln!("Warning: Invalid main_border_color in config"),
-        }
-    }
-    if let Some(color) = file_conf.apps_border_color {
-        match string_to_color(color) {
-            Ok(c) => default.apps_border_color = c,
-            Err(_) => eprintln!("Warning: Invalid apps_border_color in config"),
-        }
-    }
-    if let Some(color) = file_conf.input_border_color {
-        match string_to_color(color) {
-            Ok(c) => default.input_border_color = c,
-            Err(_) => eprintln!("Warning: Invalid input_border_color in config"),
-        }
-    }
-
-    // Parse text colors
-    if let Some(color) = file_conf.main_text_color {
-        match string_to_color(color) {
-            Ok(c) => default.main_text_color = c,
-            Err(_) => eprintln!("Warning: Invalid main_text_color in config"),
-        }
-    }
-    if let Some(color) = file_conf.apps_text_color {
-        match string_to_color(color) {
-            Ok(c) => default.apps_text_color = c,
-            Err(_) => eprintln!("Warning: Invalid apps_text_color in config"),
-        }
-    }
-    if let Some(color) = file_conf.input_text_color {
-        match string_to_color(color) {
-            Ok(c) => default.input_text_color = c,
-            Err(_) => eprintln!("Warning: Invalid input_text_color in config"),
-        }
-    }
-
-    if let Some(fm) = file_conf.fancy_mode {
-        default.fancy_mode = fm;
-    }
-
-    if let Some(color) = file_conf.header_title_color {
-        match string_to_color(color) {
-            Ok(c) => default.header_title_color = c,
-            Err(_) => eprintln!("Warning: Invalid header_title_color in config"),
-        }
-    }
-
-    if let Some(color) = file_conf.pin_color {
-        match string_to_color(color) {
-            Ok(c) => default.pin_color = c,
-            Err(_) => eprintln!("Warning: Invalid pin_color in config"),
-        }
-    }
-
-    if let Some(icon) = file_conf.pin_icon {
-        default.pin_icon = icon;
-    }
-
-    if let Some(keybinds) = file_conf.keybinds {
-        default.keybinds = keybinds;
-    }
-
-    // Parse layout configuration with validation
-    if let Some(height) = file_conf.title_panel_height_percent {
-        if (10..=70).contains(&height) {
-            default.title_panel_height_percent = height;
-        } else {
-            eprintln!("Warning: title_panel_height_percent must be between 10-70%, using default");
-        }
-    }
-    if let Some(height) = file_conf.input_panel_height {
-        if (1..=10).contains(&height) {
-            default.input_panel_height = height;
-        } else {
-            eprintln!("Warning: input_panel_height must be between 1-10 lines, using default");
-        }
-    }
-    if let Some(position) = file_conf.title_panel_position {
-        default.title_panel_position = Some(position);
-    }
-
-    // Load dmenu configuration if present
-    if let Some(dmenu_conf) = &file_conf.dmenu {
-        if let Some(color) = &dmenu_conf.highlight_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_highlight_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu highlight_color in config"),
-            }
-        }
-        if let Some(cursor) = &dmenu_conf.cursor {
-            default.dmenu_cursor = Some(cursor.clone());
-        }
-        if let Some(hard_stop) = dmenu_conf.hard_stop {
-            default.dmenu_hard_stop = Some(hard_stop);
-        }
-        if let Some(rounded_borders) = dmenu_conf.rounded_borders {
-            default.dmenu_rounded_borders = Some(rounded_borders);
-        }
-
-        // Load dmenu border colors
-        if let Some(color) = &dmenu_conf.main_border_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_main_border_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu main_border_color in config"),
-            }
-        }
-        if let Some(color) = &dmenu_conf.items_border_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_items_border_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu items_border_color in config"),
-            }
-        }
-        if let Some(color) = &dmenu_conf.input_border_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_input_border_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu input_border_color in config"),
-            }
-        }
-
-        // Load dmenu text colors
-        if let Some(color) = &dmenu_conf.main_text_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_main_text_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu main_text_color in config"),
-            }
-        }
-        if let Some(color) = &dmenu_conf.items_text_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_items_text_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu items_text_color in config"),
-            }
-        }
-        if let Some(color) = &dmenu_conf.input_text_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_input_text_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu input_text_color in config"),
-            }
-        }
-        if let Some(color) = &dmenu_conf.header_title_color {
-            match string_to_color(color) {
-                Ok(c) => default.dmenu_header_title_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid dmenu header_title_color in config"),
-            }
-        }
-
-        // Load dmenu layout
-        if let Some(height) = dmenu_conf.title_panel_height_percent {
-            if (10..=70).contains(&height) {
-                default.dmenu_title_panel_height_percent = Some(height);
-            } else {
-                eprintln!("Warning: dmenu title_panel_height_percent must be between 10-70%, using default");
-            }
-        }
-        if let Some(height) = dmenu_conf.input_panel_height {
-            if (1..=10).contains(&height) {
-                default.dmenu_input_panel_height = Some(height);
-            } else {
-                eprintln!(
-                    "Warning: dmenu input_panel_height must be between 1-10 lines, using default"
-                );
-            }
-        }
-        if let Some(position) = &dmenu_conf.title_panel_position {
-            default.dmenu_title_panel_position = Some(*position);
-        }
-
-        // Load other dmenu options
-        if let Some(delimiter) = &dmenu_conf.delimiter {
-            default.dmenu_delimiter = delimiter.clone();
-        }
-        if let Some(show_line_numbers) = dmenu_conf.show_line_numbers {
-            default.dmenu_show_line_numbers = show_line_numbers;
-        }
-        if let Some(wrap_long_lines) = dmenu_conf.wrap_long_lines {
-            default.dmenu_wrap_long_lines = wrap_long_lines;
-        }
-        if let Some(disable_mouse) = dmenu_conf.disable_mouse {
-            default.dmenu_disable_mouse = Some(disable_mouse);
-        }
-        if let Some(password_char) = &dmenu_conf.password_character {
-            default.dmenu_password_character = password_char.clone();
-        }
-        if let Some(exit_if_empty) = dmenu_conf.exit_if_empty {
-            default.dmenu_exit_if_empty = exit_if_empty;
-        }
-    }
-
-    // Load app launcher configuration if present
-    if let Some(app_conf) = &file_conf.app_launcher {
-        if let Some(filter_desktop) = app_conf.filter_desktop {
-            default.filter_desktop = filter_desktop;
-        }
-        if let Some(list_execs) = app_conf.list_executables_in_path {
-            default.list_executables_in_path = list_execs;
-        }
-        if let Some(hide_before) = app_conf.hide_before_typing {
-            default.hide_before_typing = hide_before;
-        }
-        if let Some(mode_str) = &app_conf.match_mode {
-            default.match_mode = match mode_str.as_str() {
-                "exact" => MatchMode::Exact,
-                "fuzzy" => MatchMode::Fuzzy,
-                _ => {
-                    eprintln!("Warning: Invalid match_mode in config, using default");
-                    MatchMode::Fuzzy
-                }
-            };
-        }
-        if let Some(confirm) = app_conf.confirm_first_launch {
-            default.confirm_first_launch = confirm;
-        }
-    }
-
-    // Load cclip configuration if present
-    if let Some(cclip_conf) = &file_conf.cclip {
-        if let Some(color) = &cclip_conf.highlight_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_highlight_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip highlight_color in config"),
-            }
-        }
-        if let Some(cursor) = &cclip_conf.cursor {
-            default.cclip_cursor = Some(cursor.clone());
-        }
-        if let Some(hard_stop) = cclip_conf.hard_stop {
-            default.cclip_hard_stop = Some(hard_stop);
-        }
-        if let Some(rounded_borders) = cclip_conf.rounded_borders {
-            default.cclip_rounded_borders = Some(rounded_borders);
-        }
-
-        // Load cclip border colors
-        if let Some(color) = &cclip_conf.main_border_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_main_border_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip main_border_color in config"),
-            }
-        }
-        if let Some(color) = &cclip_conf.items_border_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_items_border_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip items_border_color in config"),
-            }
-        }
-        if let Some(color) = &cclip_conf.input_border_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_input_border_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip input_border_color in config"),
-            }
-        }
-
-        // Load cclip text colors
-        if let Some(color) = &cclip_conf.main_text_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_main_text_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip main_text_color in config"),
-            }
-        }
-        if let Some(color) = &cclip_conf.items_text_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_items_text_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip items_text_color in config"),
-            }
-        }
-        if let Some(color) = &cclip_conf.input_text_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_input_text_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip input_text_color in config"),
-            }
-        }
-        if let Some(color) = &cclip_conf.header_title_color {
-            match string_to_color(color) {
-                Ok(c) => default.cclip_header_title_color = Some(c),
-                Err(_) => eprintln!("Warning: Invalid cclip header_title_color in config"),
-            }
-        }
-
-        // Load cclip layout
-        if let Some(height) = cclip_conf.title_panel_height_percent {
-            if (10..=70).contains(&height) {
-                default.cclip_title_panel_height_percent = Some(height);
-            } else {
-                eprintln!("Warning: cclip title_panel_height_percent must be between 10-70%, using default");
-            }
-        }
-        if let Some(height) = cclip_conf.input_panel_height {
-            if (1..=10).contains(&height) {
-                default.cclip_input_panel_height = Some(height);
-            } else {
-                eprintln!(
-                    "Warning: cclip input_panel_height must be between 1-10 lines, using default"
-                );
-            }
-        }
-        if let Some(position) = &cclip_conf.title_panel_position {
-            default.cclip_title_panel_position = Some(*position);
-        }
-
-        // Load other cclip options
-        if let Some(show_line_numbers) = cclip_conf.show_line_numbers {
-            default.cclip_show_line_numbers = Some(show_line_numbers);
-        }
-        if let Some(wrap_long_lines) = cclip_conf.wrap_long_lines {
-            default.cclip_wrap_long_lines = Some(wrap_long_lines);
-        }
-        if let Some(image_preview) = cclip_conf.image_preview {
-            default.cclip_image_preview = Some(image_preview);
-        }
-        if let Some(hide_message) = cclip_conf.hide_inline_image_message {
-            default.cclip_hide_inline_image_message = Some(hide_message);
-        }
-        if let Some(disable_mouse) = cclip_conf.disable_mouse {
-            default.cclip_disable_mouse = Some(disable_mouse);
-        }
-        if let Some(show_color_names) = cclip_conf.show_tag_color_names {
-            default.cclip_show_tag_color_names = Some(show_color_names);
-        }
-    }
-
     // Validate mutually exclusive options
     if default.program.is_some() && default.search_string.is_some() {
         eprintln!("Error: Cannot use -p/--program and -ss together");
@@ -1158,298 +911,8 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     Ok(default)
 }
 
-/// Title panel position
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum PanelPosition {
-    /// Panel at the top (default behavior)
-    #[default]
-    Top,
-    /// Panel in the middle (where results/apps usually are)
-    Middle,
-    /// Panel at the bottom (above input field)
-    Bottom,
-}
-
-impl FromStr for PanelPosition {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "top" => Ok(PanelPosition::Top),
-            "middle" => Ok(PanelPosition::Middle),
-            "bottom" => Ok(PanelPosition::Bottom),
-            _ => Err(format!(
-                "Invalid panel position: '{}'. Valid options: top, middle, bottom",
-                s
-            )),
-        }
-    }
-}
-
-/// File configuration, parsed with [serde]
-///
-/// [serde]: serde
-#[derive(Debug, Deserialize, Default)]
-pub struct FileConf {
-    /// Highlight color used in the UI
-    pub highlight_color: Option<String>,
-    /// Command to run Terminal=true apps
-    pub terminal_launcher: Option<String>,
-    /// Cursor character for the search
-    pub cursor: Option<String>,
-    /// Don't scroll past the last/first item
-    pub hard_stop: Option<bool>,
-    /// Disable mouse input in all modes
-    pub disable_mouse: Option<bool>,
-    /// Use rounded borders (default: true)
-    pub rounded_borders: Option<bool>,
-    /// Border color for the main panel (Fsel)
-    pub main_border_color: Option<String>,
-    /// Border color for the apps panel
-    pub apps_border_color: Option<String>,
-    /// Border color for the input panel
-    pub input_border_color: Option<String>,
-    /// Text color for the main panel
-    pub main_text_color: Option<String>,
-    /// Text color for the apps panel
-    pub apps_text_color: Option<String>,
-    /// Text color for the input panel
-    pub input_text_color: Option<String>,
-    /// Enable fancy mode (show selected app name in borders)
-    pub fancy_mode: Option<bool>,
-    /// Color for panel header titles
-    pub header_title_color: Option<String>,
-    /// Color for pin icon
-    pub pin_color: Option<String>,
-    /// Pin icon character
-    pub pin_icon: Option<String>,
-    /// Keybinds configuration
-    pub keybinds: Option<crate::ui::Keybinds>,
-    /// Title panel height percentage (10-70%)
-    pub title_panel_height_percent: Option<u16>,
-    /// Input panel height in lines
-    pub input_panel_height: Option<u16>,
-    /// Position of the title/content/description panel (top, middle, bottom)
-    pub title_panel_position: Option<PanelPosition>,
-    /// Dmenu-specific configuration
-    pub dmenu: Option<DmenuConf>,
-    /// Cclip-specific configuration
-    pub cclip: Option<CclipConf>,
-    /// App launcher-specific configuration
-    pub app_launcher: Option<AppLauncherConf>,
-}
-
-/// Dmenu-specific configuration section
-#[derive(Debug, Deserialize, Default)]
-pub struct DmenuConf {
-    /// Highlight color used in dmenu mode
-    pub highlight_color: Option<String>,
-    /// Cursor character for dmenu search
-    pub cursor: Option<String>,
-    /// Don't scroll past the last/first item in dmenu
-    pub hard_stop: Option<bool>,
-    /// Use rounded borders in dmenu (default: true)
-    pub rounded_borders: Option<bool>,
-    /// Border colors for dmenu mode
-    pub main_border_color: Option<String>,
-    pub items_border_color: Option<String>,
-    pub input_border_color: Option<String>,
-    /// Text colors for dmenu mode
-    pub main_text_color: Option<String>,
-    pub items_text_color: Option<String>,
-    pub input_text_color: Option<String>,
-    /// Color for panel header titles in dmenu
-    pub header_title_color: Option<String>,
-    /// Layout configuration for dmenu
-    pub title_panel_height_percent: Option<u16>,
-    pub input_panel_height: Option<u16>,
-    /// Position of the content panel (top, middle, bottom)
-    pub title_panel_position: Option<PanelPosition>,
-    /// Default delimiter for column parsing
-    pub delimiter: Option<String>,
-    /// Show line numbers in selection
-    pub show_line_numbers: Option<bool>,
-    /// Wrap long lines in content display
-    pub wrap_long_lines: Option<bool>,
-    /// Disable mouse input in dmenu mode
-    pub disable_mouse: Option<bool>,
-    pub password_character: Option<String>,
-    pub exit_if_empty: Option<bool>,
-}
-
-/// Cclip-specific configuration section (inherits from dmenu, then regular mode)
-#[derive(Debug, Deserialize, Default)]
-pub struct CclipConf {
-    /// Highlight color used in cclip mode
-    pub highlight_color: Option<String>,
-    /// Cursor character for cclip search
-    pub cursor: Option<String>,
-    /// Don't scroll past the last/first item in cclip
-    pub hard_stop: Option<bool>,
-    /// Use rounded borders in cclip (default: true)
-    pub rounded_borders: Option<bool>,
-    /// Border colors for cclip mode
-    pub main_border_color: Option<String>,
-    pub items_border_color: Option<String>,
-    pub input_border_color: Option<String>,
-    /// Text colors for cclip mode
-    pub main_text_color: Option<String>,
-    pub items_text_color: Option<String>,
-    pub input_text_color: Option<String>,
-    /// Color for panel header titles in cclip
-    pub header_title_color: Option<String>,
-    /// Layout configuration for cclip
-    pub title_panel_height_percent: Option<u16>,
-    pub input_panel_height: Option<u16>,
-    /// Position of the content preview panel (top, middle, bottom)
-    pub title_panel_position: Option<PanelPosition>,
-    /// Show line numbers in selection
-    pub show_line_numbers: Option<bool>,
-    /// Wrap long lines in content display
-    pub wrap_long_lines: Option<bool>,
-    /// Enable image previews using chafa
-    pub image_preview: Option<bool>,
-    /// Hide the inline image preview message (show blank instead)
-    pub hide_inline_image_message: Option<bool>,
-    /// Disable mouse input in cclip mode
-    pub disable_mouse: Option<bool>,
-    /// Show tag color names next to tags in the item list
-    pub show_tag_color_names: Option<bool>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct AppLauncherConf {
-    pub filter_desktop: Option<bool>,
-    pub list_executables_in_path: Option<bool>,
-    pub hide_before_typing: Option<bool>,
-    pub match_mode: Option<String>,
-    pub confirm_first_launch: Option<bool>,
-}
-
-impl FileConf {
-    /// Parse a file with enhanced error reporting
-    pub fn read_with_enhanced_errors(raw: &str) -> Result<Self, String> {
-        match toml::from_str::<Self>(raw) {
-            Ok(config) => Ok(config),
-            Err(e) => {
-                let error_msg = e.message();
-
-                // Duplicate key/table handling with actionable guidance
-                if error_msg.contains("duplicate key")
-                    || error_msg.contains("duplicate field")
-                    || error_msg.contains("redefinition of table")
-                {
-                    // Try to extract the duplicated key if present in backticks
-                    let duplicated = error_msg.find('`').and_then(|start| {
-                        let rest = &error_msg[start + 1..];
-                        rest.find('`').map(|end| &rest[..end])
-                    });
-
-                    let mut msg = String::from("Config Error: Duplicate setting detected");
-                    if let Some(key) = duplicated {
-                        msg.push_str(&format!("\nKey: '{}'", key));
-                    }
-
-                    msg.push_str(
-                        "\n\nEach key can appear at most once within the same section.\n\
-If you want to set a key for multiple modes, define it under distinct sections:\n\
-  - [dmenu] → keys for dmenu mode\n\
-  - [cclip] → keys for cclip mode\n\
-  - root (top-level) → defaults for all modes\n\
-Avoid repeating the same section multiple times; merge options under a single [dmenu] or [cclip].",
-                    );
-
-                    return Err(msg);
-                }
-
-                // Check if it's an unknown field error and provide helpful guidance
-                if error_msg.contains("unknown field") {
-                    let enhanced_msg = Self::enhance_unknown_field_error(error_msg);
-                    Err(enhanced_msg)
-                } else {
-                    Err(error_msg.to_string())
-                }
-            }
-        }
-    }
-
-    fn enhance_unknown_field_error(original_error: &str) -> String {
-        // Extract the unknown field name from the error message
-        let unknown_field = original_error.find("unknown field `").and_then(|start| {
-            let start = start + "unknown field `".len();
-            original_error[start..]
-                .find('`')
-                .map(|end| &original_error[start..start + end])
-        });
-
-        // Determine section and provide targeted help
-        if original_error.contains("expected one of") && original_error.contains("filter_desktop") {
-            let mut result = String::from("Config Error: Invalid field in [app_launcher] section");
-
-            if let Some(field) = unknown_field {
-                // Check if it's a color/UI field that belongs at root level
-                let root_level_fields = [
-                    "main_border_color",
-                    "apps_border_color",
-                    "input_border_color",
-                    "main_text_color",
-                    "apps_text_color",
-                    "input_text_color",
-                    "highlight_color",
-                    "header_title_color",
-                    "pin_color",
-                    "pin_icon",
-                    "cursor",
-                    "rounded_borders",
-                    "hard_stop",
-                    "fancy_mode",
-                    "terminal_launcher",
-                ];
-
-                if root_level_fields.contains(&field) {
-                    result.push_str(&format!("\n\n'{}' belongs at ROOT LEVEL", field));
-                    result.push_str("\nMove it outside [app_launcher] section");
-                } else {
-                    result.push_str(&format!("\n\n'{}' is not a valid field", field));
-                }
-            }
-
-            result.push_str("\n\n[app_launcher] accepts:");
-            result.push_str("\n  filter_desktop, list_executables_in_path,");
-            result.push_str("\n  hide_before_typing, match_mode, confirm_first_launch");
-
-            result
-        } else if original_error.contains("expected one of") && original_error.contains("delimiter")
-        {
-            format!(
-                "Config Error: Invalid field in [dmenu] section{}",
-                if let Some(field) = unknown_field {
-                    format!("\n'{}' is not valid here", field)
-                } else {
-                    String::new()
-                }
-            )
-        } else if original_error.contains("expected one of")
-            && original_error.contains("image_preview")
-        {
-            format!(
-                "Config Error: Invalid field in [cclip] section{}",
-                if let Some(field) = unknown_field {
-                    format!("\n'{}' is not valid here", field)
-                } else {
-                    String::new()
-                }
-            )
-        } else {
-            format!(
-                "{}\n\nTip: Color/UI options go at root level",
-                original_error
-            )
-        }
-    }
-}
+// Re-export PanelPosition from ui module for backwards compatibility
+pub use crate::ui::PanelPosition;
 
 /// Parses a [String] into a ratatui [color]
 ///

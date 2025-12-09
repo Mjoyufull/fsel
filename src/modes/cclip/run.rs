@@ -35,7 +35,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     // Check if cclip database is accessible
     super::scan::check_cclip_database().wrap_err("cclip database check failed")?;
 
-    // Handle clear tags mode
+    // Handle clear tags mode (fsel metadata only)
     if cli.cclip_clear_tags {
         let (db, _) = crate::core::database::open_history_db()?;
 
@@ -49,11 +49,30 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
         println!("Cleared all tag metadata from fsel database");
         println!();
-        println!("Note: To clear tags from cclip entries, use:");
-        println!("  cclip tag -d <ID>     # Clear all tags from specific entry");
-        println!("  cclip wipe -t         # Delete all entries (including tagged)");
+        println!("Note: To wipe tags from cclip entries too, use:");
+        println!("  fsel --cclip --tag wipe");
         return Ok(());
     }
+
+    // Handle wipe tags mode (cclip + fsel metadata)
+    if cli.cclip_wipe_tags {
+        // First wipe cclip tags
+        super::select::wipe_all_tags().wrap_err("Failed to wipe cclip tags")?;
+        println!("Wiped all tags from cclip entries");
+
+        // Also clear fsel metadata
+        let (db, _) = crate::core::database::open_history_db()?;
+        let write_txn = db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(super::TAG_METADATA_TABLE)?;
+            let _ = table.remove("tag_metadata");
+        }
+        write_txn.commit()?;
+        println!("Cleared all tag metadata from fsel database");
+
+        return Ok(());
+    }
+
 
     // Handle tag list mode
     if cli.cclip_tag_list {
@@ -941,8 +960,20 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             if selected < ui.shown.len() {
                                 let item = &ui.shown[selected];
                                 if ui.display_image_to_terminal(item) {
-                                    use crossterm::event::read;
-                                    let _ = read();
+                                    // Loop to keep image displayed until Esc/q is pressed
+                                    loop {
+                                        // Use the SAME input channel as the main loop to prevent buffering/race conditions
+                                        if let Ok(crate::ui::InputEvent::Input(key_event)) = input.next() {
+                                            match (key_event.code, key_event.modifiers) {
+                                                (KeyCode::Esc, _)
+                                                | (KeyCode::Char('q'), _)
+                                                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                                                _ => {} // Ignore all other keys
+                                            }
+                                        }
+                                        // Small sleep to prevent tight loop if channel is empty (though next() blocks)
+                                        // actually input.next() blocks so we don't need sleep
+                                    }
                                     terminal.clear().wrap_err("Failed to clear terminal")?;
                                     // Reset display state to force refresh of inline preview when returning
                                     if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
@@ -1976,6 +2007,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 }
             }
             Event::Tick => {}
+            Event::Render => {} // Handled by draw loop
         }
     }
 }
