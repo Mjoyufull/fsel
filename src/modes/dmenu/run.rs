@@ -720,6 +720,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                 }
             }
             Event::Tick => {}
+            Event::Render => {} // Handled by draw loop
         }
     }
 }

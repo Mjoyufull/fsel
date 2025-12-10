@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.3.0-seedclay
+    $ cargo install fsel@2.4.0-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.3.0-seedclay --force
+    $ cargo install fsel@2.4.0-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -161,7 +161,7 @@ Run `fsel` from a terminal to open the interactive TUI launcher.
 #### Features
 
 - **Smart Matching**: Searches names, descriptions, keywords, and categories
-- **Usage History**: Frequently used apps appear higher in results
+- **Smart Ranking**: Apps ranked by frequency and recent usage
 - **Desktop Filtering**: Respects `OnlyShowIn`/`NotShowIn` fields
 - **PATH Executables**: Optionally show CLI tools from `$PATH`
 - **Match Modes**: Fuzzy (default) or exact matching
@@ -340,44 +340,60 @@ See [USAGE.md](./USAGE.md) for more examples and advanced usage.
 ### Command Line Options
 
 ```
-Usage: fsel [options]
+Usage:
+  fsel [OPTIONS]
 
-Core Modes:
-  -p, --program <name>   Launch program directly (bypass TUI)
-      --cclip            Clipboard history mode
-      --dmenu            Dmenu-compatible mode
-
-Control Flags:
-  -r, --replace          Replace running fsel or cclip instance
-  -d, --detach           Detach launched applications (works with uwsm/systemd-run)
-  -v, --verbose          Increase verbosity (repeatable)
-      --systemd-run      Launch via systemd-run --user --scope
-      --uwsm             Launch via uwsm app
-      --no-exec          Print selected command instead of launching
-  -ss <search>           Pre-fill search (must be last option)
-
-Quick Extras:
-      --clear-history    Clear launch history database
-      --clear-cache      Clear cached desktop entries
-      --refresh-cache    Refresh desktop file list
-      --filter-desktop[=no] Respect OnlyShowIn/NotShowIn (default: yes)
-      --list-executables-in-path Include executables from $PATH
-      --hide-before-typing Hide list until input typed
-      --match-mode <mode> fuzzy | exact (default: fuzzy)
-
-Clipboard Mode Options:
-      --tag <name>       Filter clipboard items by tag
-      --tag list         List all tags
-      --tag list <name>  List items with specific tag
-      --tag clear        Clear tag metadata from fsel database
-      --cclip-show-tag-color-names Show tag color names in display
-
-Help:
-  -H, --help             Show detailed option tree (same as `fsel -H`)
-  -h                     Show concise overview
-  -V, --version          Show version number and exit
-
-Run `fsel -H` or `fsel --help` to see the full tree-style reference covering every dmenu and clipboard flag.
+├─ Core Modes
+│  ├─ -p, --program <NAME>         Launch program directly (bypass TUI)
+│  ├─ --cclip                      Clipboard history mode
+│  └─ --dmenu                      Dmenu-compatible mode
+│
+├─ Control Flags
+│  ├─ -r, --replace                Replace running fsel/cclip instance
+│  ├─ -d, --detach                 Detach launched applications (GUI-safe)
+│  ├─ -v, --verbose                Increase verbosity (repeatable)
+│  ├─ --systemd-run                Launch via systemd-run --user --scope
+│  ├─ --uwsm                       Launch via uwsm app
+│  ├─ --no-exec                    Print selection to stdout instead of launching
+│  └─ -ss <SEARCH>                 Pre-fill TUI search (must be last option)
+│
+├─ Quick Extras
+│  ├─ --clear-history              Clear launch history
+│  ├─ --clear-cache                Clear app cache
+│  ├─ --refresh-cache              Rescan desktop entries
+│  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn (default: yes)
+│  ├─ --hide-before-typing         Hide list until first character typed
+│  ├─ --list-executables-in-path   Include executables from $PATH
+│  └─ --match-mode <MODE>          fuzzy | exact (default: fuzzy)
+│
+├─ Dmenu Mode Options
+│  ├─ --dmenu0                     Like --dmenu but null-separated input
+│  ├─ --password[=CHAR]            Password mode (mask input)
+│  ├─ --index                      Output index instead of text
+│  ├─ --with-nth <COLS>            Display only specific columns (e.g. 1,3)
+│  ├─ --accept-nth <COLS>          Output only specified columns
+│  ├─ --match-nth <COLS>           Match only specified columns
+│  ├─ --delimiter <CHAR>           Column delimiter (default: space)
+│  ├─ --only-match                 Disallow custom input
+│  ├─ --exit-if-empty              Exit if stdin is empty
+│  ├─ --select <STRING>            Preselect matching entry
+│  ├─ --select-index <N>           Preselect entry by index
+│  ├─ --auto-select                Auto-select when one match remains
+│  └─ --prompt-only                Input-only mode (no list)
+│
+├─ Clipboard Mode Options
+│  ├─ --cclip                      Clipboard history viewer with previews
+│  ├─ --tag <NAME>                 Filter clipboard items by tag
+│  ├─ --tag list                   List all tags
+│  ├─ --tag list <NAME>            List items with specific tag
+│  ├─ --tag clear                  Clear tag metadata from fsel database
+│  ├─ --tag wipe                   Wipe ALL tags from cclip entries (cclip 3.2+)
+│  └─ --cclip-show-tag-color-names Show tag color names in display
+│
+└─ General
+   ├─ -h                           Show short help
+   ├─ -H, --help                   Show detailed help
+   └─ -V, --version                Show version info
 ```
 
 #### Launch Methods

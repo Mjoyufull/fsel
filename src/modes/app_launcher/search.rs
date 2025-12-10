@@ -1,9 +1,7 @@
-//! Search and matching logic for app launcher
-
 use eyre::{eyre, Result};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use std::{env, fs, path};
-use walkdir::WalkDir;
+use jwalk::WalkDir;
 
 use crate::cli;
 use crate::core::{cache, database};
@@ -118,11 +116,11 @@ pub fn find_app_by_name_fast(
 
             // Try cache first
             let app_result: Result<desktop::App, eyre::Report> =
-                if let Ok(Some(cached_app)) = desktop_cache.get(file_path) {
+                if let Ok(Some(cached_app)) = desktop_cache.get(&file_path) {
                     Ok(cached_app)
                 } else {
                     // Parse the file
-                    match fs::read_to_string(file_path) {
+                    match fs::read_to_string(&file_path) {
                         Ok(contents) => {
                             if !contents.contains("[Desktop Entry]") {
                                 continue;
@@ -135,7 +133,7 @@ pub fn find_app_by_name_fast(
                                     {
                                         app.desktop_id = Some(file_name.to_string());
                                     }
-                                    let _ = desktop_cache.set(file_path, app.clone());
+                                    let _ = desktop_cache.set(&file_path, app.clone());
                                     Ok(app)
                                 }
                                 Err(_) => continue,

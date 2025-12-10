@@ -12,6 +12,8 @@ fsel
 # Pin your favorite apps (Ctrl+Space in TUI)
 # Pinned apps always appear first with 📌 icon
 
+# Frequently used apps automatically rise to the top (Frecency ranking)
+
 # Pre-fill search (works with app launcher, dmenu, and cclip modes)
 # Note: -ss must be the LAST option
 fsel -ss firefox
@@ -172,6 +174,10 @@ fsel --cclip --tag list prompt -vv
 # Note: This only clears fsel's tag metadata (colors, emojis)
 # To clear tags from cclip entries, use: cclip tag -d <ID>
 fsel --cclip --tag clear
+
+# Wipe ALL tags from cclip entries (requires cclip 3.2+)
+# This removes the tag text (e.g., "[tag]") from the actual clipboard items
+fsel --cclip --tag wipe
 
 # Show tag color names in item display
 fsel --cclip --cclip-show-tag-color-names

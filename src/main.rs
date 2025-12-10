@@ -9,6 +9,7 @@
 
 mod cli;
 mod common;
+mod config;
 mod core;
 mod desktop;
 mod modes;
@@ -46,7 +47,10 @@ fn run() -> eyre::Result<()> {
     }
 
     // Default: app launcher
-    modes::app_launcher::run(cli)
+    // Default: app launcher
+    // Create runtime for async app launcher
+    let rt = tokio::runtime::Runtime::new().wrap_err("Failed to create tokio runtime")?;
+    rt.block_on(modes::app_launcher::run(cli))
 }
 
 fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
@@ -90,7 +94,7 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     };
 
     // Skip lock check for non-interactive commands (tag clear, tag list)
-    let is_non_interactive = cli.cclip_clear_tags || cli.cclip_tag_list;
+    let is_non_interactive = cli.cclip_clear_tags || cli.cclip_tag_list || cli.cclip_wipe_tags;
 
     if !contents.is_empty() && !is_non_interactive {
         if cli.replace {
