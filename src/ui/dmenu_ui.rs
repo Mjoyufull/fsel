@@ -436,7 +436,7 @@ impl<'a> DmenuUI<'a> {
                             Line::from(Span::raw("  [INLINE IMAGE PREVIEW]".to_string())),
                             Line::from(Span::raw(image_info)),
                             Line::from(Span::raw(String::new())),
-                            Line::from(Span::raw("󱇛 Press 'i' for fullscreen view".to_string())),
+                            Line::from(Span::raw("󱇛 Press 'Alt+i' for fullscreen view".to_string())),
                             Line::from(Span::raw(
                                 " Press 'Enter' to copy to clipboard".to_string(),
                             )),

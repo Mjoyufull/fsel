@@ -1,4 +1,4 @@
-.TH FSEL 1 "2025-10-27" "2.3.0-seedclay" "User Commands"
+.TH FSEL 1 "2025-12-10" "2.4.0-seedclay" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -7,6 +7,8 @@ fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH DESCRIPTION
 .B fsel
 is a terminal-based application launcher with fuzzy search, dmenu compatibility, and clipboard history integration. It scans XDG desktop entries and optionally PATH executables, providing a fast interface for launching applications.
+.PP
+Features frecency-based ranking (zoxide-style) to automatically surface frequently and recently used apps. Pin your favorites with Ctrl-Space for instant access.
 .SH OPTIONS
 .SS "App Launcher Options"
 .TP
@@ -26,7 +28,7 @@ Clear launch history database
 Clear desktop file cache
 .TP
 .B \-\-refresh-cache
-Force refresh of desktop file list
+Force refresh of desktop file list (rescan for new apps)
 .TP
 .BR \-p ", " \-\-program " " \fINAME\fR
 Launch program directly, bypassing TUI (requires at least 2 characters)
@@ -55,7 +57,7 @@ Include executables from $PATH alongside desktop apps
 .B \-\-hide-before-typing
 Hide list until first character is typed
 .TP
-.B \-\-match-mode " " \fIMODE\fR
+.BR \-\-match-mode " " \fIMODE\fR
 Match mode: 'fuzzy' or 'exact' (default: fuzzy)
 .TP
 .BR \-d ", " \-\-detach
@@ -118,7 +120,10 @@ List all tags (use with --cclip)
 List items with specific tag (use with --cclip)
 .TP
 .B \-\-tag clear
-Clear tag metadata from fsel database (colors, emojis). Does not remove tags from cclip entries. (use with --cclip)
+Clear tag metadata from fsel database (colors, emojis). Does not remove tags from cclip entries.
+.TP
+.B \-\-tag wipe
+Wipe ALL tags from cclip entries (requires cclip 3.2+). Removes the tag text from actual clipboard items.
 .TP
 .B \-\-cclip-show-tag-color-names
 Show tag color names in clipboard item display (use with --cclip)
@@ -139,33 +144,55 @@ Example configuration:
 .PP
 .nf
 .RS
-# colors
+# Root level - Colors and UI options
 highlight_color = "LightBlue"
 cursor = "█"
-
-# app launcher
-terminal_launcher = "alacritty -e"
-filter_desktop = true
-list_executables_in_path = false
-match_mode = "fuzzy"
-
-# ui customization
+terminal_launcher = "kitty -e"
 rounded_borders = true
+hard_stop = false
+
+# Border colors
 main_border_color = "White"
+apps_border_color = "White"
+input_border_color = "White"
+
+# Layout
 title_panel_height_percent = 30
 input_panel_height = 3
 title_panel_position = "top"  # or "middle" or "bottom"
-disable_mouse = false
 
-# pin system
+# Pin system
 pin_icon = "📌"
 pin_color = "rgb(255,165,0)"
 
-# keybinds (see keybinds.toml for full customization)
+# App launcher specific options (must be in section)
+[app_launcher]
+filter_desktop = true
+list_executables_in_path = false
+hide_before_typing = false
+match_mode = "fuzzy"
+confirm_first_launch = false
+
+# Dmenu mode overrides (optional)
+[dmenu]
+delimiter = " "
+show_line_numbers = true
+
+# Clipboard mode overrides (optional)
+[cclip]
+image_preview = true
+
+# Custom keybinds (optional)
+[keybinds]
+up = ["up", { key = "p", modifiers = "ctrl" }]
+down = ["down", { key = "n", modifiers = "ctrl" }]
+select = ["enter"]
+exit = ["esc", { key = "q", modifiers = "ctrl" }]
+pin = [{ key = "space", modifiers = "ctrl" }]
 .RE
 .fi
 .PP
-See the example config file and keybinds.toml for all available options.
+See the example config.toml and keybinds.toml for all available options.
 .SH KEYBOARD SHORTCUTS
 .SS "Navigation"
 .TP
@@ -179,7 +206,7 @@ Jump to top/bottom of list
 Launch selected application
 .TP
 .BR "Ctrl-Space"
-Toggle pin/favorite for selected app (pinned apps appear first in search)
+Toggle pin/favorite for selected app (pinned apps always appear first)
 .TP
 .BR "Esc" " or " "Ctrl-Q" " or " "Ctrl-C"
 Exit
@@ -187,11 +214,18 @@ Exit
 .B Backspace
 Remove characters from search
 .TP
-.BR "Ctrl-I"
-(Cclip mode only) Open fullscreen image viewer for selected clipboard item
+.B Tab/Shift-Tab
+Navigate down/up (alternative)
+.TP
+.B Home/End
+Jump to first/last item
+.SS "Clipboard Mode Keybinds"
+.TP
+.BR "Alt-i"
+Open fullscreen image viewer for selected clipboard item
 .TP
 .BR "Ctrl-T"
-(Cclip mode only) Tag selected clipboard item
+Tag selected clipboard item
 .SS "Mouse Support"
 .TP
 .B Hover
@@ -201,9 +235,9 @@ Select application
 Launch application
 .TP
 .B Scroll
-Navigate list
+Navigate list (selection follows mouse position)
 .PP
-All keybinds can be customized via \fI~/.config/fsel/keybinds.toml\fR. See the example keybinds.toml file for configuration options.
+All keybinds can be customized via \fI~/.config/fsel/keybinds.toml\fR or in the [keybinds] section of config.toml.
 .SH LAUNCH METHODS
 .TP
 .B Default
@@ -217,6 +251,9 @@ Launch applications in isolated systemd user scopes with \fB--systemd-run\fR fla
 .TP
 .B uwsm
 Launch applications through Universal Wayland Session Manager with \fB--uwsm\fR flag.
+.TP
+.B Detach
+Use \fB-d/--detach\fR to prevent apps from being killed when terminal closes. Works standalone or combined with --systemd-run/--uwsm.
 .SH EXAMPLES
 .SS "Basic Usage"
 .TP
@@ -241,12 +278,27 @@ Launch first match for "terminal":
 fsel -p term
 .RE
 .fi
+.TP
+Launch with detach (GUI apps):
+.nf
+.RS
+fsel --detach -p discord
+fsel --systemd-run -p code
+.RE
+.fi
 .SS "Pre-filled Search"
 .TP
 Open TUI with "firefox" already searched:
 .nf
 .RS
 fsel -ss firefox
+.RE
+.fi
+.TP
+Multi-word search (must be last option):
+.nf
+.RS
+fsel --uwsm -vv -r -ss text editor
 .RE
 .fi
 .TP
@@ -282,7 +334,21 @@ ps aux | fsel --dmenu --with-nth 2,11 --accept-nth 2 | xargs kill
 Git branch switcher:
 .nf
 .RS
-git branch | fsel --dmenu | xargs git checkout
+git branch | fsel --dmenu --select main | xargs git checkout
+.RE
+.fi
+.TP
+SSH connection picker:
+.nf
+.RS
+grep "^Host " ~/.ssh/config | fsel --dmenu --with-nth 2 | xargs ssh
+.RE
+.fi
+.TP
+Window switcher (Sway):
+.nf
+.RS
+swaymsg -t get_tree | jq -r '..|select(.name)|.name' | fsel --dmenu
 .RE
 .fi
 .SS "Clipboard History"
@@ -309,31 +375,33 @@ fsel --cclip --tag list
 .RE
 .fi
 .TP
-List items with specific tag:
+List items with specific tag (verbose):
 .nf
 .RS
-fsel --cclip --tag list prompt
-fsel --cclip --tag list prompt -vv  # verbose shows details
+fsel --cclip --tag list prompt -vv
 .RE
 .fi
 .TP
-Clear all tags and metadata:
+Clear fsel tag metadata:
 .nf
 .RS
 fsel --cclip --tag clear
 .RE
 .fi
 .TP
-Show tag color names in display:
+Wipe ALL tags from cclip entries:
 .nf
 .RS
-fsel --cclip --cclip-show-tag-color-names
+fsel --cclip --tag wipe
 .RE
 .fi
 .SH ENVIRONMENT
 .TP
 .B SWAYSOCK
 If set, enables Sway integration automatically
+.TP
+.B XDG_CONFIG_HOME
+User config directory (default: ~/.config)
 .TP
 .B XDG_DATA_HOME
 User data directory (default: ~/.local/share)
@@ -342,23 +410,29 @@ User data directory (default: ~/.local/share)
 System data directories (default: /usr/local/share:/usr/share)
 .TP
 .B XDG_CURRENT_DESKTOP
-Used for desktop environment filtering
+Used for desktop environment filtering (OnlyShowIn/NotShowIn)
 .TP
 .B WAYLAND_DISPLAY
 Used to detect Wayland vs X11 for clipboard operations
+.TP
+.B FSEL_*
+Environment variables with FSEL_ prefix override config file settings
 .SH FILES
 .TP
 .I ~/.config/fsel/config.toml
 User configuration file
 .TP
 .I ~/.config/fsel/keybinds.toml
-Keybind customization file
+Keybind customization file (optional, can use [keybinds] in config.toml)
 .TP
 .I ~/.local/share/fsel/hist_db.redb
-Launch history and pinned apps database (redb format)
+Launch history, frecency data, and pinned apps database (redb format)
 .TP
-.I ~/.local/share/fsel/lock
-Lock file for single instance
+.I ~/.cache/fsel/fsel-fsel.lock
+Lock file for single instance (app launcher mode)
+.TP
+.I ~/.cache/fsel/fsel-cclip.lock
+Lock file for single instance (cclip mode)
 .TP
 .I /usr/share/applications/*.desktop
 System desktop entries
@@ -377,11 +451,13 @@ Report bugs to: https://github.com/Mjoyufull/fsel/issues
 .SH AUTHOR
 Mjoyufull <https://github.com/Mjoyufull>
 .PP
-Original fsel by Namkhai B.
+Original gyr by Namkhai B.
 .SH SEE ALSO
 .BR dmenu (1),
 .BR rofi (1),
 .BR cclip (1),
-.BR swaymsg (1)
+.BR swaymsg (1),
+.BR uwsm (1),
+.BR systemd-run (1)
 .PP
 Project homepage: https://github.com/Mjoyufull/fsel

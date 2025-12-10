@@ -185,7 +185,7 @@ fsel --cclip --cclip-show-tag-color-names
 
 ### Keybindings in cclip mode
 - `Enter` - Copy selection to clipboard
-- `i` - Display image fullscreen (bypass TUI)
+- `Alt+i` - Display image fullscreen (bypass TUI)
 - `Esc` - Exit without copying
 - Arrow keys - Navigate
 - Type to filter
