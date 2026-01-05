@@ -97,31 +97,44 @@ fn run_cclip_mode(cli: &cli::Opts) -> eyre::Result<()> {
     let is_non_interactive = cli.cclip_clear_tags || cli.cclip_tag_list || cli.cclip_wipe_tags;
 
     if !contents.is_empty() && !is_non_interactive {
-        if cli.replace {
-            let pid: i32 = contents
-                .parse()
-                .wrap_err("Failed to parse cclip lockfile contents")?;
-            match process::kill_process_sigterm_result(pid) {
-                Ok(()) => {
-                    // Process killed, remove lock
-                    fs::remove_file(&lock_path)?;
+        if let Ok(pid) = contents.trim().parse::<i32>() {
+            if !process::process_exists(pid) {
+                // Process does not exist, remove stale lock file
+                // Ignore errors - file may already be gone or permission issues shouldn't block startup
+                if let Err(e) = fs::remove_file(&lock_path) {
+                    // Log but don't fail - stale lock cleanup is best-effort
+                    eprintln!("Warning: Failed to remove stale lock file: {}", e);
                 }
-                Err(e) if e.raw_os_error() == Some(libc::ESRCH) => {
-                    // Process does not exist, remove lock
-                    fs::remove_file(&lock_path)?;
+            } else if cli.replace {
+                match process::kill_process_sigterm_result(pid) {
+                    Ok(()) => {
+                        // Process killed, remove lock
+                        fs::remove_file(&lock_path)?;
+                    }
+                    Err(e) if e.raw_os_error() == Some(libc::ESRCH) => {
+                        // Process does not exist, remove lock
+                        fs::remove_file(&lock_path)?;
+                    }
+                    Err(e) => {
+                        // Other error, don't remove lock
+                        return Err(eyre!(
+                            "Failed to kill existing fsel cclip process (pid {}): {}",
+                            pid,
+                            e
+                        ));
+                    }
                 }
-                Err(e) => {
-                    // Other error, don't remove lock
-                    return Err(eyre!(
-                        "Failed to kill existing fsel cclip process (pid {}): {}",
-                        pid,
-                        e
-                    ));
-                }
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            } else {
+                return Err(eyre!("Fsel cclip mode is already running"));
             }
-            std::thread::sleep(std::time::Duration::from_millis(200));
         } else {
-            return Err(eyre!("Fsel cclip mode is already running"));
+            // Invalid PID in lock file, remove it
+            // Ignore errors - file may already be gone or permission issues shouldn't block startup
+            if let Err(e) = fs::remove_file(&lock_path) {
+                // Log but don't fail - corrupted lock cleanup is best-effort
+                eprintln!("Warning: Failed to remove corrupted lock file: {}", e);
+            }
         }
     }
 
