@@ -36,7 +36,7 @@ impl Config {
     pub fn init(self) -> Input {
         Input::with_config(self)
     }
-    
+
     /// Creates a new async `AsyncInput` with the configuration in `Self`
     /// Used by async modes (app_launcher when migrated)
     pub fn init_async(self) -> AsyncInput {

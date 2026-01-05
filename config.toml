@@ -89,6 +89,13 @@ match_mode = "fuzzy"
 # Helps prevent accidental launches of wrong apps
 confirm_first_launch = false
 
+# Character depth for prefix matching priority (default: 3)
+# When query length is within this depth, prefix matches (exact, word-start) 
+# are prioritized over fuzzy matches. Beyond this depth, all matches use fuzzy scoring.
+# Example: With prefix_depth=3, typing "fi" (2 chars) prioritizes prefix matches,
+#          but typing "fire" (4 chars) uses fuzzy matching for all results.
+prefix_depth = 3
+
 # ===== DMENU MODE =====
 # Override settings when using --dmenu flag
 # Inherits from main settings if not specified

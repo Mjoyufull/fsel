@@ -16,9 +16,9 @@ impl UI {
     /// Render the UI using the centralized State
     pub fn render(&self, f: &mut Frame, state: &crate::core::state::State, cli: &crate::cli::Opts) {
         let size = f.area();
-        
+
         let should_render_border = cli.title_panel_height_percent > 0;
-        
+
         // Layout calculations
         let chunks = if should_render_border {
             match cli.title_panel_position {
@@ -31,14 +31,14 @@ impl UI {
                     ])
                     .split(size),
                 Some(crate::ui::PanelPosition::Middle) => Layout::default()
-                   .direction(Direction::Vertical)
-                   .constraints([
-                       Constraint::Min(0),
-                       Constraint::Percentage(cli.title_panel_height_percent),
-                       Constraint::Length(cli.input_panel_height),
-                       Constraint::Min(0),
-                   ])
-                   .split(size),
+                    .direction(Direction::Vertical)
+                    .constraints([
+                        Constraint::Min(0),
+                        Constraint::Percentage(cli.title_panel_height_percent),
+                        Constraint::Length(cli.input_panel_height),
+                        Constraint::Min(0),
+                    ])
+                    .split(size),
                 _ => Layout::default() // Top default
                     .direction(Direction::Vertical)
                     .constraints([
@@ -52,9 +52,9 @@ impl UI {
             Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(3), 
+                    Constraint::Length(3),
                     Constraint::Min(0),
-                    Constraint::Length(cli.input_panel_height)
+                    Constraint::Length(cli.input_panel_height),
                 ])
                 .split(size)
         };
@@ -71,7 +71,11 @@ impl UI {
             // Determine dynamic title
             let title = if cli.fancy_mode {
                 if let Some(selected) = state.selected {
-                    state.shown.get(selected).map(|a| a.name.clone()).unwrap_or_else(|| "Fsel".to_string())
+                    state
+                        .shown
+                        .get(selected)
+                        .map(|a| a.name.clone())
+                        .unwrap_or_else(|| "Fsel".to_string())
                 } else {
                     "Fsel".to_string()
                 }
@@ -82,9 +86,16 @@ impl UI {
             let info_block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(cli.main_border_color))
-                .title(Span::styled(format!(" {} ", title), Style::default().fg(cli.header_title_color)))
-                .border_type(if cli.rounded_borders { BorderType::Rounded } else { BorderType::Plain });
-            
+                .title(Span::styled(
+                    format!(" {} ", title),
+                    Style::default().fg(cli.header_title_color),
+                ))
+                .border_type(if cli.rounded_borders {
+                    BorderType::Rounded
+                } else {
+                    BorderType::Plain
+                });
+
             // Text rendering from state.text which should be populated by state.update_info
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
             let paragraph = Paragraph::new(info_text)
@@ -97,8 +108,15 @@ impl UI {
         let input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(cli.input_border_color))
-            .title(Span::styled(" Input ", Style::default().fg(cli.header_title_color)))
-            .border_type(if cli.rounded_borders { BorderType::Rounded } else { BorderType::Plain });
+            .title(Span::styled(
+                " Input ",
+                Style::default().fg(cli.header_title_color),
+            ))
+            .border_type(if cli.rounded_borders {
+                BorderType::Rounded
+            } else {
+                BorderType::Plain
+            });
 
         // Legacy Formatting: (Selected/Total) >> Query
         // Colors:
@@ -127,7 +145,7 @@ impl UI {
 
         let line = Line::from(spans);
         let text_len = line.width();
-        
+
         let available_width = input_area.width.saturating_sub(2) as usize; // Account for borders
 
         let scroll_x = if text_len > available_width {
@@ -149,34 +167,52 @@ impl UI {
         let apps_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(cli.apps_border_color))
-            .title(Span::styled(" Apps ", Style::default().fg(cli.header_title_color)))
-            .border_type(if cli.rounded_borders { BorderType::Rounded } else { BorderType::Plain });
+            .title(Span::styled(
+                " Apps ",
+                Style::default().fg(cli.header_title_color),
+            ))
+            .border_type(if cli.rounded_borders {
+                BorderType::Rounded
+            } else {
+                BorderType::Plain
+            });
 
         // only render whats on screen, not the whole dang list
-        let items: Vec<ListItem> = state.shown
+        let items: Vec<ListItem> = state
+            .shown
             .iter()
             .skip(state.scroll_offset)
             .take(max_visible)
             .map(|app| {
                 let mut spans = Vec::new();
-                
+
                 // Pin support
                 if app.pinned {
-                    spans.push(Span::styled(&cli.pin_icon, Style::default().fg(cli.pin_color)));
+                    spans.push(Span::styled(
+                        &cli.pin_icon,
+                        Style::default().fg(cli.pin_color),
+                    ));
                     spans.push(Span::raw(" "));
                 }
-                
-                spans.push(Span::styled(&app.name, Style::default().fg(cli.apps_text_color)));
-                
+
+                spans.push(Span::styled(
+                    &app.name,
+                    Style::default().fg(cli.apps_text_color),
+                ));
+
                 ListItem::new(Line::from(spans))
             })
             .collect();
 
         let list = List::new(items)
             .block(apps_block)
-            .highlight_style(Style::default().fg(cli.highlight_color).add_modifier(Modifier::BOLD))
+            .highlight_style(
+                Style::default()
+                    .fg(cli.highlight_color)
+                    .add_modifier(Modifier::BOLD),
+            )
             .highlight_symbol("> ");
-        
+
         // gotta adjust for the scroll offset innit
         let mut list_state = ratatui::widgets::ListState::default();
         if let Some(sel) = state.selected {
@@ -185,7 +221,7 @@ impl UI {
                 list_state.select(Some(sel - state.scroll_offset));
             }
         }
-        
+
         f.render_stateful_widget(list, apps_area, &mut list_state);
     }
 }

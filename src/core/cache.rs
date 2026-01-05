@@ -95,7 +95,7 @@ impl DesktopCache {
                         return Ok(None);
                     }
                 }
-                
+
                 // Also check if we have extra directories in cache that are no longer requested
                 if cache.dir_mtimes.len() != dirs.len() {
                     return Ok(None);
@@ -180,10 +180,7 @@ impl DesktopCache {
             }
         }
 
-        let cache = FileListCache {
-            paths,
-            dir_mtimes,
-        };
+        let cache = FileListCache { paths, dir_mtimes };
         let data = bincode::serialize(&cache)?;
 
         let write_txn = self.db.begin_write()?;

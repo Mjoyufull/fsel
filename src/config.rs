@@ -12,13 +12,13 @@ pub struct FselConfig {
     pub ui: UiConfig,
     #[serde(flatten)]
     pub layout: LayoutConfig,
-    
+
     // mode-specific configs live under their own sections
     #[serde(default)]
     pub dmenu: DmenuConfig,
     #[serde(default)]
     pub cclip: CclipConfig,
-    
+
     // Legacy [app_launcher] section - takes precedence over root-level settings
     #[serde(default)]
     pub app_launcher: AppLauncherConfig,
@@ -32,6 +32,7 @@ pub struct AppLauncherConfig {
     pub hide_before_typing: Option<bool>,
     pub match_mode: Option<String>,
     pub confirm_first_launch: Option<bool>,
+    pub prefix_depth: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -58,6 +59,8 @@ pub struct GeneralConfig {
     pub no_exec: bool,
     #[serde(default)]
     pub confirm_first_launch: bool,
+    #[serde(default = "default_prefix_depth")]
+    pub prefix_depth: usize,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -155,17 +158,42 @@ pub struct CclipConfig {
 }
 
 // Default value implementations for serde
-fn default_terminal_launcher() -> String { "alacritty -e".to_string() }
-fn default_true() -> bool { true }
-fn default_match_mode() -> String { "fuzzy".to_string() }
-fn default_highlight_color() -> String { "LightBlue".to_string() }
-fn default_cursor() -> String { "█".to_string() }
-fn default_white() -> String { "White".to_string() }
-fn default_pin_color() -> String { "rgb(255, 165, 0)".to_string() }
-fn default_pin_icon() -> String { "📌".to_string() }
-fn default_title_panel_height() -> u16 { 30 }
-fn default_input_panel_height() -> u16 { 3 }
-fn default_title_panel_position() -> String { "top".to_string() }
+fn default_terminal_launcher() -> String {
+    "alacritty -e".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_match_mode() -> String {
+    "fuzzy".to_string()
+}
+fn default_highlight_color() -> String {
+    "LightBlue".to_string()
+}
+fn default_cursor() -> String {
+    "█".to_string()
+}
+fn default_white() -> String {
+    "White".to_string()
+}
+fn default_pin_color() -> String {
+    "rgb(255, 165, 0)".to_string()
+}
+fn default_pin_icon() -> String {
+    "📌".to_string()
+}
+fn default_title_panel_height() -> u16 {
+    30
+}
+fn default_input_panel_height() -> u16 {
+    3
+}
+fn default_title_panel_position() -> String {
+    "top".to_string()
+}
+fn default_prefix_depth() -> usize {
+    3
+}
 
 impl Default for FselConfig {
     fn default() -> Self {
@@ -182,6 +210,7 @@ impl Default for FselConfig {
                 detach: false,
                 no_exec: false,
                 confirm_first_launch: false,
+                prefix_depth: default_prefix_depth(),
             },
             ui: UiConfig {
                 highlight_color: default_highlight_color(),
@@ -220,7 +249,7 @@ impl FselConfig {
         // 1. Load Config File
         // Priority: CLI arg > XDG_CONFIG_HOME > Default fallback
         let config_path = if let Some(path) = cli_config_path {
-             Some(path)
+            Some(path)
         } else if let Some(proj_dirs) = ProjectDirs::from("", "", "fsel") {
             let mut p = proj_dirs.config_dir().to_path_buf();
             p.push("config.toml");
@@ -230,7 +259,7 @@ impl FselConfig {
         };
 
         if let Some(path) = config_path {
-             s = s.add_source(File::from(path).required(false));
+            s = s.add_source(File::from(path).required(false));
         }
 
         // 2. Load Environment Variables

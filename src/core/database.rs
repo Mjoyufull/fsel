@@ -112,7 +112,10 @@ pub fn load_frecency(db: &std::sync::Arc<redb::Database>) -> HashMap<String, Fre
                 }
             }
         }
-        Err(e) => eprintln!("Warning: Failed to begin read transaction for frecency: {}", e),
+        Err(e) => eprintln!(
+            "Warning: Failed to begin read transaction for frecency: {}",
+            e
+        ),
     }
 
     frecency
@@ -126,7 +129,7 @@ pub fn save_frecency(
     let write_txn = db.begin_write()?;
     {
         let mut table = write_txn.open_table(crate::core::cache::FRECENCY_TABLE)?;
-        
+
         // Clear existing entries and write new ones
         // Note: In production, you might want to do incremental updates
         for (name, entry) in frecency {
@@ -141,16 +144,16 @@ pub fn save_frecency(
 /// Record an app access (updates frecency)
 pub fn record_access(db: &std::sync::Arc<redb::Database>, app_name: &str) -> Result<()> {
     let mut frecency = load_frecency(db);
-    
+
     // Update or create entry
     frecency
         .entry(app_name.to_string())
         .and_modify(|e| e.access())
         .or_default();
-    
+
     // Age entries if total exceeds max (10000 by default, like zoxide)
     crate::core::state::age_entries(&mut frecency, 10000);
-    
+
     save_frecency(db, &frecency)?;
     Ok(())
 }

@@ -170,7 +170,9 @@ pub fn wipe_all_tags() -> Result<()> {
 /// Delete a specific tag from cclip (cclip 3.2.0+)
 #[allow(dead_code)]
 pub fn delete_tag(tag: &str) -> Result<()> {
-    let output = Command::new("cclip").args(["tags", "delete", tag]).output()?;
+    let output = Command::new("cclip")
+        .args(["tags", "delete", tag])
+        .output()?;
 
     if !output.status.success() {
         return Err(eyre!(
@@ -182,4 +184,3 @@ pub fn delete_tag(tag: &str) -> Result<()> {
 
     Ok(())
 }
-

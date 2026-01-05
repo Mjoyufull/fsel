@@ -3,17 +3,17 @@
 use crate::cli::Opts;
 use eyre::{eyre, Result, WrapErr};
 
-use crate::ui::{InputConfig, UI, InputEvent as Event};
+use crate::ui::{InputConfig, InputEvent as Event, UI};
 
+use crate::core::state::{sort_by_frecency, Message, State};
 use directories::ProjectDirs;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use redb::ReadableTable;
 use scopeguard::defer;
 use std::collections::BTreeSet;
-use std::{env, fs, io, path};
 use std::time::Duration;
-use crate::core::state::{State, Message, sort_by_frecency};
+use std::{env, fs, io, path};
 
 use crossterm::event::{MouseButton, MouseEventKind};
 
@@ -331,27 +331,38 @@ pub async fn run(cli: Opts) -> Result<()> {
         }
     }
 
+    // Initialize debug mode if requested
+    if cli.test_mode {
+        crate::cli::DEBUG_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Err(e) = crate::core::debug_logger::init_test_log() {
+            eprintln!("Warning: Failed to initialize debug logging: {}", e);
+        } else {
+            crate::core::debug_logger::log_event("App launcher started in test mode");
+        }
+    }
+
     // Load database and cache (Blocking I/O - Keep for now)
     // gotta load everything up front or it looks janky af
     // no one wants to see apps popping in one by one like its 1999
     let filter_desktop = cli.filter_desktop;
     let list_executables = cli.list_executables_in_path;
-    
-    let apps_rx = crate::desktop::read_with_options(
-        dirs.clone(),
-        &db,
-        filter_desktop,
-        list_executables,
-    );
-    
+
+    let apps_rx =
+        crate::desktop::read_with_options(dirs.clone(), &db, filter_desktop, list_executables);
+
     let mut all_apps = Vec::with_capacity(500);
     while let Ok(app) = apps_rx.recv() {
         all_apps.push(app);
     }
-    
+
     // Sort by frecency ONCE
     let frecency_data = crate::core::database::load_frecency(&db);
     sort_by_frecency(&mut all_apps, &frecency_data);
+
+    // Log startup info if in test mode
+    if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::core::debug_logger::log_startup_info(&cli, all_apps.len(), frecency_data.len());
+    }
 
     // Initialize the terminal with crossterm backend using stderr
     let backend = CrosstermBackend::new(io::stderr());
@@ -360,16 +371,20 @@ pub async fn run(cli: Opts) -> Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Initialize State with ALL apps loaded
-    let mut state = State::new(all_apps, cli.match_mode);
-    
+    let mut state = State::new(all_apps, cli.match_mode, frecency_data, cli.prefix_depth);
+
     // Pre-fill search
     if let Some(ref s) = cli.search_string {
         state.query = s.clone();
     }
-    
+
     // Filter ONCE with all apps loaded - INSTANT display
     state.filter();
-    state.update_info(cli.highlight_color, cli.fancy_mode, cli.verbose.unwrap_or(0));
+    state.update_info(
+        cli.highlight_color,
+        cli.fancy_mode,
+        cli.verbose.unwrap_or(0),
+    );
 
     // Initialize Async Input
     let mut input = InputConfig {
@@ -377,7 +392,8 @@ pub async fn run(cli: Opts) -> Result<()> {
         tick_rate: Duration::from_millis(16),
         exit_key: KeyCode::Null, // Handle exit manually
         ..InputConfig::default()
-    }.init_async();
+    }
+    .init_async();
 
     // App Loop
     loop {
@@ -416,7 +432,7 @@ pub async fn run(cli: Opts) -> Result<()> {
                          } else if cli.keybinds.matches_backspace(key.code, key.modifiers) {
                              Message::Backspace
                          } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
-                             // Handle Pin toggling directly here as it requires DB access, 
+                             // Handle Pin toggling directly here as it requires DB access,
                              // or emit Message::TogglePin which we intercept below.
                              // Let's emit Message::TogglePin to keep it clean, and handle it in the State update post-check?
                              // Actually, State update doesn't have DB access.
@@ -449,14 +465,14 @@ pub async fn run(cli: Opts) -> Result<()> {
                                  _ => Message::Tick,
                              }
                          };
-                         
+
                          // Special case for Ctrl+C if not handled by keybinds (though it's usually in exit)
                          if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') && !cli.keybinds.matches_exit(key.code, key.modifiers) {
                              state.should_exit = true;
                          }
 
                          crate::core::state::update(&mut state, msg, cli.hard_stop, max_visible);
-                         
+
                          // Post-update: Check text (update info)
                          let fancy = cli.fancy_mode;
                          state.update_info(cli.highlight_color, fancy, cli.verbose.unwrap_or(0));
@@ -496,9 +512,9 @@ pub async fn run(cli: Opts) -> Result<()> {
                                 (0, total_height.saturating_sub(title_height + input_height))
                             }
                         };
-                        
+
                         // List content area (inside the borders) - first item starts 1 row down from panel start
-                        let list_content_start = apps_panel_start + 1; 
+                        let list_content_start = apps_panel_start + 1;
                         let max_visible_rows = apps_panel_height.saturating_sub(2); // -2 for top/bottom borders
                         let list_content_end = list_content_start + max_visible_rows;
 
@@ -566,6 +582,10 @@ pub async fn run(cli: Opts) -> Result<()> {
                         if let Message::Tick = msg {
                             // Don't update for ignored mouse events
                         } else {
+                            if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                                crate::core::debug_logger::log_event(&format!("State update via Mouse: {:?}", msg));
+                            }
+
                             crate::core::state::update(&mut state, msg, cli.hard_stop, max_visible_rows as usize);
 
                             // Post-update: Check text (update info)
@@ -578,28 +598,31 @@ pub async fn run(cli: Opts) -> Result<()> {
         }
 
         if state.should_exit {
+            if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+                crate::core::debug_logger::log_session_end();
+            }
             break;
         }
 
         if state.should_launch {
             if let Some(selected_idx) = state.selected {
-                 if let Some(app) = state.shown.get(selected_idx) {
-                     // Record access in frecency
-                     if let Err(e) = crate::core::database::record_access(&db, &app.name) {
-                         eprintln!("Failed to record access: {}", e);
-                     }
+                if let Some(app) = state.shown.get(selected_idx) {
+                    // Record access in frecency
+                    if let Err(e) = crate::core::database::record_access(&db, &app.name) {
+                        eprintln!("Failed to record access: {}", e);
+                    }
 
-                     crate::shutdown_terminal(cli.disable_mouse)?;
-                     
-                     // Launch
-                     // Handle --no-exec
-                     if cli.no_exec {
-                         println!("{}", app.command);
-                         return Ok(());
-                     }
-                     
-                     super::launch::launch_app(app, &cli, &db)?;
-                 }
+                    crate::shutdown_terminal(cli.disable_mouse)?;
+
+                    // Launch
+                    // Handle --no-exec
+                    if cli.no_exec {
+                        println!("{}", app.command);
+                        return Ok(());
+                    }
+
+                    super::launch::launch_app(app, &cli, &db)?;
+                }
             }
             break;
         }
@@ -608,7 +631,12 @@ pub async fn run(cli: Opts) -> Result<()> {
     if !state.should_launch {
         crate::shutdown_terminal(cli.disable_mouse)?;
     }
-    
+
+    // Log session end if in test mode
+    if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::core::debug_logger::log_session_end();
+    }
+
     // Lock file cleanup handled by Guard
     Ok(())
 }

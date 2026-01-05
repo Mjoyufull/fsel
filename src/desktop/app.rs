@@ -15,6 +15,7 @@ use ratatui::widgets::ListItem;
 use rayon::prelude::*;
 
 use crate::core::cache::HistoryCache;
+use crate::core::state::ScoreBreakdown;
 
 /// Cached locale to avoid repeated environment variable lookups
 static LOCALE_CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -368,6 +369,7 @@ pub fn read_with_options(
                                                         score: 0,
                                                         pinned: false,
                                                         last_access: None,
+                                                        breakdown: None,
                                                     };
 
                                                     let app_with_history =
@@ -446,6 +448,9 @@ pub struct App {
     /// Last access timestamp (Unix epoch seconds)
     /// Not part of specification, injected by Frecency
     pub last_access: Option<u64>,
+
+    /// Detailed score breakdown for debugging (-T)
+    pub breakdown: Option<ScoreBreakdown>,
 
     // Private field for internal use only
     #[doc(hidden)]
@@ -734,6 +739,7 @@ impl App {
             entry_type,
             desktop_id: None,
             actions,
+            breakdown: None,
         })
     }
 }

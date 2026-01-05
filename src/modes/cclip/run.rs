@@ -73,7 +73,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
         return Ok(());
     }
 
-
     // Handle tag list mode
     if cli.cclip_tag_list {
         let tags = super::scan::get_all_tags().wrap_err("Failed to get tags from cclip")?;
@@ -963,11 +962,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     // Loop to keep image displayed until Esc/q is pressed
                                     loop {
                                         // Use the SAME input channel as the main loop to prevent buffering/race conditions
-                                        if let Ok(crate::ui::InputEvent::Input(key_event)) = input.next() {
+                                        if let Ok(crate::ui::InputEvent::Input(key_event)) =
+                                            input.next()
+                                        {
                                             match (key_event.code, key_event.modifiers) {
                                                 (KeyCode::Esc, _)
                                                 | (KeyCode::Char('q'), _)
-                                                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                                                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                                                    break
+                                                }
                                                 _ => {} // Ignore all other keys
                                             }
                                         }
