@@ -27,3 +27,8 @@ pub fn kill_process_sigterm_result(pid: i32) -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+/// Check if a process exists
+#[allow(unsafe_code)]
+pub fn process_exists(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
