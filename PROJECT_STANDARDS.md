@@ -66,8 +66,8 @@ This document defines the technical Git workflow. See also:
 
 | Branch | Purpose | Push Policy |
 |--------|----------|-------------|
-| main | Stable, production-ready code. Every commit is a tagged release. | Never push directly. Merge only from dev after testing and tagging. |
-| dev | Integration branch. All features merge here before main. | Never push directly. Only receives merges from feature branches via pull requests. |
+| main | Stable, production-ready code. Every commit is a tagged release. | Never push directly. Merge only from release branches after testing and tagging. |
+| dev | Integration branch. All features merge here before release branches. | Never push directly. Only receives merges from feature branches via pull requests. |
 
 ### Feature Branches
 
@@ -80,6 +80,23 @@ All work occurs in feature branches created from dev.
 | Refactor | refactor/name | Code restructuring without changing behavior |
 | Docs | docs/name | Documentation changes |
 | Chore | chore/name | Tooling, dependencies, build updates |
+
+### Release Branches
+
+| Type | Naming | Purpose |
+|------|---------|---------|
+| Release | release/version | Prepare releases with version bumps and final testing |
+
+Release branches are created from dev when a maintainer decides to release. They are used to:
+- Freeze a stable point in dev for release preparation
+- Update version numbers in all relevant files
+- Perform final testing before release
+- Merge to main (which gets tagged) and then back to dev
+
+**When to create a release branch:**
+- A maintainer decides it's time for a release
+- dev is in a stable state (no critical bugs, features are complete)
+- All planned features for the release are merged into dev
 
 ### Hotfix Branches
 
@@ -122,15 +139,19 @@ git push origin dev
 ```
 main (production releases only)
   |
-  └── merge from dev (at release time) ← tag applied here
+  └── merge from release/v2.x.x (at release time) ← tag applied here
        |
-       dev (integration branch)
+       release/v2.x.x (release preparation branch)
          |
-         ├── PR merge from feat/feature-one
-         ├── PR merge from fix/bug-fix
-         └── PR merge from feat/feature-two
+         └── created from dev (freeze point)
               |
-              feat/feature-two (development work happens here)
+              dev (integration branch)
+                |
+                ├── PR merge from feat/feature-one
+                ├── PR merge from fix/bug-fix
+                └── PR merge from feat/feature-two
+                     |
+                     feat/feature-two (development work happens here)
 ```
 
 Standard process:
@@ -141,8 +162,10 @@ Standard process:
 4. Open pull request targeting dev
 5. Get review and approval
 6. Merge PR to dev
-7. Merge dev to main for release
-8. Tag and push
+7. Maintainer creates release branch from dev when ready
+8. Maintainer merges release branch to main
+9. Tag and push
+10. Maintainer merges release branch back to dev
 
 ---
 
@@ -387,28 +410,71 @@ Integrate automated checks:
 
 ## Release Management
 
+### When to Create a Release Branch
+
+A maintainer creates a release branch when:
+- They decide it's time for a release
+- dev is in a stable state (no critical bugs, features are complete)
+- All planned features for the release are merged into dev
+
+**Important:** Release branches freeze a specific point in dev, allowing ongoing PRs to continue merging into dev without affecting the release preparation.
+
 ### Preparation
 
-1. Ensure all feature PRs are merged into dev.
-2. Confirm all tests pass.
-3. Update version references:
+1. Ensure all feature PRs for the release are merged into dev.
+2. Confirm all tests pass on dev.
+3. Create a release branch from dev (this freezes the release point):
+   ```bash
+   git checkout dev
+   git pull origin dev
+   git checkout -b release/v2.5.0-seedclay  # Replace with actual version
+   ```
+4. Update version references on the release branch:
    - `Cargo.toml` (root directory)
    - `flake.nix` (root directory)
-   - `README.md` (installation instructions)
+   - `README.md` (installation instructions, if needed)
    - Man pages (`fsel.1` or similar)
    - Example configs if they contain version info
-4. Prepare release notes following [Keep a Changelog](https://keepachangelog.com/) format.
-5. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
+5. Commit version bump:
+   ```bash
+   git commit -am "chore: bump version to 2.5.0-seedclay"
+   ```
+6. Prepare release notes following [Keep a Changelog](https://keepachangelog.com/) format.
+7. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
+8. Run final tests on the release branch:
+   ```bash
+   cargo test
+   cargo build --release
+   ```
 
 ### Process
 
 ```bash
+# 1. Merge release branch to main
 git checkout main
 git pull origin main
-git merge dev
-git tag -a v2.2.0-seedclay -m "v2.2.0-seedclay: detach mode, cache optimizations"
+git merge release/v2.5.0-seedclay
+
+# 2. Tag the release
+git tag -a v2.5.0-seedclay -m "v2.5.0-seedclay: release notes here"
 git push origin main --tags
+
+# 3. Merge release branch back to dev (so dev has the version bump)
+git checkout dev
+git merge release/v2.5.0-seedclay
+git push origin dev
+
+# 4. Delete the release branch
+git branch -d release/v2.5.0-seedclay
+git push origin --delete release/v2.5.0-seedclay
 ```
+
+**Why this workflow:**
+- dev continues accepting PRs during release preparation
+- Release work is isolated on the release branch
+- No conflicts from ongoing development
+- Clear freeze point for the release
+- dev stays in sync with version numbers
 
 ### GitHub Release
 
@@ -554,14 +620,34 @@ git push origin feat/detach-mode
 ### Release
 
 ```bash
+# 1. Create release branch from dev
 git checkout dev
 git pull origin dev
+git checkout -b release/v2.5.0-seedclay
+
+# 2. Update version numbers in Cargo.toml, flake.nix, etc.
+# ... edit files ...
+git commit -am "chore: bump version to 2.5.0-seedclay"
+
+# 3. Final testing
 cargo build --release
 cargo test
+
+# 4. Merge to main and tag
 git checkout main
-git merge dev
-git tag -a v2.2.0-seedclay -m "v2.2.0-seedclay: major release"
+git pull origin main
+git merge release/v2.5.0-seedclay
+git tag -a v2.5.0-seedclay -m "v2.5.0-seedclay: major release"
 git push origin main --tags
+
+# 5. Merge back to dev
+git checkout dev
+git merge release/v2.5.0-seedclay
+git push origin dev
+
+# 6. Clean up
+git branch -d release/v2.5.0-seedclay
+git push origin --delete release/v2.5.0-seedclay
 ```
 
 ### Hotfix

@@ -306,6 +306,89 @@ fsel --match-mode=exact
 # (edit config to disable list_executables_in_path)
 ```
 
+### Debug/Test Mode
+
+Enable detailed debug logging with `-T` or `--test`:
+
+```sh
+# Enable debug mode
+fsel -T
+
+# Debug logs are written to ~/.config/fsel/logs/
+# Filename format: fsel-debug-YYYYMMDD-HHMMSS-pidXXXXX.log
+```
+
+**What gets logged:**
+- Startup configuration (prefix_depth, match_mode, etc.)
+- Total apps loaded and frecency entries
+- Query changes (each character typed, backspace)
+- Search snapshots with full scoring breakdown:
+  - Tier classification (Pinned App Name Exact, Normal Fuzzy Match, etc.)
+  - Bucket score, matcher score, frecency boost
+  - Top 50 matches with complete breakdown
+  - Filter timing
+- Selection changes (which app is selected, scroll position)
+- Launch events (app name, command, scoring details)
+- Session summary (total duration)
+
+**Use cases:**
+- Debug why certain apps rank higher/lower than expected
+- Understand search ranking algorithm behavior
+- Analyze performance (filter timing)
+- Track user interaction patterns
+- Verify prefix_depth and other configuration settings
+
+**Example log output:**
+```
+=== FSEL DEBUG SESSION STARTED ===
+Timestamp: 2025-01-15 14:30:45.123
+PID: 12345
+Version: 2.4.0-seedclay
+Log file: /home/user/.config/fsel/logs/fsel-debug-20250115-143045-pid12345.log
+
+[STARTUP] Configuration:
+  Prefix depth: 3
+  Match mode: Fuzzy
+  ...
+
+[QUERY] User typed 'f': "" -> "f"
+[SEARCH] Query: "f" (len: 1, prefix_depth: 3)
+[SEARCH] Filter time: 2ms
+[SEARCH] Total matches: 45 (showing top 50)
+  [  1] Firefox (Score: 90000050)
+       ├── Tier: Normal App Name Exact
+       ├── Bucket Score: 90000000
+       ├── Matcher Score: 50 (base: 0, 100x multiplier)
+       └── Frecency: 0.500 (raw: 0.500, boost: +5)
+...
+```
+
+### Prefix Depth Configuration
+
+The `prefix_depth` setting controls how many characters must be typed before prefix matching gets priority over fuzzy matching:
+
+```sh
+# Set prefix depth via CLI
+fsel --prefix-depth 5
+
+# Or in config.toml
+prefix_depth = 5
+```
+
+**How it works:**
+- When query length ≤ prefix_depth: Prefix matches (word-start, exact, etc.) get higher priority
+- When query length > prefix_depth: All matches use fuzzy scoring equally
+- Default: 3 characters
+
+**Example:**
+- With `prefix_depth = 3`:
+  - Typing "fi" (2 chars): Prefix matches prioritized
+  - Typing "fire" (4 chars): Fuzzy matching takes over
+- With `prefix_depth = 5`:
+  - Typing "fire" (4 chars): Still uses prefix priority
+  - Typing "firef" (5 chars): Prefix priority
+  - Typing "firefo" (6 chars): Fuzzy matching
+
 ### Debugging
 ```sh
 # Quick overview grouped by mode/flags

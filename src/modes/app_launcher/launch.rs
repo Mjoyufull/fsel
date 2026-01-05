@@ -14,6 +14,13 @@ pub fn launch_app(
 ) -> Result<()> {
     let commands = shell_words::split(&app.command)?;
 
+    if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::core::debug_logger::log_event(&format!(
+            "Launch requested for '{}' with command: {}",
+            app.name, app.command
+        ));
+    }
+
     if let Some(path) = &app.path {
         env::set_current_dir(std::path::PathBuf::from(path))?;
     }
@@ -84,6 +91,18 @@ pub fn launch_app(
         exec.stdin(process::Stdio::null());
         exec.stdout(process::Stdio::null());
         exec.stderr(process::Stdio::null());
+    }
+
+    if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        let cmd_str = format!(
+            "{} {}",
+            exec.get_program().to_string_lossy(),
+            exec.get_args()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        crate::core::debug_logger::log_launch(app, &cmd_str);
     }
 
     exec.spawn()?;

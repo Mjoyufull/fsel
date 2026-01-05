@@ -1,7 +1,7 @@
 use eyre::{eyre, Result};
+use jwalk::WalkDir;
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use std::{env, fs, path};
-use jwalk::WalkDir;
 
 use crate::cli;
 use crate::core::{cache, database};

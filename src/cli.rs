@@ -1,6 +1,9 @@
 #![allow(clippy::field_reassign_with_default)]
-use std::{env, path};
+use std::env;
+use std::path;
+use std::sync::atomic::AtomicBool;
 
+pub static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum MatchMode {
@@ -33,6 +36,8 @@ Quick Extras:
       --clear-cache      Clear app cache
       --refresh-cache    Rescan desktop entries
       --filter-desktop[=no] Respect OnlyShowIn/NotShowIn (default: yes)
+      --prefix-depth <N> Character depth for prefix matching priority (default: 3)
+      -T, --test         Enable debug/test mode with detailed logging
 
 Help:
   -H, --help             Show detailed option tree
@@ -73,7 +78,9 @@ Usage:
 │  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn (default: yes)
 │  ├─ --hide-before-typing         Hide list until first character typed
 │  ├─ --list-executables-in-path   Include executables from $PATH
-│  └─ --match-mode <MODE>          fuzzy | exact (default: fuzzy)
+│  ├─ --match-mode <MODE>          fuzzy | exact (default: fuzzy)
+│  ├─ --prefix-depth <N>           Character depth for prefix matching priority (default: 3)
+│  └─ -T, --test                   Enable debug/test mode with detailed logging
 │
 ├─ Dmenu Mode Options
 │  ├─ --dmenu0                     Like --dmenu but null-separated input
@@ -102,6 +109,7 @@ Usage:
 └─ General
    ├─ -h                           Show short help
    ├─ -H, --help                   Show detailed help
+   ├─ -T, --test                   Enable debug/test mode (logs to ~/.config/fsel/logs/)
    └─ -V, --version                Show version info
 ",
         cmd = cmd
@@ -245,6 +253,10 @@ pub struct Opts {
     pub dmenu_disable_mouse: Option<bool>,
     /// Cclip-specific disable mouse option
     pub cclip_disable_mouse: Option<bool>,
+    /// Character depth for prioritized prefix matching
+    pub prefix_depth: usize,
+    /// Enable full debug/test mode with detailed logging
+    pub test_mode: bool,
 }
 
 impl Default for Opts {
@@ -350,6 +362,8 @@ impl Default for Opts {
             cclip_show_tag_color_names: None,
             dmenu_disable_mouse: None,
             cclip_disable_mouse: None,
+            prefix_depth: 3,
+            test_mode: false,
         }
     }
 }
@@ -357,14 +371,14 @@ impl Default for Opts {
 /// Parses the cli arguments
 pub fn parse() -> Result<Opts, lexopt::Error> {
     use lexopt::prelude::*;
-    
+
     // 1. First pass to find config file location
     let mut config_path_cli: Option<path::PathBuf> = None;
     let mut args_for_config_check = env::args().skip(1);
     while let Some(arg) = args_for_config_check.next() {
         if arg == "-c" || arg == "--config" {
             if let Some(val) = args_for_config_check.next() {
-                 config_path_cli = Some(path::PathBuf::from(val));
+                config_path_cli = Some(path::PathBuf::from(val));
             }
         }
     }
@@ -381,7 +395,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     // 3. Initialize Opts with defaults from Config
     #[allow(clippy::field_reassign_with_default)]
     let mut default = Opts::default();
-    
+
     // Map General Config
     default.terminal_launcher = fsel_config.general.terminal_launcher;
     default.filter_desktop = fsel_config.general.filter_desktop;
@@ -397,6 +411,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     default.detach = fsel_config.general.detach;
     default.no_exec = fsel_config.general.no_exec;
     default.confirm_first_launch = fsel_config.general.confirm_first_launch;
+    default.prefix_depth = fsel_config.general.prefix_depth;
 
     // apply [app_launcher] section overrides if they exist
     if let Some(filter) = fsel_config.app_launcher.filter_desktop {
@@ -417,68 +432,128 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     if let Some(confirm) = fsel_config.app_launcher.confirm_first_launch {
         default.confirm_first_launch = confirm;
     }
+    if let Some(depth) = fsel_config.app_launcher.prefix_depth {
+        default.prefix_depth = depth;
+    }
 
     // Map UI Config
-    if let Ok(c) = string_to_color(&fsel_config.ui.highlight_color) { default.highlight_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.highlight_color) {
+        default.highlight_color = c;
+    }
     default.cursor = fsel_config.ui.cursor;
     default.hard_stop = fsel_config.ui.hard_stop;
     default.rounded_borders = fsel_config.ui.rounded_borders;
     default.disable_mouse = fsel_config.ui.disable_mouse;
-    if let Ok(c) = string_to_color(&fsel_config.ui.main_border_color) { default.main_border_color = c; }
-    if let Ok(c) = string_to_color(&fsel_config.ui.apps_border_color) { default.apps_border_color = c; }
-    if let Ok(c) = string_to_color(&fsel_config.ui.input_border_color) { default.input_border_color = c; }
-    if let Ok(c) = string_to_color(&fsel_config.ui.main_text_color) { default.main_text_color = c; }
-    if let Ok(c) = string_to_color(&fsel_config.ui.apps_text_color) { default.apps_text_color = c; }
-    if let Ok(c) = string_to_color(&fsel_config.ui.input_text_color) { default.input_text_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.main_border_color) {
+        default.main_border_color = c;
+    }
+    if let Ok(c) = string_to_color(&fsel_config.ui.apps_border_color) {
+        default.apps_border_color = c;
+    }
+    if let Ok(c) = string_to_color(&fsel_config.ui.input_border_color) {
+        default.input_border_color = c;
+    }
+    if let Ok(c) = string_to_color(&fsel_config.ui.main_text_color) {
+        default.main_text_color = c;
+    }
+    if let Ok(c) = string_to_color(&fsel_config.ui.apps_text_color) {
+        default.apps_text_color = c;
+    }
+    if let Ok(c) = string_to_color(&fsel_config.ui.input_text_color) {
+        default.input_text_color = c;
+    }
     default.fancy_mode = fsel_config.ui.fancy_mode;
-    if let Ok(c) = string_to_color(&fsel_config.ui.header_title_color) { default.header_title_color = c; }
-    if let Ok(c) = string_to_color(&fsel_config.ui.pin_color) { default.pin_color = c; }
+    if let Ok(c) = string_to_color(&fsel_config.ui.header_title_color) {
+        default.header_title_color = c;
+    }
+    if let Ok(c) = string_to_color(&fsel_config.ui.pin_color) {
+        default.pin_color = c;
+    }
     default.pin_icon = fsel_config.ui.pin_icon;
     default.keybinds = fsel_config.ui.keybinds;
 
     // Map Layout Config
     default.title_panel_height_percent = fsel_config.layout.title_panel_height_percent;
     default.input_panel_height = fsel_config.layout.input_panel_height;
-    default.title_panel_position = match fsel_config.layout.title_panel_position.to_lowercase().as_str() {
+    default.title_panel_position = match fsel_config
+        .layout
+        .title_panel_position
+        .to_lowercase()
+        .as_str()
+    {
         "bottom" => Some(PanelPosition::Bottom),
         "middle" => Some(PanelPosition::Middle),
         "top" => Some(PanelPosition::Top),
         _ => None,
     };
-    
+
     // Map Dmenu Config
-    if let Some(d) = fsel_config.dmenu.delimiter { default.dmenu_delimiter = d; }
-    if let Some(c) = fsel_config.dmenu.password_character { default.dmenu_password_character = c; }
-    if let Some(show_line_numbers) = fsel_config.dmenu.show_line_numbers { default.dmenu_show_line_numbers = show_line_numbers; }
-    if let Some(wrap_long_lines) = fsel_config.dmenu.wrap_long_lines { default.dmenu_wrap_long_lines = wrap_long_lines; }
-    if let Some(exit_if_empty) = fsel_config.dmenu.exit_if_empty { default.dmenu_exit_if_empty = exit_if_empty; }
-    if let Some(disable_mouse) = fsel_config.dmenu.disable_mouse { default.dmenu_disable_mouse = Some(disable_mouse); }
-    if let Some(hard_stop) = fsel_config.dmenu.hard_stop { default.dmenu_hard_stop = Some(hard_stop); }
-    if let Some(rounded_borders) = fsel_config.dmenu.rounded_borders { default.dmenu_rounded_borders = Some(rounded_borders); }
-    if let Some(cursor) = fsel_config.dmenu.cursor { default.dmenu_cursor = Some(cursor); }
+    if let Some(d) = fsel_config.dmenu.delimiter {
+        default.dmenu_delimiter = d;
+    }
+    if let Some(c) = fsel_config.dmenu.password_character {
+        default.dmenu_password_character = c;
+    }
+    if let Some(show_line_numbers) = fsel_config.dmenu.show_line_numbers {
+        default.dmenu_show_line_numbers = show_line_numbers;
+    }
+    if let Some(wrap_long_lines) = fsel_config.dmenu.wrap_long_lines {
+        default.dmenu_wrap_long_lines = wrap_long_lines;
+    }
+    if let Some(exit_if_empty) = fsel_config.dmenu.exit_if_empty {
+        default.dmenu_exit_if_empty = exit_if_empty;
+    }
+    if let Some(disable_mouse) = fsel_config.dmenu.disable_mouse {
+        default.dmenu_disable_mouse = Some(disable_mouse);
+    }
+    if let Some(hard_stop) = fsel_config.dmenu.hard_stop {
+        default.dmenu_hard_stop = Some(hard_stop);
+    }
+    if let Some(rounded_borders) = fsel_config.dmenu.rounded_borders {
+        default.dmenu_rounded_borders = Some(rounded_borders);
+    }
+    if let Some(cursor) = fsel_config.dmenu.cursor {
+        default.dmenu_cursor = Some(cursor);
+    }
     if let Some(color_str) = fsel_config.dmenu.highlight_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_highlight_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_highlight_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.dmenu.main_border_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_main_border_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_main_border_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.dmenu.items_border_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_items_border_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_items_border_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.dmenu.input_border_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_input_border_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_input_border_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.dmenu.main_text_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_main_text_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_main_text_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.dmenu.items_text_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_items_text_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_items_text_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.dmenu.input_text_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_input_text_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_input_text_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.dmenu.header_title_color {
-        if let Ok(c) = string_to_color(&color_str) { default.dmenu_header_title_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.dmenu_header_title_color = Some(c);
+        }
     }
     if let Some(height) = fsel_config.dmenu.title_panel_height_percent {
         default.dmenu_title_panel_height_percent = Some(height);
@@ -494,38 +569,72 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
 
     // Map Cclip Config
-    if let Some(image_preview) = fsel_config.cclip.image_preview { default.cclip_image_preview = Some(image_preview); }
-    if let Some(hide_inline_image_message) = fsel_config.cclip.hide_inline_image_message { default.cclip_hide_inline_image_message = Some(hide_inline_image_message); }
-    if let Some(show_tag_color_names) = fsel_config.cclip.show_tag_color_names { default.cclip_show_tag_color_names = Some(show_tag_color_names); }
-    if let Some(show_line_numbers) = fsel_config.cclip.show_line_numbers { default.cclip_show_line_numbers = Some(show_line_numbers); }
-    if let Some(wrap_long_lines) = fsel_config.cclip.wrap_long_lines { default.cclip_wrap_long_lines = Some(wrap_long_lines); }
-    if let Some(disable_mouse) = fsel_config.cclip.disable_mouse { default.cclip_disable_mouse = Some(disable_mouse); }
-    if let Some(hard_stop) = fsel_config.cclip.hard_stop { default.cclip_hard_stop = Some(hard_stop); }
-    if let Some(rounded_borders) = fsel_config.cclip.rounded_borders { default.cclip_rounded_borders = Some(rounded_borders); }
-    if let Some(cursor) = fsel_config.cclip.cursor { default.cclip_cursor = Some(cursor); }
+    if let Some(image_preview) = fsel_config.cclip.image_preview {
+        default.cclip_image_preview = Some(image_preview);
+    }
+    if let Some(hide_inline_image_message) = fsel_config.cclip.hide_inline_image_message {
+        default.cclip_hide_inline_image_message = Some(hide_inline_image_message);
+    }
+    if let Some(show_tag_color_names) = fsel_config.cclip.show_tag_color_names {
+        default.cclip_show_tag_color_names = Some(show_tag_color_names);
+    }
+    if let Some(show_line_numbers) = fsel_config.cclip.show_line_numbers {
+        default.cclip_show_line_numbers = Some(show_line_numbers);
+    }
+    if let Some(wrap_long_lines) = fsel_config.cclip.wrap_long_lines {
+        default.cclip_wrap_long_lines = Some(wrap_long_lines);
+    }
+    if let Some(disable_mouse) = fsel_config.cclip.disable_mouse {
+        default.cclip_disable_mouse = Some(disable_mouse);
+    }
+    if let Some(hard_stop) = fsel_config.cclip.hard_stop {
+        default.cclip_hard_stop = Some(hard_stop);
+    }
+    if let Some(rounded_borders) = fsel_config.cclip.rounded_borders {
+        default.cclip_rounded_borders = Some(rounded_borders);
+    }
+    if let Some(cursor) = fsel_config.cclip.cursor {
+        default.cclip_cursor = Some(cursor);
+    }
     if let Some(color_str) = fsel_config.cclip.highlight_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_highlight_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_highlight_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.cclip.main_border_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_main_border_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_main_border_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.cclip.items_border_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_items_border_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_items_border_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.cclip.input_border_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_input_border_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_input_border_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.cclip.main_text_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_main_text_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_main_text_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.cclip.items_text_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_items_text_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_items_text_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.cclip.input_text_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_input_text_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_input_text_color = Some(c);
+        }
     }
     if let Some(color_str) = fsel_config.cclip.header_title_color {
-        if let Ok(c) = string_to_color(&color_str) { default.cclip_header_title_color = Some(c); }
+        if let Ok(c) = string_to_color(&color_str) {
+            default.cclip_header_title_color = Some(c);
+        }
     }
     if let Some(height) = fsel_config.cclip.title_panel_height_percent {
         default.cclip_title_panel_height_percent = Some(height);
@@ -542,7 +651,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     // 4. Parse CLI Overrides
     let mut parser = lexopt::Parser::from_env();
-    
+
     // Check for -ss option first and handle it specially
     let args: Vec<String> = env::args().collect();
     if let Some(ss_pos) = args.iter().position(|arg| arg == "-ss") {
@@ -585,8 +694,8 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 default.replace = true;
             }
             Short('c') | Long("config") => {
-                 // Already handled in pre-pass, but consume it
-                 let _ = parser.value()?;
+                // Already handled in pre-pass, but consume it
+                let _ = parser.value()?;
             }
             Long("clear-history") => {
                 default.clear_history = true;
@@ -733,6 +842,19 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                     "fuzzy" => MatchMode::Fuzzy,
                     _ => return Err("Invalid match mode. Use 'exact' or 'fuzzy'".into()),
                 };
+            }
+            Long("prefix-depth") => {
+                let depth_str = parser
+                    .value()?
+                    .into_string()
+                    .map_err(|_| "Prefix depth must be valid UTF-8")?;
+                default.prefix_depth = depth_str
+                    .parse::<usize>()
+                    .map_err(|_| "Invalid prefix depth")?;
+            }
+            Short('T') | Long("test") => {
+                default.test_mode = true;
+                default.verbose = Some(3);
             }
             Long("with-nth") => {
                 let cols_str = parser

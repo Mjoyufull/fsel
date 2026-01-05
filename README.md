@@ -364,7 +364,9 @@ Usage:
 │  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn (default: yes)
 │  ├─ --hide-before-typing         Hide list until first character typed
 │  ├─ --list-executables-in-path   Include executables from $PATH
-│  └─ --match-mode <MODE>          fuzzy | exact (default: fuzzy)
+│  ├─ --match-mode <MODE>          fuzzy | exact (default: fuzzy)
+│  ├─ --prefix-depth <N>           Character depth for prefix matching priority (default: 3)
+│  └─ -T, --test                   Enable debug/test mode with detailed logging
 │
 ├─ Dmenu Mode Options
 │  ├─ --dmenu0                     Like --dmenu but null-separated input
@@ -393,6 +395,7 @@ Usage:
 └─ General
    ├─ -h                           Show short help
    ├─ -H, --help                   Show detailed help
+   ├─ -T, --test                   Enable debug/test mode (logs to ~/.config/fsel/logs/)
    └─ -V, --version                Show version info
 ```
 
@@ -408,6 +411,28 @@ Usage:
 - `-v`: Show application execution details
 - `-vv`: Show application paths and additional metadata
 - `-vvv`: Show debug information including usage statistics
+
+#### Debug/Test Mode
+
+Use `-T` or `--test` to enable detailed debug logging:
+
+```sh
+# Enable debug mode
+fsel -T
+
+# Debug logs are written to ~/.config/fsel/logs/
+# Filename format: fsel-debug-YYYYMMDD-HHMMSS-pidXXXXX.log
+```
+
+Debug mode logs:
+- Startup configuration and loaded data
+- Query changes (each character typed)
+- Search snapshots with full scoring breakdown
+- Selection changes
+- Launch events
+- Session timing and statistics
+
+Useful for debugging search ranking, understanding why apps appear in a certain order, or analyzing performance.
 
 ## Configuration
 
@@ -429,6 +454,7 @@ list_executables_in_path = false   # Show CLI tools from $PATH
 hide_before_typing = false         # Hide list until you start typing
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 confirm_first_launch = false       # Confirm before launching new apps with -p
+prefix_depth = 3                   # Character depth for prefix matching priority
 
 # Pin/favorite settings
 pin_color = "rgb(255,165,0)"       # Color for pin icon (orange)
@@ -561,4 +587,4 @@ Fork of [gyr](https://git.sr.ht/~nkeor/gyr) by Namkhai B.
 
 ## License
 
-[BSD 2-Clause](./LICENSE) (c) 2020-2022 Namkhai B.
+[BSD 2-Clause](./LICENSE) (c) 2020-2022 Namkhai B., Mjoyufull
