@@ -101,11 +101,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@2.4.0-seedclay
+    $ cargo install fsel@2.5.0-seedclay
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@2.4.0-seedclay --force
+    $ cargo install fsel@2.5.0-seedclay --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -160,8 +160,9 @@ Run `fsel` from a terminal to open the interactive TUI launcher.
 
 #### Features
 
+- **Advanced Search Ranking**: 12-tier prioritization system ensures you find what you're looking for. Pinned apps, exact matches, and prefix matches are intelligently ranked with frecency-based scoring (zoxide-style) that learns from your usage patterns
 - **Smart Matching**: Searches names, descriptions, keywords, and categories
-- **Smart Ranking**: Apps ranked by frequency and recent usage
+- **Smart Ranking**: Apps ranked by frequency and recent usage with time-bucketed multipliers
 - **Desktop Filtering**: Respects `OnlyShowIn`/`NotShowIn` fields
 - **PATH Executables**: Optionally show CLI tools from `$PATH`
 - **Match Modes**: Fuzzy (default) or exact matching
