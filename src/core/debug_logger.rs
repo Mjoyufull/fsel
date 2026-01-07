@@ -52,7 +52,7 @@ pub fn init_test_log() -> std::io::Result<()> {
     writeln!(file, "PID: {}", pid)?;
     writeln!(file, "Version: {}", env!("CARGO_PKG_VERSION"))?;
     writeln!(file, "Log file: {:?}", path)?;
-    writeln!(file, "")?;
+    writeln!(file)?;
 
     LOG_FILE.set(path).ok();
     Ok(())
@@ -71,11 +71,11 @@ pub fn log_startup_info(cli: &crate::cli::Opts, app_count: usize, frecency_count
                 cli.list_executables_in_path
             );
             let _ = writeln!(file, "  Hide before typing: {}", cli.hide_before_typing);
-            let _ = writeln!(file, "");
+            let _ = writeln!(file);
             let _ = writeln!(file, "[STARTUP] Loaded data:");
             let _ = writeln!(file, "  Total apps: {}", app_count);
             let _ = writeln!(file, "  Frecency entries: {}", frecency_count);
-            let _ = writeln!(file, "");
+            let _ = writeln!(file);
         }
     }
 }
@@ -131,7 +131,7 @@ pub fn log_selection_change(
 pub fn log_search_snapshot(query: &str, matches: &[App], prefix_depth: usize, filter_time_ms: u64) {
     if let Some(path) = LOG_FILE.get() {
         if let Ok(mut file) = OpenOptions::new().append(true).open(path) {
-            let _ = writeln!(file, "");
+            let _ = writeln!(file);
             let _ = writeln!(
                 file,
                 "[SEARCH] Query: \"{}\" (len: {}, prefix_depth: {})",
@@ -145,7 +145,7 @@ pub fn log_search_snapshot(query: &str, matches: &[App], prefix_depth: usize, fi
                 "[SEARCH] Total matches: {} (showing top 50)",
                 matches.len()
             );
-            let _ = writeln!(file, "");
+            let _ = writeln!(file);
 
             for (idx, app) in matches.iter().take(50).enumerate() {
                 let _ = writeln!(
@@ -198,7 +198,7 @@ pub fn log_search_snapshot(query: &str, matches: &[App], prefix_depth: usize, fi
             if matches.len() > 50 {
                 let _ = writeln!(file, "       ... and {} more matches", matches.len() - 50);
             }
-            let _ = writeln!(file, "");
+            let _ = writeln!(file);
         }
     }
 }
@@ -227,7 +227,7 @@ pub fn log_session_end() {
                 .get()
                 .map(|start| start.elapsed())
                 .unwrap_or(std::time::Duration::ZERO);
-            let _ = writeln!(file, "");
+            let _ = writeln!(file);
             let _ = writeln!(file, "=== FSEL DEBUG SESSION ENDED ===");
             let _ = writeln!(file, "Duration: {:.3}s", elapsed.as_secs_f64());
             let _ = writeln!(
@@ -235,6 +235,7 @@ pub fn log_session_end() {
                 "Timestamp: {}",
                 chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
             );
+            let _ = writeln!(file);
         }
     }
 }

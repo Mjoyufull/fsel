@@ -173,26 +173,24 @@ impl State {
                         } else {
                             return None;
                         }
+                    } else if name_exact {
+                        90_000_000
+                    } else if exec_exact {
+                        85_000_000
+                    } else if name_prefix {
+                        80_000_000
+                    } else if exec_prefix {
+                        75_000_000
+                    } else if within_depth && name_word {
+                        70_000_000
+                    } else if within_depth && exec_word {
+                        65_000_000
+                    } else if within_depth && meta_match {
+                        30_000_000
+                    } else if base_fuzzy_score > 0 {
+                        0
                     } else {
-                        if name_exact {
-                            90_000_000
-                        } else if exec_exact {
-                            85_000_000
-                        } else if name_prefix {
-                            80_000_000
-                        } else if exec_prefix {
-                            75_000_000
-                        } else if within_depth && name_word {
-                            70_000_000
-                        } else if within_depth && exec_word {
-                            65_000_000
-                        } else if within_depth && meta_match {
-                            30_000_000
-                        } else if base_fuzzy_score > 0 {
-                            0
-                        } else {
-                            return None;
-                        }
+                        return None;
                     };
 
                     // 3. Frecency boost (additive)
