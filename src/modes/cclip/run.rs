@@ -1052,6 +1052,76 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             }
                         }
                     }
+                    // Delete entry (Alt+Delete)
+                    (code, mods) if cli.keybinds.matches_cclip_delete(code, mods) => {
+                        if ui.tag_mode == TagMode::Normal {
+                            if let Some(selected) = ui.selected {
+                                if selected < ui.shown.len() {
+                                    let item = &ui.shown[selected];
+                                    if let Some(rowid) = ui.get_cclip_rowid(item) {
+                                        if let Ok(()) = super::select::delete_item(&rowid) {
+                                            ui.set_temp_message(format!("Deleted entry {}", rowid));
+
+                                            // Reload clipboard history
+                                            if let Ok(updated_items) =
+                                                super::scan::get_clipboard_history()
+                                            {
+                                                // Recreate items
+                                                let new_items: Vec<Item> = updated_items
+                                                    .into_iter()
+                                                    .enumerate()
+                                                    .map(|(idx, cclip_item)| {
+                                                        let display_name = if show_line_numbers {
+                                                            cclip_item.get_display_name_with_number_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
+                                                        } else {
+                                                            cclip_item.get_display_name_with_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
+                                                        };
+
+                                                        let mut item = Item::new_simple(
+                                                            cclip_item.original_line.clone(),
+                                                            display_name,
+                                                            idx + 1,
+                                                        );
+                                                        item.tags = Some(cclip_item.tags.clone());
+                                                        item
+                                                    })
+                                                    .collect();
+
+                                                // Preserve current selection and scroll
+                                                let old_selected = ui.selected;
+                                                let old_scroll_offset = ui.scroll_offset;
+
+                                                // Update UI with new items
+                                                ui.hidden = new_items;
+                                                ui.shown.clear();
+                                                ui.filter();
+
+                                                // Restore selection and scroll
+                                                ui.selected = old_selected;
+                                                ui.scroll_offset = old_scroll_offset;
+
+                                                // Adjust selection if it's now out of bounds
+                                                if let Some(sel) = ui.selected {
+                                                    if sel >= ui.shown.len() && !ui.shown.is_empty() {
+                                                        ui.selected =
+                                                            Some(ui.shown.len().saturating_sub(1));
+                                                    } else if ui.shown.is_empty() {
+                                                        ui.selected = None;
+                                                    }
+                                                }
+
+                                                // Ensure scroll offset is sane (selection visible)
+                                                if let Some(sel) = ui.selected {
+                                                    ui.scroll_offset = ui.scroll_offset.min(sel);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            continue;
+                        }
+                    }
                     // Exit on escape or Ctrl+C/Q
                     (KeyCode::Esc, _)
                     | (KeyCode::Char('q'), KeyModifiers::CONTROL)

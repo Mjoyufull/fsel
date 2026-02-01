@@ -25,6 +25,36 @@ pub fn launch_app(
         env::set_current_dir(std::path::PathBuf::from(path))?;
     }
 
+    if cli.tty && app.is_terminal {
+        #[allow(unsafe_code)]
+        use std::os::unix::process::CommandExt;
+
+        if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+            crate::core::debug_logger::log_event("TTY mode: Replacing fsel with target app");
+            crate::core::debug_logger::log_launch(app, &app.command);
+        }
+
+        // Record history and frecency BEFORE exec since we disappear after
+        let value = app.history + 1;
+        let write_txn = db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(crate::core::cache::HISTORY_TABLE)?;
+            table.insert(app.name.as_str(), value)?;
+        }
+        write_txn.commit()?;
+
+        if let Err(e) = crate::core::database::record_access(db, &app.name) {
+            eprintln!("Warning: Failed to update frecency: {}", e);
+        }
+
+        let mut exec = process::Command::new(&commands[0]);
+        exec.args(&commands[1..]);
+
+        let err = exec.exec();
+        // If we're here, exec failed
+        return Err(io::Error::from(err).into());
+    }
+
     let mut runner: Vec<&str> = vec![];
 
     if cli.uwsm {

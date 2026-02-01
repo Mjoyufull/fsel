@@ -153,6 +153,20 @@ pub fn untag_item(rowid: &str, tag: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Delete a specific cclip item by rowid
+pub fn delete_item(rowid: &str) -> Result<()> {
+    let output = Command::new("cclip").args(["delete", rowid]).output()?;
+
+    if !output.status.success() {
+        return Err(eyre!(
+            "Failed to delete item: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    Ok(())
+}
+
 /// Wipe all tags from all cclip entries (cclip 3.2.0+)
 pub fn wipe_all_tags() -> Result<()> {
     let output = Command::new("cclip").args(["tags", "wipe"]).output()?;
