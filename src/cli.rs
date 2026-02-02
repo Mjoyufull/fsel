@@ -263,7 +263,6 @@ pub struct Opts {
     pub tty: bool,
 }
 
-
 impl Default for Opts {
     fn default() -> Self {
         Self {
@@ -373,7 +372,6 @@ impl Default for Opts {
         }
     }
 }
-
 
 /// Parses the cli arguments
 pub fn parse() -> Result<Opts, lexopt::Error> {
@@ -700,7 +698,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         match arg {
             Short('t') | Long("tty") => {
                 default.tty = true;
-                default.terminal_launcher = "fsel-tty-placeholder".to_string(); // Will be ignored in launch.rs but good for signal
+                default.terminal_launcher.clear();
             }
             Short('s') | Long("nosway") => {
                 default.sway = false;

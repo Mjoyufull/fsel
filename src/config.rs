@@ -307,7 +307,8 @@ impl FselConfig {
             cfg.general.filter_desktop = val.parse().unwrap_or(cfg.general.filter_desktop);
         }
         if let Ok(val) = env::var("FSEL_LIST_EXECUTABLES_IN_PATH") {
-            cfg.general.list_executables_in_path = val.parse().unwrap_or(cfg.general.list_executables_in_path);
+            cfg.general.list_executables_in_path =
+                val.parse().unwrap_or(cfg.general.list_executables_in_path);
         }
         if let Ok(val) = env::var("FSEL_HIDE_BEFORE_TYPING") {
             cfg.general.hide_before_typing = val.parse().unwrap_or(cfg.general.hide_before_typing);
@@ -331,7 +332,8 @@ impl FselConfig {
             cfg.general.no_exec = val.parse().unwrap_or(cfg.general.no_exec);
         }
         if let Ok(val) = env::var("FSEL_CONFIRM_FIRST_LAUNCH") {
-            cfg.general.confirm_first_launch = val.parse().unwrap_or(cfg.general.confirm_first_launch);
+            cfg.general.confirm_first_launch =
+                val.parse().unwrap_or(cfg.general.confirm_first_launch);
         }
         if let Ok(val) = env::var("FSEL_PREFIX_DEPTH") {
             cfg.general.prefix_depth = val.parse().unwrap_or(cfg.general.prefix_depth);
@@ -355,4 +357,3 @@ impl FselConfig {
         Ok(cfg)
     }
 }
-

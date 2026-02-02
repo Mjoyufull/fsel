@@ -26,7 +26,6 @@ pub fn launch_app(
     }
 
     if cli.tty && app.is_terminal {
-        #[allow(unsafe_code)]
         use std::os::unix::process::CommandExt;
 
         if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -52,7 +51,7 @@ pub fn launch_app(
 
         let err = exec.exec();
         // If we're here, exec failed
-        return Err(io::Error::from(err).into());
+        return Err(err.into());
     }
 
     let mut runner: Vec<&str> = vec![];

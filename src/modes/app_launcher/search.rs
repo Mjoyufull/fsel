@@ -61,7 +61,8 @@ pub fn find_app_by_name_fast(
         if dir.exists() {
             dirs.push(dir);
         }
-    } else if let Some(home_dir) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+    } else if let Some(home_dir) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
+    {
         let mut dir = home_dir;
         dir.push(".local/share/applications");
         if dir.exists() {
@@ -230,7 +231,8 @@ pub fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> Result<()
         if dir.exists() {
             dirs.push(dir);
         }
-    } else if let Some(home_dir) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf()) {
+    } else if let Some(home_dir) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
+    {
         let mut dir = home_dir;
         dir.push(".local/share/applications");
         if dir.exists() {

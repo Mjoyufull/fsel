@@ -1061,15 +1061,20 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     if let Some(rowid) = ui.get_cclip_rowid(item) {
                                         match super::select::delete_item(&rowid) {
                                             Ok(()) => {
-                                                ui.set_temp_message(format!("Deleted entry {}", rowid));
+                                                ui.set_temp_message(format!(
+                                                    "Deleted entry {}",
+                                                    rowid
+                                                ));
 
                                                 // Reload clipboard history (respecting tag filter if active)
-                                                let updated_items_res = if let Some(ref tag_name) = cli.cclip_tag
-                                                {
-                                                    super::scan::get_clipboard_history_by_tag(tag_name)
-                                                } else {
-                                                    super::scan::get_clipboard_history()
-                                                };
+                                                let updated_items_res =
+                                                    if let Some(ref tag_name) = cli.cclip_tag {
+                                                        super::scan::get_clipboard_history_by_tag(
+                                                            tag_name,
+                                                        )
+                                                    } else {
+                                                        super::scan::get_clipboard_history()
+                                                    };
 
                                                 if let Ok(updated_items) = updated_items_res {
                                                     // Recreate items
