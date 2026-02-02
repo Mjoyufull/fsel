@@ -22,7 +22,8 @@ pub fn init_test_log() -> std::io::Result<()> {
     }
 
     // Generate timestamped filename with PID
-    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    let timestamp = now.format(&time::format_description::parse("[year][month][day]-[hour][minute][second]").unwrap()).unwrap();
     let pid = std::process::id();
     let path = log_dir.join(format!("fsel-debug-{}-pid{}.log", timestamp, pid));
 
@@ -47,7 +48,8 @@ pub fn init_test_log() -> std::io::Result<()> {
     writeln!(
         file,
         "Timestamp: {}",
-        chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
+        time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+            .format(&time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]").unwrap()).unwrap()
     )?;
     writeln!(file, "PID: {}", pid)?;
     writeln!(file, "Version: {}", env!("CARGO_PKG_VERSION"))?;
@@ -233,7 +235,8 @@ pub fn log_session_end() {
             let _ = writeln!(
                 file,
                 "Timestamp: {}",
-                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
+                time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc())
+                    .format(&time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second].[subsecond digits:3]").unwrap()).unwrap()
             );
             let _ = writeln!(file);
         }

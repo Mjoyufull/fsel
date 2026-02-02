@@ -407,6 +407,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     default.terminal_launcher = fsel_config.general.terminal_launcher;
     if default.terminal_launcher == "tty" {
         default.tty = true;
+        default.terminal_launcher.clear();
     }
     default.filter_desktop = fsel_config.general.filter_desktop;
     default.list_executables_in_path = fsel_config.general.list_executables_in_path;

@@ -404,7 +404,7 @@ Usage:
 └─ General
    ├─ -h                           Show short help
    ├─ -H, --help                   Show detailed help
-   ├─ -T, --test                   Enable debug/test/mode (logs to ~/.config/fsel/logs/)
+   ├─ -T, --test                   Enable debug/test mode (logs to ~/.config/fsel/logs/)
    ├─ -V, --version                Show version info
    └─ -t, --tty                    Launch in current terminal (TTY mode)
 

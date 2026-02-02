@@ -1,8 +1,38 @@
-use config::{Config, ConfigError, Environment, File};
 use directories::ProjectDirs;
 use serde::Deserialize;
 use std::env;
+use std::fs;
 use std::path::PathBuf;
+
+/// Error type for config loading
+#[derive(Debug)]
+pub enum ConfigError {
+    Io(std::io::Error),
+    Toml(toml::de::Error),
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::Io(e) => write!(f, "IO error: {}", e),
+            ConfigError::Toml(e) => write!(f, "TOML parse error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {}
+
+impl From<std::io::Error> for ConfigError {
+    fn from(e: std::io::Error) -> Self {
+        ConfigError::Io(e)
+    }
+}
+
+impl From<toml::de::Error> for ConfigError {
+    fn from(e: toml::de::Error) -> Self {
+        ConfigError::Toml(e)
+    }
+}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct FselConfig {
@@ -244,9 +274,7 @@ impl Default for FselConfig {
 
 impl FselConfig {
     pub fn new(cli_config_path: Option<PathBuf>) -> Result<Self, ConfigError> {
-        let mut s = Config::builder();
-
-        // 1. Load Config File
+        // Determine config file path
         // Priority: CLI arg > XDG_CONFIG_HOME > Default fallback
         let config_path = if let Some(path) = cli_config_path {
             Some(path)
@@ -258,16 +286,73 @@ impl FselConfig {
             None
         };
 
-        if let Some(path) = config_path {
-            s = s.add_source(File::from(path).required(false));
+        // Load config from file or use defaults
+        let mut cfg: FselConfig = if let Some(ref path) = config_path {
+            if path.exists() {
+                let contents = fs::read_to_string(path)?;
+                toml::from_str(&contents)?
+            } else {
+                FselConfig::default()
+            }
+        } else {
+            FselConfig::default()
+        };
+
+        // Override with FSEL_* environment variables
+        // This replicates the behavior of config-rs Environment source
+        if let Ok(val) = env::var("FSEL_TERMINAL_LAUNCHER") {
+            cfg.general.terminal_launcher = val;
+        }
+        if let Ok(val) = env::var("FSEL_FILTER_DESKTOP") {
+            cfg.general.filter_desktop = val.parse().unwrap_or(cfg.general.filter_desktop);
+        }
+        if let Ok(val) = env::var("FSEL_LIST_EXECUTABLES_IN_PATH") {
+            cfg.general.list_executables_in_path = val.parse().unwrap_or(cfg.general.list_executables_in_path);
+        }
+        if let Ok(val) = env::var("FSEL_HIDE_BEFORE_TYPING") {
+            cfg.general.hide_before_typing = val.parse().unwrap_or(cfg.general.hide_before_typing);
+        }
+        if let Ok(val) = env::var("FSEL_MATCH_MODE") {
+            cfg.general.match_mode = val;
+        }
+        if let Ok(val) = env::var("FSEL_SWAY") {
+            cfg.general.sway = val.parse().unwrap_or(cfg.general.sway);
+        }
+        if let Ok(val) = env::var("FSEL_SYSTEMD_RUN") {
+            cfg.general.systemd_run = val.parse().unwrap_or(cfg.general.systemd_run);
+        }
+        if let Ok(val) = env::var("FSEL_UWSM") {
+            cfg.general.uwsm = val.parse().unwrap_or(cfg.general.uwsm);
+        }
+        if let Ok(val) = env::var("FSEL_DETACH") {
+            cfg.general.detach = val.parse().unwrap_or(cfg.general.detach);
+        }
+        if let Ok(val) = env::var("FSEL_NO_EXEC") {
+            cfg.general.no_exec = val.parse().unwrap_or(cfg.general.no_exec);
+        }
+        if let Ok(val) = env::var("FSEL_CONFIRM_FIRST_LAUNCH") {
+            cfg.general.confirm_first_launch = val.parse().unwrap_or(cfg.general.confirm_first_launch);
+        }
+        if let Ok(val) = env::var("FSEL_PREFIX_DEPTH") {
+            cfg.general.prefix_depth = val.parse().unwrap_or(cfg.general.prefix_depth);
+        }
+        if let Ok(val) = env::var("FSEL_HIGHLIGHT_COLOR") {
+            cfg.ui.highlight_color = val;
+        }
+        if let Ok(val) = env::var("FSEL_CURSOR") {
+            cfg.ui.cursor = val;
+        }
+        if let Ok(val) = env::var("FSEL_HARD_STOP") {
+            cfg.ui.hard_stop = val.parse().unwrap_or(cfg.ui.hard_stop);
+        }
+        if let Ok(val) = env::var("FSEL_ROUNDED_BORDERS") {
+            cfg.ui.rounded_borders = val.parse().unwrap_or(cfg.ui.rounded_borders);
+        }
+        if let Ok(val) = env::var("FSEL_DISABLE_MOUSE") {
+            cfg.ui.disable_mouse = val.parse().unwrap_or(cfg.ui.disable_mouse);
         }
 
-        // 2. Load Environment Variables
-        // Maps FSEL_TERMINAL_LAUNCHER to terminal_launcher (if flattened)
-        // config-rs environment support for flattened structs might need careful handling
-        // But with separator removed, FSEL_OPTION should match `option` field at root (flattened)
-        s = s.add_source(Environment::with_prefix("FSEL"));
-
-        s.build()?.try_deserialize()
+        Ok(cfg)
     }
 }
+

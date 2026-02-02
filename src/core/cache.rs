@@ -69,7 +69,7 @@ impl DesktopCache {
         let table = read_txn.open_table(FILE_LIST_TABLE)?;
 
         if let Some(data) = table.get("paths")? {
-            if let Ok(cache) = bincode::deserialize::<FileListCache>(data.value()) {
+            if let Ok(cache) = postcard::from_bytes::<FileListCache>(data.value()) {
                 // Check if any directory has been modified since we cached it
                 for dir in dirs {
                     if let Some(cached_mtime) = cache.dir_mtimes.get(dir) {
@@ -119,7 +119,7 @@ impl DesktopCache {
         for path in paths {
             let path_key = path.to_string_lossy();
             if let Some(data) = table.get(path_key.as_ref())? {
-                if let Ok(entry) = bincode::deserialize::<CacheEntry>(data.value()) {
+                if let Ok(entry) = postcard::from_bytes::<CacheEntry>(data.value()) {
                     // Check if file has been modified
                     if let Ok(metadata) = fs::metadata(path) {
                         if let Ok(mtime) = metadata.modified() {
@@ -154,7 +154,7 @@ impl DesktopCache {
                         };
 
                         let path_key = path.to_string_lossy();
-                        let data = bincode::serialize(&entry)?;
+                        let data = postcard::to_allocvec(&entry)?;
                         cache_table.insert(path_key.as_ref(), data.as_slice())?;
 
                         // Update name index
@@ -181,7 +181,7 @@ impl DesktopCache {
         }
 
         let cache = FileListCache { paths, dir_mtimes };
-        let data = bincode::serialize(&cache)?;
+        let data = postcard::to_allocvec(&cache)?;
 
         let write_txn = self.db.begin_write()?;
         {
@@ -217,7 +217,7 @@ impl DesktopCache {
         let table = read_txn.open_table(DESKTOP_CACHE_TABLE)?;
 
         if let Some(data) = table.get(path_key.as_ref())? {
-            if let Ok(entry) = bincode::deserialize::<CacheEntry>(data.value()) {
+            if let Ok(entry) = postcard::from_bytes::<CacheEntry>(data.value()) {
                 // Check if file has been modified
                 if let Ok(metadata) = fs::metadata(path) {
                     if let Ok(mtime) = metadata.modified() {
@@ -243,7 +243,7 @@ impl DesktopCache {
                 };
 
                 let path_key = path.to_string_lossy();
-                let data = bincode::serialize(&entry)?;
+                let data = postcard::to_allocvec(&entry)?;
 
                 let write_txn = self.db.begin_write()?;
                 {
@@ -343,7 +343,7 @@ impl HistoryCache {
         // Load pinned apps (table might not exist yet)
         if let Ok(pinned_table) = read_txn.open_table(PINNED_TABLE) {
             if let Some(data) = pinned_table.get("pinned_apps")? {
-                if let Ok(apps) = bincode::deserialize::<Vec<String>>(data.value()) {
+                if let Ok(apps) = postcard::from_bytes::<Vec<String>>(data.value()) {
                     pinned.extend(apps);
                 }
             }
