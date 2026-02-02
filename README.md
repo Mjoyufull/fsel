@@ -206,7 +206,7 @@ fsel --systemd-run -vv -p code
 
 # TTY mode: Launch terminal applications inline in the current terminal session.
 # In TTY mode fsel replaces itself with the selected terminal program (exec),
-# so the launched app takes over the current terminal (useful for htop, vim, etc).
+# so the launched app takes over the current terminal (useful for htop, vim, etc.).
 # Enable with -t or --tty, or set `terminal_launcher = "tty"` in config.
 fsel -t
 fsel --tty
