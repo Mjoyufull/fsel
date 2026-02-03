@@ -276,6 +276,7 @@ impl FselConfig {
     pub fn new(cli_config_path: Option<PathBuf>) -> Result<Self, ConfigError> {
         // Determine config file path
         // Priority: CLI arg > XDG_CONFIG_HOME > Default fallback
+        let cli_provided = cli_config_path.is_some();
         let config_path = if let Some(path) = cli_config_path {
             Some(path)
         } else if let Some(proj_dirs) = ProjectDirs::from("", "", "fsel") {
@@ -291,6 +292,12 @@ impl FselConfig {
             if path.exists() {
                 let contents = fs::read_to_string(path)?;
                 toml::from_str(&contents)?
+            } else if cli_provided {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Config file not found at {}", path.display()),
+                )
+                .into());
             } else {
                 FselConfig::default()
             }

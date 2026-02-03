@@ -13,7 +13,9 @@ pub fn launch_app(
     db: &std::sync::Arc<redb::Database>,
 ) -> Result<()> {
     let commands = shell_words::split(&app.command)?;
-
+    if commands.is_empty() {
+        return Err(eyre::eyre!("Empty command for app '{}'", app.name));
+    }
     if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
         crate::core::debug_logger::log_event(&format!(
             "Launch requested for '{}' with command: {}",
