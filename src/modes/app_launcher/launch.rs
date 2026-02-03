@@ -35,6 +35,78 @@ pub fn launch_app(
             crate::core::debug_logger::log_launch(app, &app.command);
         }
 
+        // Validate the target executable before recording history / committing.
+        // Resolve commands[0] on PATH (if it has no slash) or check the given path,
+        // and ensure it exists and is executable. This prevents failed execs from
+        // being recorded as successful launches.
+        let exe_path_opt: Option<std::path::PathBuf> = {
+            let cmd0: &str = &commands[0];
+            let cmd_path = std::path::Path::new(cmd0);
+            if cmd0.contains('/') {
+                // Path provided directly
+                if cmd_path.exists() && cmd_path.is_file() {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        match cmd_path.metadata() {
+                            Ok(md) => {
+                                if (md.permissions().mode() & 0o111) != 0 {
+                                    Some(cmd_path.to_path_buf())
+                                } else {
+                                    None
+                                }
+                            }
+                            Err(_) => None,
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        Some(cmd_path.to_path_buf())
+                    }
+                } else {
+                    None
+                }
+            } else {
+                // Search PATH
+                if let Ok(pathvar) = env::var("PATH") {
+                    let mut found: Option<std::path::PathBuf> = None;
+                    for dir in pathvar.split(':') {
+                        let candidate = std::path::Path::new(dir).join(cmd0);
+                        if candidate.exists() && candidate.is_file() {
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::PermissionsExt;
+                                if let Ok(md) = candidate.metadata() {
+                                    if (md.permissions().mode() & 0o111) != 0 {
+                                        found = Some(candidate);
+                                        break;
+                                    }
+                                }
+                            }
+                            #[cfg(not(unix))]
+                            {
+                                found = Some(candidate);
+                                break;
+                            }
+                        }
+                    }
+                    found
+                } else {
+                    None
+                }
+            }
+        };
+
+        let exe_path = match exe_path_opt {
+            Some(p) => p,
+            None => {
+                return Err(eyre::eyre!(
+                    "Executable not found or not executable: {}",
+                    commands[0]
+                ))
+            }
+        };
+
         // Record history and frecency BEFORE exec since we disappear after
         let value = app.history + 1;
         let write_txn = db.begin_write()?;
@@ -48,7 +120,7 @@ pub fn launch_app(
             eprintln!("Warning: Failed to update frecency: {}", e);
         }
 
-        let mut exec = process::Command::new(&commands[0]);
+        let mut exec = process::Command::new(exe_path);
         exec.args(&commands[1..]);
 
         let err = exec.exec();

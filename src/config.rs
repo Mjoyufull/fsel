@@ -307,6 +307,8 @@ impl FselConfig {
 
         // Override with FSEL_* environment variables
         // This replicates the behavior of config-rs Environment source
+        // Note: environment variables mirror the config keys and allow overriding
+        // values loaded from file or defaults.
         if let Ok(val) = env::var("FSEL_TERMINAL_LAUNCHER") {
             cfg.general.terminal_launcher = val;
         }
@@ -345,6 +347,7 @@ impl FselConfig {
         if let Ok(val) = env::var("FSEL_PREFIX_DEPTH") {
             cfg.general.prefix_depth = val.parse().unwrap_or(cfg.general.prefix_depth);
         }
+        // UI overrides
         if let Ok(val) = env::var("FSEL_HIGHLIGHT_COLOR") {
             cfg.ui.highlight_color = val;
         }
@@ -359,6 +362,226 @@ impl FselConfig {
         }
         if let Ok(val) = env::var("FSEL_DISABLE_MOUSE") {
             cfg.ui.disable_mouse = val.parse().unwrap_or(cfg.ui.disable_mouse);
+        }
+
+        // Layout overrides
+        if let Ok(val) = env::var("FSEL_TITLE_PANEL_HEIGHT_PERCENT") {
+            cfg.layout.title_panel_height_percent =
+                val.parse().unwrap_or(cfg.layout.title_panel_height_percent);
+        }
+        if let Ok(val) = env::var("FSEL_INPUT_PANEL_HEIGHT") {
+            cfg.layout.input_panel_height = val.parse().unwrap_or(cfg.layout.input_panel_height);
+        }
+        if let Ok(val) = env::var("FSEL_TITLE_PANEL_POSITION") {
+            cfg.layout.title_panel_position = val;
+        }
+
+        // Dmenu mode-specific overrides (optional values)
+        if let Ok(val) = env::var("FSEL_DMENU_DELIMITER") {
+            cfg.dmenu.delimiter = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_PASSWORD_CHARACTER") {
+            cfg.dmenu.password_character = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_SHOW_LINE_NUMBERS") {
+            cfg.dmenu.show_line_numbers = Some(
+                val.parse()
+                    .unwrap_or(cfg.dmenu.show_line_numbers.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_WRAP_LONG_LINES") {
+            cfg.dmenu.wrap_long_lines = Some(
+                val.parse()
+                    .unwrap_or(cfg.dmenu.wrap_long_lines.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_EXIT_IF_EMPTY") {
+            cfg.dmenu.exit_if_empty = Some(
+                val.parse()
+                    .unwrap_or(cfg.dmenu.exit_if_empty.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_DISABLE_MOUSE") {
+            cfg.dmenu.disable_mouse = Some(
+                val.parse()
+                    .unwrap_or(cfg.dmenu.disable_mouse.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_HARD_STOP") {
+            cfg.dmenu.hard_stop = Some(val.parse().unwrap_or(cfg.dmenu.hard_stop.unwrap_or(false)));
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_ROUNDED_BORDERS") {
+            cfg.dmenu.rounded_borders = Some(
+                val.parse()
+                    .unwrap_or(cfg.dmenu.rounded_borders.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_CURSOR") {
+            cfg.dmenu.cursor = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_HIGHLIGHT_COLOR") {
+            cfg.dmenu.highlight_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_MAIN_BORDER_COLOR") {
+            cfg.dmenu.main_border_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_ITEMS_BORDER_COLOR") {
+            cfg.dmenu.items_border_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_INPUT_BORDER_COLOR") {
+            cfg.dmenu.input_border_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_MAIN_TEXT_COLOR") {
+            cfg.dmenu.main_text_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_ITEMS_TEXT_COLOR") {
+            cfg.dmenu.items_text_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_INPUT_TEXT_COLOR") {
+            cfg.dmenu.input_text_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_HEADER_TITLE_COLOR") {
+            cfg.dmenu.header_title_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_TITLE_PANEL_HEIGHT_PERCENT") {
+            cfg.dmenu.title_panel_height_percent = Some(
+                val.parse().unwrap_or(
+                    cfg.dmenu
+                        .title_panel_height_percent
+                        .unwrap_or(cfg.layout.title_panel_height_percent),
+                ),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_INPUT_PANEL_HEIGHT") {
+            cfg.dmenu.input_panel_height = Some(
+                val.parse().unwrap_or(
+                    cfg.dmenu
+                        .input_panel_height
+                        .unwrap_or(cfg.layout.input_panel_height),
+                ),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_TITLE_PANEL_POSITION") {
+            cfg.dmenu.title_panel_position = Some(val);
+        }
+
+        // Cclip mode-specific overrides (optional values)
+        if let Ok(val) = env::var("FSEL_CCLIP_IMAGE_PREVIEW") {
+            cfg.cclip.image_preview = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.image_preview.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_HIDE_INLINE_IMAGE_MESSAGE") {
+            cfg.cclip.hide_inline_image_message = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.hide_inline_image_message.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_SHOW_TAG_COLOR_NAMES") {
+            cfg.cclip.show_tag_color_names = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.show_tag_color_names.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_SHOW_LINE_NUMBERS") {
+            cfg.cclip.show_line_numbers = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.show_line_numbers.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_WRAP_LONG_LINES") {
+            cfg.cclip.wrap_long_lines = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.wrap_long_lines.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_DISABLE_MOUSE") {
+            cfg.cclip.disable_mouse = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.disable_mouse.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_HARD_STOP") {
+            cfg.cclip.hard_stop = Some(val.parse().unwrap_or(cfg.cclip.hard_stop.unwrap_or(false)));
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_ROUNDED_BORDERS") {
+            cfg.cclip.rounded_borders = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.rounded_borders.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_CURSOR") {
+            cfg.cclip.cursor = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_HIGHLIGHT_COLOR") {
+            cfg.cclip.highlight_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_MAIN_BORDER_COLOR") {
+            cfg.cclip.main_border_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_ITEMS_BORDER_COLOR") {
+            cfg.cclip.items_border_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_INPUT_BORDER_COLOR") {
+            cfg.cclip.input_border_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_MAIN_TEXT_COLOR") {
+            cfg.cclip.main_text_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_ITEMS_TEXT_COLOR") {
+            cfg.cclip.items_text_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_INPUT_TEXT_COLOR") {
+            cfg.cclip.input_text_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_HEADER_TITLE_COLOR") {
+            cfg.cclip.header_title_color = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_TITLE_PANEL_HEIGHT_PERCENT") {
+            cfg.cclip.title_panel_height_percent = Some(
+                val.parse().unwrap_or(
+                    cfg.cclip
+                        .title_panel_height_percent
+                        .unwrap_or(cfg.layout.title_panel_height_percent),
+                ),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_INPUT_PANEL_HEIGHT") {
+            cfg.cclip.input_panel_height = Some(
+                val.parse().unwrap_or(
+                    cfg.cclip
+                        .input_panel_height
+                        .unwrap_or(cfg.layout.input_panel_height),
+                ),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_TITLE_PANEL_POSITION") {
+            cfg.cclip.title_panel_position = Some(val);
+        }
+
+        // App launcher legacy section overrides (optional values)
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_FILTER_DESKTOP") {
+            cfg.app_launcher.filter_desktop =
+                Some(val.parse().unwrap_or(cfg.general.filter_desktop));
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_LIST_EXECUTABLES_IN_PATH") {
+            cfg.app_launcher.list_executables_in_path =
+                Some(val.parse().unwrap_or(cfg.general.list_executables_in_path));
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_HIDE_BEFORE_TYPING") {
+            cfg.app_launcher.hide_before_typing =
+                Some(val.parse().unwrap_or(cfg.general.hide_before_typing));
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_MATCH_MODE") {
+            cfg.app_launcher.match_mode = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_CONFIRM_FIRST_LAUNCH") {
+            cfg.app_launcher.confirm_first_launch =
+                Some(val.parse().unwrap_or(cfg.general.confirm_first_launch));
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_PREFIX_DEPTH") {
+            cfg.app_launcher.prefix_depth = Some(val.parse().unwrap_or(cfg.general.prefix_depth));
         }
 
         Ok(cfg)
