@@ -427,7 +427,7 @@ A maintainer creates a release branch when:
    ```bash
    git checkout dev
    git pull origin dev
-   git checkout -b release/v2.5.0-seedclay  # Replace with actual version
+   git checkout -b release/v3.0.0-kiwicrab  # Replace with actual version
    ```
 4. Update version references on the release branch:
    - `Cargo.toml` (root directory)
@@ -437,7 +437,7 @@ A maintainer creates a release branch when:
    - Example configs if they contain version info
 5. Commit version bump:
    ```bash
-   git commit -am "chore: bump version to 2.5.0-seedclay"
+   git commit -am "chore: bump version to 3.0.0-kiwicrab"
    ```
 6. Prepare release notes following [Keep a Changelog](https://keepachangelog.com/) format.
 7. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
@@ -453,20 +453,20 @@ A maintainer creates a release branch when:
 # 1. Merge release branch to main
 git checkout main
 git pull origin main
-git merge release/v2.5.0-seedclay
+git merge release/v3.0.0-kiwicrab
 
 # 2. Tag the release
-git tag -a v2.5.0-seedclay -m "v2.5.0-seedclay: release notes here"
+git tag -a v3.0.0-kiwicrab -m "v3.0.0-kiwicrab: release notes here"
 git push origin main --tags
 
 # 3. Merge release branch back to dev (so dev has the version bump)
 git checkout dev
-git merge release/v2.5.0-seedclay
+git merge release/v3.0.0-kiwicrab
 git push origin dev
 
 # 4. Delete the release branch
-git branch -d release/v2.5.0-seedclay
-git push origin --delete release/v2.5.0-seedclay
+git branch -d release/v3.0.0-kiwicrab
+git push origin --delete release/v3.0.0-kiwicrab
 ```
 
 **Why this workflow:**
@@ -490,7 +490,7 @@ Create a release using [Keep a Changelog](https://keepachangelog.com/) format.
 Example:
 
 ```markdown
-## [2.2.0-seedclay] - 2025-10-27
+## [3.0.0-kiwicrab] - 2026-02-02
 
 ### Added
 - Tag color name display feature (--cclip-show-tag-color-names)
@@ -523,7 +523,7 @@ major.minor.patch-codename
 Example:
 
 ```
-v2.2.0-seedclay
+v3.0.0-kiwicrab
 ```
 
 ### Semantic Versioning Rules
@@ -538,15 +538,15 @@ v2.2.0-seedclay
 
 **Codenames are updated when MAJOR version changes:**
 - Codenames provide personality and memorable release identifiers
-- New codename chosen at each MAJOR version bump (e.g., 1.x.x → 2.0.0)
+- New codename chosen at each MAJOR version bump (e.g., 2.x.x → 3.0.0)
 - **Only maintainers** choose and update codenames
 - Codenames persist across MINOR and PATCH versions within same MAJOR version
 
 **Examples:**
-- `1.0.0-riceknife`, `1.0.1-riceknife`, `1.1.0-riceknife` all use "riceknife"
-- When `2.0.0` is released, new codename chosen: `2.0.0-seedclay`
-- Then `2.1.0-seedclay`, `2.1.1-seedclay`, `2.2.0-seedclay` all use "seedclay"
-- When `3.0.0` is released, new codename chosen again
+- `2.0.0-seedclay`, `2.1.0-seedclay`, `2.5.0-seedclay` all use "seedclay"
+- When `3.0.0` is released, new codename chosen: `3.0.0-kiwicrab`
+- Then `3.0.0-kiwicrab`, `3.1.0-kiwicrab`, `3.2.0-kiwicrab` all use "kiwicrab"
+- When `4.0.0` is released, new codename chosen again
 
 ### Pre-release Suffixes
 
@@ -556,7 +556,7 @@ For unstable or beta releases:
 - `v2.0.0-rc.1` (release candidate)
 
 These can be combined with codenames:
-- `v2.0.0-alpha-seedclay`
+- `v3.0.0-alpha-kiwicrab`
 
 ---
 
@@ -623,11 +623,11 @@ git push origin feat/detach-mode
 # 1. Create release branch from dev
 git checkout dev
 git pull origin dev
-git checkout -b release/v2.5.0-seedclay
+git checkout -b release/v3.0.0-kiwicrab
 
 # 2. Update version numbers in Cargo.toml, flake.nix, etc.
 # ... edit files ...
-git commit -am "chore: bump version to 2.5.0-seedclay"
+git commit -am "chore: bump version to 3.0.0-kiwicrab"
 
 # 3. Final testing
 cargo build --release
@@ -636,18 +636,18 @@ cargo test
 # 4. Merge to main and tag
 git checkout main
 git pull origin main
-git merge release/v2.5.0-seedclay
-git tag -a v2.5.0-seedclay -m "v2.5.0-seedclay: major release"
+git merge release/v3.0.0-kiwicrab
+git tag -a v3.0.0-kiwicrab -m "v3.0.0-kiwicrab: major release"
 git push origin main --tags
 
 # 5. Merge back to dev
 git checkout dev
-git merge release/v2.5.0-seedclay
+git merge release/v3.0.0-kiwicrab
 git push origin dev
 
 # 6. Clean up
-git branch -d release/v2.5.0-seedclay
-git push origin --delete release/v2.5.0-seedclay
+git branch -d release/v3.0.0-kiwicrab
+git push origin --delete release/v3.0.0-kiwicrab
 ```
 
 ### Hotfix
@@ -660,7 +660,7 @@ git checkout -b hotfix/cache
 git commit -am "fix: prevent cache corruption"
 git push origin hotfix/cache
 # PR to main, approve, merge
-git tag -a v2.2.1-seedclay -m "v2.2.1-seedclay: hotfix"
+git tag -a v3.0.1-kiwicrab -m "v3.0.1-kiwicrab: hotfix"
 git push origin main --tags
 git checkout dev
 git merge main

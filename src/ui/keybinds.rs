@@ -25,6 +25,8 @@ pub struct Keybinds {
     pub image_preview: Vec<KeyBind>,
     #[serde(default = "default_tag")]
     pub tag: Vec<KeyBind>,
+    #[serde(default = "default_cclip_delete")]
+    pub cclip_delete: Vec<KeyBind>,
 }
 
 impl Default for Keybinds {
@@ -40,6 +42,7 @@ impl Default for Keybinds {
             backspace: default_backspace(),
             image_preview: default_image_preview(),
             tag: default_tag(),
+            cclip_delete: default_cclip_delete(),
         }
     }
 }
@@ -76,6 +79,7 @@ fn parse_key(key: &str) -> (KeyCode, KeyModifiers) {
         "enter" => (KeyCode::Enter, KeyModifiers::NONE),
         "esc" | "escape" => (KeyCode::Esc, KeyModifiers::NONE),
         "backspace" => (KeyCode::Backspace, KeyModifiers::NONE),
+        "delete" => (KeyCode::Delete, KeyModifiers::NONE),
         "space" => (KeyCode::Char(' '), KeyModifiers::NONE),
         s if s.len() == 1 => (KeyCode::Char(s.chars().next().unwrap()), KeyModifiers::NONE),
         _ => (KeyCode::Null, KeyModifiers::NONE),
@@ -173,6 +177,13 @@ fn default_tag() -> Vec<KeyBind> {
     }]
 }
 
+fn default_cclip_delete() -> Vec<KeyBind> {
+    vec![KeyBind::WithMod {
+        key: "delete".to_string(),
+        modifiers: "alt".to_string(),
+    }]
+}
+
 impl Keybinds {
     pub fn matches_up(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.up.iter().any(|kb| kb.matches(code, mods))
@@ -213,5 +224,10 @@ impl Keybinds {
     /// Tag keybind for cclip mode
     pub fn matches_tag(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.tag.iter().any(|kb| kb.matches(code, mods))
+    }
+
+    /// Delete keybind for cclip mode
+    pub fn matches_cclip_delete(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        self.cclip_delete.iter().any(|kb| kb.matches(code, mods))
     }
 }

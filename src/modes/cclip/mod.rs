@@ -266,7 +266,7 @@ pub fn load_tag_metadata(
     if let Ok(read_txn) = db.begin_read() {
         if let Ok(table) = read_txn.open_table(TAG_METADATA_TABLE) {
             if let Ok(Some(data)) = table.get("tag_metadata") {
-                if let Ok(metadata) = bincode::deserialize::<Vec<TagMetadata>>(data.value()) {
+                if let Ok(metadata) = postcard::from_bytes::<Vec<TagMetadata>>(data.value()) {
                     for tag in metadata {
                         tags.insert(tag.name.clone(), tag);
                     }
@@ -284,7 +284,7 @@ pub fn save_tag_metadata(
     tags: &std::collections::HashMap<String, TagMetadata>,
 ) -> Result<()> {
     let metadata: Vec<TagMetadata> = tags.values().cloned().collect();
-    let data = bincode::serialize(&metadata)?;
+    let data = postcard::to_allocvec(&metadata)?;
 
     let write_txn = db.begin_write()?;
     {

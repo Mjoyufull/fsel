@@ -16,7 +16,7 @@ highlight_color = "LightBlue"
 # Cursor character in search box
 cursor = "█"
 
-# Command to launch terminal apps (apps with Terminal=true)
+# Command to launch terminal apps (apps with Terminal=true). Use "tty" for TTY mode (same as -t/--tty).
 terminal_launcher = "kitty -e"
 
 # Don't wrap around at list ends (false = wrap around)

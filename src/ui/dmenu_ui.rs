@@ -487,11 +487,9 @@ impl<'a> DmenuUI<'a> {
                     .replace('\t', "    ") // Tabs → 4 spaces
                     .replace(['\r', '\0'], ""); // Remove carriage returns and nulls
 
-                // Strip ANSI escape codes (basic pattern)
-                // Matches: ESC [ ... m
+                // Strip ANSI escape codes using strip-ansi-escapes crate
                 if display_content.contains('\x1b') {
-                    let re = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
-                    display_content = re.replace_all(&display_content, "").to_string();
+                    display_content = strip_ansi_escapes::strip_str(&display_content).to_string();
                 }
 
                 if self.wrap_long_lines {

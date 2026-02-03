@@ -293,7 +293,8 @@ pub async fn run(cli: Opts) -> Result<()> {
         if dir.exists() {
             dirs.push(dir);
         }
-    } else if let Some(home_dir) = dirs::home_dir() {
+    } else if let Some(home_dir) = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
+    {
         let mut dir = home_dir;
         dir.push(".local/share/applications");
         if dir.exists() {
