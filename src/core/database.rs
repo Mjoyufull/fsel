@@ -38,7 +38,7 @@ pub fn load_pinned_apps(db: &std::sync::Arc<redb::Database>) -> std::collections
             match read_txn.open_table(crate::core::cache::PINNED_TABLE) {
                 Ok(table) => {
                     match table.get("pinned_apps") {
-                        Ok(Some(data)) => match bincode::deserialize::<Vec<String>>(data.value()) {
+                        Ok(Some(data)) => match postcard::from_bytes::<Vec<String>>(data.value()) {
                             Ok(apps) => pinned.extend(apps),
                             Err(e) => {
                                 eprintln!("Warning: Failed to deserialize pinned apps: {}", e)
@@ -63,7 +63,7 @@ pub fn save_pinned_apps(
     pinned: &std::collections::HashSet<String>,
 ) -> Result<()> {
     let apps: Vec<String> = pinned.iter().cloned().collect();
-    let data = bincode::serialize(&apps)?;
+    let data = postcard::to_allocvec(&apps)?;
 
     let write_txn = db.begin_write()?;
     {
@@ -105,7 +105,7 @@ pub fn load_frecency(db: &std::sync::Arc<redb::Database>) -> HashMap<String, Fre
                 // Iterate over all entries
                 if let Ok(iter) = table.iter() {
                     for (key, value) in iter.flatten() {
-                        if let Ok(entry) = bincode::deserialize::<FrecencyEntry>(value.value()) {
+                        if let Ok(entry) = postcard::from_bytes::<FrecencyEntry>(value.value()) {
                             frecency.insert(key.value().to_string(), entry);
                         }
                     }
@@ -133,7 +133,7 @@ pub fn save_frecency(
         // Clear existing entries and write new ones
         // Note: In production, you might want to do incremental updates
         for (name, entry) in frecency {
-            let data = bincode::serialize(entry)?;
+            let data = postcard::to_allocvec(entry)?;
             table.insert(name.as_str(), data.as_slice())?;
         }
     }

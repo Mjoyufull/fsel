@@ -204,6 +204,13 @@ fsel --uwsm -p discord
 fsel --systemd-run -vv -p code
 ```
 
+# TTY mode: Launch terminal applications inline in the current terminal session.
+# In TTY mode fsel replaces itself with the selected terminal program (exec),
+# so the launched app takes over the current terminal (useful for htop, vim, etc.).
+# Enable with -t or --tty, or set `terminal_launcher = "tty"` in config.
+fsel -t
+fsel --tty
+
 ### Pre-filled Search Mode
 
 Open the TUI with a pre-filled search string. Works with app launcher, dmenu, and cclip modes:
@@ -301,6 +308,7 @@ fsel --cclip --cclip-show-tag-color-names
 - **Content Preview**: Full text preview panel
 - **Fuzzy Search**: Filter clipboard history
 - **Smart Copy**: Auto-copies selection to clipboard
+- **Entry Deletion**: Press Alt+Delete to delete the selected clipboard entry; the selection remains at the same physical position (the next item becomes selected).
 - **Tag System**: Organize clipboard items with tags (requires cclip with tag support)
 - Requires [cclip](https://github.com/heather7283/cclip)
 
@@ -397,7 +405,9 @@ Usage:
    ├─ -h                           Show short help
    ├─ -H, --help                   Show detailed help
    ├─ -T, --test                   Enable debug/test mode (logs to ~/.config/fsel/logs/)
-   └─ -V, --version                Show version info
+   ├─ -V, --version                Show version info
+   └─ -t, --tty                    Launch in current terminal (TTY mode)
+
 ```
 
 #### Launch Methods

@@ -43,6 +43,7 @@ Help:
   -H, --help             Show detailed option tree
   -h                     Show this overview
   -V, --version          Show version info
+  -t, --tty              Launch terminal apps in current terminal
 ",
         cmd = cmd
     );
@@ -110,7 +111,8 @@ Usage:
    ├─ -h                           Show short help
    ├─ -H, --help                   Show detailed help
    ├─ -T, --test                   Enable debug/test mode (logs to ~/.config/fsel/logs/)
-   └─ -V, --version                Show version info
+   ├─ -V, --version                Show version info
+   └─ -t, --tty                    Launch in current terminal (TTY mode)
 ",
         cmd = cmd
     );
@@ -257,6 +259,8 @@ pub struct Opts {
     pub prefix_depth: usize,
     /// Enable full debug/test mode with detailed logging
     pub test_mode: bool,
+    /// Launch in TTY mode (replace current process)
+    pub tty: bool,
 }
 
 impl Default for Opts {
@@ -364,6 +368,7 @@ impl Default for Opts {
             cclip_disable_mouse: None,
             prefix_depth: 3,
             test_mode: false,
+            tty: false,
         }
     }
 }
@@ -398,6 +403,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     // Map General Config
     default.terminal_launcher = fsel_config.general.terminal_launcher;
+    if default.terminal_launcher == "tty" {
+        default.tty = true;
+        default.terminal_launcher.clear();
+    }
     default.filter_desktop = fsel_config.general.filter_desktop;
     default.list_executables_in_path = fsel_config.general.list_executables_in_path;
     default.hide_before_typing = fsel_config.general.hide_before_typing;
@@ -687,6 +696,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     while let Some(arg) = parser.next()? {
         match arg {
+            Short('t') | Long("tty") => {
+                default.tty = true;
+                default.terminal_launcher.clear();
+            }
             Short('s') | Long("nosway") => {
                 default.sway = false;
             }
