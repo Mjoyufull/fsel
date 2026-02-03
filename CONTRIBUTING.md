@@ -678,7 +678,7 @@ What you expected to happen.
 What actually happened.
 
 **Environment**
-- fsel version: [e.g., 2.2.0-seedclay]
+- fsel version: [e.g., 3.0.0-kiwicrab]
 - OS: [e.g., Arch Linux, kernel 6.6.1]
 - Terminal: [e.g., kitty 0.30.0]
 - Rust version: [output of `rustc --version`]
@@ -763,7 +763,7 @@ A maintainer creates a release branch when:
    ```sh
    git checkout dev
    git pull origin dev
-   git checkout -b release/v2.5.0-seedclay  # Replace with actual version
+   git checkout -b release/v3.0.0-kiwicrab  # Replace with actual version
    ```
 4. Update version references on the release branch:
    - `Cargo.toml` (root directory)
@@ -772,7 +772,7 @@ A maintainer creates a release branch when:
    - Man pages (`fsel.1` or similar)
 5. Commit version bump:
    ```sh
-   git commit -am "chore: bump version to 2.5.0-seedclay"
+   git commit -am "chore: bump version to 3.0.0-kiwicrab"
    ```
 6. Prepare release notes following [Keep a Changelog](https://keepachangelog.com/)
 7. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance
@@ -785,12 +785,12 @@ A maintainer creates a release branch when:
 ### Codename Policy
 
 **Codenames change only on MAJOR version bumps:**
-- Codename for 2.x.x series: `seedclay`
+- Codename for 3.x.x series: `kiwicrab`
+- Previous codename for 2.x.x series: `seedclay`
 - Previous codename for 1.x.x series: `riceknife`
-- When 3.0.0 is released, a new codename will be chosen
 - **Only maintainers** choose and assign codenames
 
-This is a new policy starting from version 2.0.0. All 2.x.x releases use `seedclay`.
+This policy started from version 2.0.0. All 3.x.x releases use `kiwicrab`.
 
 ### Process
 
@@ -798,20 +798,20 @@ This is a new policy starting from version 2.0.0. All 2.x.x releases use `seedcl
 # 1. Merge release branch to main
 git checkout main
 git pull origin main
-git merge release/v2.5.0-seedclay
+git merge release/v3.0.0-kiwicrab
 
 # 2. Tag the release
-git tag -a v2.5.0-seedclay -m "v2.5.0-seedclay: release notes here"
+git tag -a v3.0.0-kiwicrab -m "v3.0.0-kiwicrab: release notes here"
 git push origin main --tags
 
 # 3. Merge release branch back to dev (so dev has the version bump)
 git checkout dev
-git merge release/v2.5.0-seedclay
+git merge release/v3.0.0-kiwicrab
 git push origin dev
 
 # 4. Delete the release branch
-git branch -d release/v2.5.0-seedclay
-git push origin --delete release/v2.5.0-seedclay
+git branch -d release/v3.0.0-kiwicrab
+git push origin --delete release/v3.0.0-kiwicrab
 ```
 
 **Why this workflow:**
@@ -826,7 +826,7 @@ git push origin --delete release/v2.5.0-seedclay
 Create a release using [Keep a Changelog](https://keepachangelog.com/) format:
 
 ```markdown
-## [2.2.0-seedclay] - 2025-10-27
+## [3.0.0-kiwicrab] - 2026-02-02
 
 ### Added
 - Tag system for clipboard items with color/emoji metadata

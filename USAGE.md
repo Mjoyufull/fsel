@@ -351,7 +351,7 @@ fsel -T
 === FSEL DEBUG SESSION STARTED ===
 Timestamp: 2025-01-15 14:30:45.123
 PID: 12345
-Version: 2.4.0-seedclay
+Version: 3.0.0-kiwicrab
 Log file: /home/user/.config/fsel/logs/fsel-debug-20250115-143045-pid12345.log
 
 [STARTUP] Configuration:

@@ -1,4 +1,4 @@
-.TH FSEL 1 "2026-01-06" "2.5.0-seedclay" "User Commands"
+.TH FSEL 1 "2026-02-02" "3.0.0-kiwicrab" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -68,6 +68,9 @@ Enable debug/test mode with detailed logging. Logs are written to \fI~/.config/f
 .TP
 .BR \-d ", " \-\-detach
 Detach launched applications from terminal session (compatible with --systemd-run and --uwsm)
+.TP
+.BR \-t ", " \-\-tty
+Launch terminal apps in the current terminal (TTY mode). Replaces the fsel process with the launched app; use with -p/--program. Overrides terminal_launcher. Useful for TTY login sessions.
 .SS "Dmenu Mode Options"
 .TP
 .B \-\-dmenu
@@ -146,6 +149,9 @@ Enable debug/test mode with detailed logging. See App Launcher Options section f
 .TP
 .BR \-V ", " \-\-version
 Show version number
+.TP
+.BR \-t ", " \-\-tty
+Launch in current terminal (TTY mode). See App Launcher Options.
 .SH CONFIGURATION
 Configuration file: \fI~/.config/fsel/config.toml\fR
 .PP
@@ -156,7 +162,7 @@ Example configuration:
 # Root level - Colors and UI options
 highlight_color = "LightBlue"
 cursor = "█"
-terminal_launcher = "kitty -e"
+terminal_launcher = "kitty -e"  # Use "tty" for TTY mode (same as -t flag)
 rounded_borders = true
 hard_stop = false
 
@@ -236,6 +242,9 @@ Open fullscreen image viewer for selected clipboard item
 .TP
 .BR "Ctrl-T"
 Tag selected clipboard item
+.TP
+.BR "Alt-Delete"
+Delete selected clipboard item (runs cclip delete). Selection and scroll position are preserved after deletion.
 .SS "Mouse Support"
 .TP
 .B Hover
