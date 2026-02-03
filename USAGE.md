@@ -349,10 +349,10 @@ fsel -T
 **Example log output:**
 ```
 === FSEL DEBUG SESSION STARTED ===
-Timestamp: 2025-01-15 14:30:45.123
+Timestamp: 2026-02-02 14:30:45.123
 PID: 12345
 Version: 3.0.0-kiwicrab
-Log file: /home/user/.config/fsel/logs/fsel-debug-20250115-143045-pid12345.log
+Log file: /home/user/.config/fsel/logs/fsel-debug-20260202-143045-pid12345.log
 
 [STARTUP] Configuration:
   Prefix depth: 3
@@ -421,7 +421,7 @@ Configuration is stored in `~/.config/fsel/config.toml`. **Field placement is cr
 highlight_color = "LightBlue"
 main_border_color = "White"
 pin_color = "Orange"
-terminal_launcher = "kitty -e"
+terminal_launcher = "kitty -e"  # or "tty" for TTY mode (-t/--tty)
 
 # App launcher specific options
 [app_launcher]
@@ -464,10 +464,10 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - Colors: `highlight_color`, `main_border_color`, `apps_border_color`, `input_border_color`, `main_text_color`, `apps_text_color`, `input_text_color`, `header_title_color`, `pin_color`
 - UI: `cursor`, `rounded_borders`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
 - Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
-- General: `terminal_launcher`, `keybinds`
+- General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `confirm_first_launch`
+- `filter_desktop`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `confirm_first_launch`, `prefix_depth`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`
