@@ -613,7 +613,7 @@ impl<'a> DmenuUI<'a> {
     }
 
     /// Check if an Item is a cclip image item by parsing its original line
-    fn is_cclip_image_item(&self, item: &crate::common::Item) -> bool {
+    pub fn is_cclip_image_item(&self, item: &crate::common::Item) -> bool {
         // Parse the tab-separated cclip format to check mime type
         // Format: rowid\tmime_type\tpreview[\ttags]
         if item.original_line.trim().is_empty() {

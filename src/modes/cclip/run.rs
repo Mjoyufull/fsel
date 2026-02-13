@@ -400,7 +400,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
             if let Some(selected) = ui.selected {
                 if selected < ui.shown.len() {
                     let item = &ui.shown[selected];
-                    if ui.get_cclip_rowid(item).is_some() {
+                    if ui.is_cclip_image_item(item) {
                         current_is_image = true;
                     }
                 }
