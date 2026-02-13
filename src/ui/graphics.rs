@@ -1,12 +1,15 @@
-use crossterm::{
-    cursor::{MoveTo, RestorePosition, SavePosition},
-    queue,
-};
 use ratatui::layout::Rect;
-use std::io::{self, Write};
+use ratatui::Frame;
+use ratatui_image::picker::Picker;
+use ratatui_image::{Resize, StatefulImage};
+use std::io::{self, Read};
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
+use eyre::{eyre, Result};
 
-/// Combined display state to eliminate race conditions
+use ratatui_image::protocol::StatefulProtocol;
+
+/// Combined display state to track what's currently on screen
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayState {
     /// No content displayed
@@ -18,41 +21,91 @@ pub enum DisplayState {
 /// Single atomic state tracker to eliminate lock contention
 pub static DISPLAY_STATE: Mutex<DisplayState> = Mutex::new(DisplayState::Empty);
 
-/// Direct terminal graphics handler inspired by Yazi
-pub struct TerminalGraphics;
-
-impl TerminalGraphics {
-    /// Write graphics data directly to terminal (bypasses ratatui)
-    pub fn write_at_position<F, T>(pos: (u16, u16), writer_fn: F) -> io::Result<T>
-    where
-        F: FnOnce(&mut io::Stderr) -> io::Result<T>,
-    {
-        use crossterm::cursor::Hide;
-        let mut stderr = io::stderr();
-
-        // Hide cursor to prevent jumping and flickering
-        queue!(stderr, Hide, SavePosition)?;
-
-        // Move to target position
-        queue!(stderr, MoveTo(pos.0, pos.1))?;
-
-        // Execute the writer function with direct terminal access
-        let result = writer_fn(&mut stderr);
-
-        // Restore cursor position
-        queue!(stderr, RestorePosition)?;
-
-        // Ensure all commands are flushed
-        stderr.flush()?;
-
-        result
-    }
-
-    // Note: Manual clearing functions removed in favor of ratatui's Clear widget
-    // The Clear widget is more reliable and integrates better with ratatui's rendering pipeline
+/// Manages image loading and rendering using ratatui-image
+pub struct ImageManager {
+    picker: Picker,
+    protocol: Option<StatefulProtocol>,
 }
 
-/// Image display adapter - chooses the right graphics protocol
+impl ImageManager {
+    /// Initialize the image manager by detecting terminal capabilities
+    /// This should be called after entering alternate screen
+    pub fn new() -> io::Result<Self> {
+        let picker = Picker::from_query_stdio()
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))?;
+        Ok(Self {
+            picker,
+            protocol: None,
+        })
+    }
+
+    /// Check if the terminal supports any high-resolution graphics protocol
+    pub fn supports_graphics(&self) -> bool {
+        use ratatui_image::picker::ProtocolType;
+        match self.picker.protocol_type() {
+            ProtocolType::Halfblocks => false,
+            _ => true,
+        }
+    }
+
+    /// Is the current protocol Kitty? (Used for specific clearing logic)
+    pub fn is_kitty(&self) -> bool {
+        use ratatui_image::picker::ProtocolType;
+        matches!(self.picker.protocol_type(), ProtocolType::Kitty)
+    }
+
+    /// Is the current protocol Sixel?
+    pub fn is_sixel(&self) -> bool {
+        use ratatui_image::picker::ProtocolType;
+        matches!(self.picker.protocol_type(), ProtocolType::Sixel)
+    }
+
+    /// Load image data from cclip and prepare it for rendering
+    pub fn load_cclip_image(&mut self, rowid: &str) -> Result<()> {
+        // Run cclip get to fetch image bytes
+        let mut child = Command::new("cclip")
+            .args(["get", rowid])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+
+        let mut bytes = Vec::new();
+        if let Some(mut stdout) = child.stdout.take() {
+            stdout.read_to_end(&mut bytes)?;
+        }
+        child.wait()?;
+
+        if bytes.is_empty() {
+            return Err(eyre!("No data received from cclip get {}", rowid));
+        }
+
+        // Decode image bytes
+        let dyn_img = image::load_from_memory(&bytes)?;
+
+        // Create new protocol state
+        self.protocol = Some(self.picker.new_resize_protocol(dyn_img));
+
+        Ok(())
+    }
+
+    /// Render the current image into the given area
+    pub fn render(&mut self, f: &mut Frame, area: Rect) {
+        if let Some(ref mut protocol) = self.protocol {
+            f.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Fit(None)),
+                area,
+                protocol,
+            );
+        }
+    }
+
+    /// Clear the current image protocol
+    pub fn clear(&mut self) {
+        self.protocol = None;
+    }
+}
+
+/// Legacy GraphicsAdapter enum to minimize breakage in matches
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GraphicsAdapter {
     Kitty,
@@ -61,7 +114,7 @@ pub enum GraphicsAdapter {
 }
 
 impl GraphicsAdapter {
-    /// Detect the best graphics adapter for the current terminal
+    /// Detect the best graphics adapter (legacy)
     pub fn detect() -> Self {
         let term = std::env::var("TERM").unwrap_or_default();
         let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
@@ -73,207 +126,5 @@ impl GraphicsAdapter {
         } else {
             Self::None
         }
-    }
-
-    /// Display cclip image data at the given area
-    pub async fn show_cclip_image(&self, rowid: &str, area: Rect) -> io::Result<()> {
-        // Show the new image (will overwrite any existing content)
-        let result = match self {
-            Self::Kitty => self.show_cclip_kitty_image(rowid, area).await,
-            Self::Sixel => self.show_cclip_sixel_image(rowid, area).await,
-            Self::None => Ok(()), // No graphics support
-        };
-
-        // Update state to track the new image
-        if result.is_ok() && *self != Self::None {
-            if let Ok(mut state) = DISPLAY_STATE.lock() {
-                *state = DisplayState::Image(area, rowid.to_string());
-            }
-        }
-
-        result
-    }
-
-    /// Display cclip image only if it's different from the currently displayed one
-    /// Uses Yazi's approach: always hide current image before showing new one
-    pub async fn show_cclip_image_if_different(&self, rowid: &str, area: Rect) -> io::Result<()> {
-        // Check if we're already displaying this exact image at this area
-        let needs_update = if let Ok(current_state) = DISPLAY_STATE.lock() {
-            match &*current_state {
-                DisplayState::Image(current_area, current_rowid) => {
-                    // Need update if different image or different area
-                    current_rowid != rowid || *current_area != area
-                }
-                _ => true, // Not showing image, need to show
-            }
-        } else {
-            true
-        };
-
-        if !needs_update {
-            // Same image at same position, skip redraw
-            return Ok(());
-        }
-
-        // Hide current image before showing new one
-        // For Kitty: uses graphics protocol (doesn't affect text)
-        // For Sixel: DON'T clear here - it would wipe text that ratatui just drew
-        //            Clearing is handled in main loop BEFORE ratatui draws
-        if matches!(self, Self::Kitty) {
-            self.image_hide()?;
-        }
-
-        // Show the new image
-        self.show_cclip_image(rowid, area).await
-    }
-
-    /// Hide any currently displayed image (Yazi's approach)
-    pub fn image_hide(&self) -> io::Result<()> {
-        if let Ok(mut state) = DISPLAY_STATE.lock() {
-            if let DisplayState::Image(area, _) = &*state {
-                self.image_erase(*area)?;
-                *state = DisplayState::Empty;
-            }
-        }
-        Ok(())
-    }
-
-    /// Erase image from specific area
-    pub fn image_erase(&self, area: Rect) -> io::Result<()> {
-        match self {
-            Self::Kitty => self.clear_kitty_graphics(area)?,
-            Self::Sixel => {
-                // For Sixel/Foot: Fill the entire area with spaces to force Foot to remove sixel
-                TerminalGraphics::write_at_position((area.x, area.y), |stderr| {
-                    let spaces = " ".repeat(area.width as usize);
-                    for y in 0..area.height {
-                        write!(stderr, "\x1b[{};{}H{}", area.y + y + 1, area.x + 1, spaces)?;
-                    }
-                    stderr.flush()?;
-                    Ok(())
-                })?;
-            }
-            Self::None => {}
-        }
-        Ok(())
-    }
-
-    /// Clear Kitty graphics using the graphics protocol
-    fn clear_kitty_graphics(&self, area: Rect) -> io::Result<()> {
-        // Use Kitty's graphics protocol to delete images only, don't clear text
-        TerminalGraphics::write_at_position((area.x, area.y), |stderr| {
-            // Delete all graphics using Kitty protocol
-            write!(stderr, "\x1b_Ga=d,d=A\x1b\\")?; // Delete all images
-            stderr.flush()?; // Force immediate execution
-            Ok(())
-        })
-    }
-
-    async fn show_cclip_kitty_image(&self, rowid: &str, area: Rect) -> io::Result<()> {
-        // pipe cclip data directly to chafa for kitty graphics with proper positioning
-        let mut cclip_child = tokio::process::Command::new("cclip")
-            .args(["get", rowid])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
-
-        if let Some(cclip_stdout) = cclip_child.stdout.take() {
-            let size_arg = format!("{}x{}", area.width, area.height);
-            let mut chafa_child = tokio::process::Command::new("chafa")
-                .args([
-                    "-f",
-                    "kitty",
-                    "--size",
-                    &size_arg,
-                    "--animate=off",
-                    "--polite=on",
-                    "-",
-                ])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            if let Some(mut chafa_stdin) = chafa_child.stdin.take() {
-                // pipe cclip output to chafa input
-                tokio::spawn(async move {
-                    let mut cclip_stdout = cclip_stdout;
-                    tokio::io::copy(&mut cclip_stdout, &mut chafa_stdin)
-                        .await
-                        .ok();
-                });
-
-                let result = chafa_child.wait_with_output().await?;
-                let _ = cclip_child.wait().await;
-
-                if result.status.success() {
-                    let graphics_data = result.stdout;
-
-                    TerminalGraphics::write_at_position((area.x, area.y), |stderr| {
-                        // position cursor at the target location
-                        write!(stderr, "\x1b[{};{}H", area.y + 1, area.x + 1)?;
-                        stderr.write_all(&graphics_data)?;
-                        stderr.flush()?;
-                        Ok(())
-                    })?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn show_cclip_sixel_image(&self, rowid: &str, area: Rect) -> io::Result<()> {
-        // pipe cclip data directly to chafa for sixel graphics
-        let mut cclip_child = tokio::process::Command::new("cclip")
-            .args(["get", rowid])
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
-
-        if let Some(cclip_stdout) = cclip_child.stdout.take() {
-            let size_arg = format!("{}x{}", area.width, area.height);
-            let mut chafa_child = tokio::process::Command::new("chafa")
-                .args([
-                    "-f",
-                    "sixels",
-                    "--size",
-                    &size_arg,
-                    "--animate=off",
-                    "--polite=on",
-                    "-",
-                ])
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::null())
-                .spawn()?;
-
-            if let Some(mut chafa_stdin) = chafa_child.stdin.take() {
-                // pipe cclip output to chafa input
-                tokio::spawn(async move {
-                    let mut cclip_stdout = cclip_stdout;
-                    tokio::io::copy(&mut cclip_stdout, &mut chafa_stdin)
-                        .await
-                        .ok();
-                });
-
-                let result = chafa_child.wait_with_output().await?;
-                let _ = cclip_child.wait().await;
-
-                if result.status.success() {
-                    let graphics_data = result.stdout;
-
-                    TerminalGraphics::write_at_position((area.x, area.y), |stderr| {
-                        // position cursor at the target location
-                        write!(stderr, "\x1b[{};{}H", area.y + 1, area.x + 1)?;
-                        stderr.write_all(&graphics_data)?;
-                        stderr.flush()?;
-                        Ok(())
-                    })?;
-                }
-            }
-        }
-
-        Ok(())
     }
 }

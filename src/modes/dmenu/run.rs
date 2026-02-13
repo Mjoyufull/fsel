@@ -208,7 +208,6 @@ pub fn run(cli: &Opts) -> Result<()> {
                                     Constraint::Min(1),
                                     Constraint::Length(input_panel_height),
                                 ]
-                                .as_ref(),
                             )
                             .split(f.area());
                         (layout, 0, 1, 2)
@@ -223,7 +222,6 @@ pub fn run(cli: &Opts) -> Result<()> {
                                     Constraint::Length(content_height.max(3)),
                                     Constraint::Length(input_panel_height),
                                 ]
-                                .as_ref(),
                             )
                             .split(f.area());
                         (layout, 1, 0, 2)
@@ -238,7 +236,6 @@ pub fn run(cli: &Opts) -> Result<()> {
                                     Constraint::Length(input_panel_height),    // Input panel
                                     Constraint::Length(content_height.max(3)), // Content panel at bottom
                                 ]
-                                .as_ref(),
                             )
                             .split(f.area());
                         (layout, 2, 0, 1)

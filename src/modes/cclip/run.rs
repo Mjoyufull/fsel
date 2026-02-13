@@ -213,6 +213,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
+    // Initialize ImageManager for ratatui-image
+    let mut image_manager = crate::ui::ImageManager::new().ok();
+
     // Input handler - use Null key to prevent Escape from killing the input thread
     // (Escape is handled manually in the main loop for tag mode cancellation)
     let input = InputConfig {
@@ -239,24 +242,17 @@ pub async fn run(cli: &Opts) -> Result<()> {
         ui.selected = Some(0);
     }
 
-    // Check if terminal supports graphics and chafa is available
-    let chafa_available = super::preview::check_chafa_available();
-
-    // enable inline preview for both Kitty and Sixel protocols
-    let graphics_adapter = crate::ui::GraphicsAdapter::detect();
-    let supports_graphics = !matches!(graphics_adapter, crate::ui::GraphicsAdapter::None);
-
-    let image_preview_enabled = cli
-        .cclip_image_preview
-        .unwrap_or(chafa_available && supports_graphics);
+    // enable inline preview if terminal supports graphics and chafa is available (or user forced it)
+    let image_preview_enabled = cli.cclip_image_preview.unwrap_or_else(|| {
+        image_manager
+            .as_ref()
+            .map(|m| m.supports_graphics())
+            .unwrap_or(false)
+    });
 
     // warn if image preview is enabled but requirements aren't met
-    if image_preview_enabled && !chafa_available {
-        eprintln!("warning: image_preview is enabled but chafa is not installed");
-        eprintln!("install chafa for image previews: https://github.com/hpjansson/chafa");
-    }
-    if image_preview_enabled && !supports_graphics {
-        eprintln!("warning: image_preview is enabled but your terminal doesn't support graphics");
+    if image_preview_enabled && image_manager.is_none() {
+        eprintln!("warning: image_preview is enabled but terminal graphics detection failed");
         eprintln!("supported terminals: Kitty, Foot, WezTerm, xterm (with sixel support)");
     }
 
@@ -317,7 +313,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         Constraint::Min(1),
                         Constraint::Length(input_panel_height),
                     ]
-                    .as_ref(),
+                
                 )
                 .split(terminal_area);
             (layout, 0, 1, 2)
@@ -331,7 +327,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         Constraint::Length(content_height),
                         Constraint::Length(input_panel_height),
                     ]
-                    .as_ref(),
+                
                 )
                 .split(terminal_area);
             (layout, 1, 0, 2)
@@ -345,7 +341,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         Constraint::Length(input_panel_height),
                         Constraint::Length(content_height),
                     ]
-                    .as_ref(),
+                
                 )
                 .split(terminal_area);
             (layout, 2, 0, 1)
@@ -396,23 +392,21 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
         // Check if current item is an image (only when not in tag mode)
         let mut current_is_image = false;
+        let mut current_rowid_opt = None;
         if image_preview_enabled && matches!(ui.tag_mode, TagMode::Normal) {
             if let Some(selected) = ui.selected {
                 if selected < ui.shown.len() {
                     let item = &ui.shown[selected];
                     if ui.is_cclip_image_item(item) {
                         current_is_image = true;
+                        current_rowid_opt = ui.get_cclip_rowid(item);
                     }
                 }
             }
         }
 
-        // For Sixel/Foot: Clear when state changes OR when showing different image
-        // We use terminal.clear() which clears the entire screen, then sync Ratatui's buffer
-        // for all panels using Clear widgets to prevent disappearing text
-        let mut needs_sixel_clear = false;
+        // Handle image loading if it changed
         if image_preview_enabled {
-            // Determine whether the currently displayed image (if any) differs
             let displayed_rowid_opt = if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
                 match &*state {
                     crate::ui::DisplayState::Image(_, displayed_rowid) => {
@@ -424,46 +418,38 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 None
             };
 
-            let current_rowid_opt = if current_is_image {
-                if let Some(selected) = ui.selected {
-                    if selected < ui.shown.len() {
-                        ui.get_cclip_rowid(&ui.shown[selected])
-                    } else {
-                        None
+            if current_is_image {
+                if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
+                    if displayed_rowid_opt.as_deref() != Some(rowid) {
+                        // Load the new image
+                        if manager.load_cclip_image(rowid).is_ok() {
+                            if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                *state = crate::ui::DisplayState::Image(ratatui::layout::Rect::default(), rowid.clone());
+                            }
+                        }
                     }
-                } else {
-                    None
                 }
-            } else {
-                None
-            };
-
-            // Decide if we need to clear the content panel area based on state transitions
-            let need_area_clear = match (previous_was_image, current_is_image) {
-                // image -> text: must clear to remove sixel
-                (true, false) => true,
-                // text -> image: clear to avoid any leftover artifacts before drawing image
-                (false, true) => true,
-                // image -> image: clear only if different rowid
-                (true, true) => displayed_rowid_opt.as_deref() != current_rowid_opt.as_deref(),
-                // text -> text: never clear (this prevents text from disappearing)
-                (false, false) => false,
-            };
-
-            // Decide graphics adapter once
-            let graphics = crate::ui::GraphicsAdapter::detect();
-
-            // For Sixel: use terminal.clear() when transitioning states to properly clear images
-            // This clears the entire screen, so we'll need to sync Ratatui's buffer for all panels
-            if need_area_clear && matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
-                // Clear entire terminal to remove lingering Sixel images
-                let _ = terminal.clear();
-                // Flag that we need to sync Ratatui's buffer for all panels
-                needs_sixel_clear = true;
+            } else if previous_was_image {
+                // Clear the image manager if we transitioned away from an image
+                if let Some(manager) = &mut image_manager {
+                    manager.clear();
+                }
+                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                    *state = crate::ui::DisplayState::Empty;
+                }
             }
         }
 
-        // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
+        // For Sixel/Foot: Clear when state changes (only if still using legacy clearing for some reason)
+        let mut needs_sixel_clear = false;
+        if image_preview_enabled {
+            let is_sixel = image_manager.as_ref().map(|m| m.is_sixel()).unwrap_or(false);
+            if is_sixel && (previous_was_image != current_is_image) {
+                let _ = terminal.clear();
+                needs_sixel_clear = true;
+            }
+        }
+ // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
         let term_is_foot = std::env::var("TERM")
             .unwrap_or_default()
             .starts_with("foot");
@@ -557,7 +543,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     Constraint::Min(1),
                                     Constraint::Length(input_panel_height),
                                 ]
-                                .as_ref(),
                             )
                             .split(f.area());
                         (layout, 0, 1, 2)
@@ -572,7 +557,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     Constraint::Length(content_height.max(3)),
                                     Constraint::Length(input_panel_height),
                                 ]
-                                .as_ref(),
                             )
                             .split(f.area());
                         (layout, 1, 0, 2)
@@ -587,7 +571,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     Constraint::Length(input_panel_height),    // Input panel
                                     Constraint::Length(content_height.max(3)), // Content panel at bottom
                                 ]
-                                .as_ref(),
                             )
                             .split(f.area());
                         (layout, 2, 0, 1)
@@ -811,17 +794,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
             // - Sixel: clear ALL panels when we did terminal.clear() to sync Ratatui's buffer
             //   This prevents disappearing text because Ratatui knows all panels were cleared
             use ratatui::widgets::Clear;
-            let graphics_runtime = crate::ui::GraphicsAdapter::detect();
+            let is_kitty = image_manager.as_ref().map(|m| m.is_kitty()).unwrap_or(false);
 
-            if matches!(graphics_runtime, crate::ui::GraphicsAdapter::Kitty) {
+            if is_kitty {
                 // Kitty: Use Clear widget for all panels (Kitty requires explicit clearing)
                 f.render_widget(Clear, chunks[content_panel_index]);
                 f.render_widget(Clear, chunks[items_panel_index]);
                 f.render_widget(Clear, chunks[input_panel_index]);
             } else if needs_sixel_clear || force_sixel_sync {
                 // Sixel: Clear ALL panels to sync Ratatui's buffer with terminal state
-                // terminal.clear() wiped the entire screen, so we need to tell Ratatui
-                // that all panels were cleared so it will redraw them properly
                 f.render_widget(Clear, chunks[content_panel_index]);
                 f.render_widget(Clear, chunks[items_panel_index]);
                 f.render_widget(Clear, chunks[input_panel_index]);
@@ -829,10 +810,25 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 force_sixel_sync = false;
             }
 
-            // NOW render all components in their dynamic positions
+            // Render all components in their dynamic positions
             f.render_widget(content_paragraph, chunks[content_panel_index]);
             f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
             f.render_widget(input_paragraph, chunks[input_panel_index]);
+
+            // Render image if enabled and we have a manager
+            if image_preview_enabled && current_is_image {
+                if let Some(manager) = &mut image_manager {
+                    // Calculate image area INSIDE the content panel borders
+                    let content_chunk = chunks[content_panel_index];
+                    let image_area = ratatui::layout::Rect {
+                        x: content_chunk.x + 1,
+                        y: content_chunk.y + 1,
+                        width: content_chunk.width.saturating_sub(2),
+                        height: content_chunk.height.saturating_sub(2),
+                    };
+                    manager.render(f, image_area);
+                }
+            }
         })?;
 
         if term_is_foot {
@@ -844,108 +840,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
         // Note: Post-draw clearing removed - using Clear widget inside draw loop instead
         // Clear widget ensures all widget areas are cleaned before rendering new content
 
-        // After ratatui draws, handle image display
-        if image_preview_enabled && current_is_image {
-            let graphics = crate::ui::GraphicsAdapter::detect();
-
-            // Show new image if current item is an image
-            {
-                if let Some(selected) = ui.selected {
-                    if selected < ui.shown.len() {
-                        let item = &ui.shown[selected];
-                        if let Some(rowid) = ui.get_cclip_rowid(item) {
-                            // Get the content panel chunk position from the last draw
-                            // We need to recalculate the layout to get the correct chunk positions
-                            let term_size = terminal.get_frame().area();
-                            let total_height = term_size.height;
-                            let content_panel_height_percent = get_cclip_u16(
-                                cli.cclip_title_panel_height_percent,
-                                cli.dmenu_title_panel_height_percent,
-                                cli.title_panel_height_percent,
-                            );
-                            let content_height =
-                                (total_height as f32 * content_panel_height_percent as f32 / 100.0)
-                                    .round() as u16;
-                            let content_height = content_height.max(3);
-                            let input_panel_height = get_cclip_u16(
-                                cli.cclip_input_panel_height,
-                                cli.dmenu_input_panel_height,
-                                cli.input_panel_height,
-                            );
-                            let content_panel_position = get_cclip_panel_position(
-                                cli.cclip_title_panel_position,
-                                cli.dmenu_title_panel_position,
-                                cli.title_panel_position
-                                    .unwrap_or(crate::cli::PanelPosition::Top),
-                            );
-
-                            // Recalculate layout to get chunk positions (same as in draw)
-                            let (chunks, content_panel_index, _, _) = match content_panel_position {
-                                crate::cli::PanelPosition::Top => {
-                                    let layout = Layout::default()
-                                        .direction(Direction::Vertical)
-                                        .constraints(
-                                            [
-                                                Constraint::Length(content_height),
-                                                Constraint::Min(1),
-                                                Constraint::Length(input_panel_height),
-                                            ]
-                                            .as_ref(),
-                                        )
-                                        .split(term_size);
-                                    (layout, 0, 1, 2)
-                                }
-                                crate::cli::PanelPosition::Middle => {
-                                    let layout = Layout::default()
-                                        .direction(Direction::Vertical)
-                                        .constraints(
-                                            [
-                                                Constraint::Min(1),
-                                                Constraint::Length(content_height),
-                                                Constraint::Length(input_panel_height),
-                                            ]
-                                            .as_ref(),
-                                        )
-                                        .split(term_size);
-                                    (layout, 1, 0, 2)
-                                }
-                                crate::cli::PanelPosition::Bottom => {
-                                    let layout = Layout::default()
-                                        .direction(Direction::Vertical)
-                                        .constraints(
-                                            [
-                                                Constraint::Min(1),
-                                                Constraint::Length(input_panel_height),
-                                                Constraint::Length(content_height),
-                                            ]
-                                            .as_ref(),
-                                        )
-                                        .split(term_size);
-                                    (layout, 2, 0, 1)
-                                }
-                            };
-
-                            // Get the content panel chunk
-                            let content_chunk = chunks[content_panel_index];
-
-                            // Calculate image area INSIDE the content panel borders
-                            let image_area = ratatui::layout::Rect {
-                                x: content_chunk.x + 1,                         // Inside left border
-                                y: content_chunk.y + 1,                         // Inside top border
-                                width: content_chunk.width.saturating_sub(2), // Account for left+right borders
-                                height: content_chunk.height.saturating_sub(2), // Account for top+bottom borders
-                            };
-
-                            // Show image inside the content panel
-                            let _ = graphics
-                                .show_cclip_image_if_different(&rowid, image_area)
-                                .await;
-                        }
-                    }
-                }
-            }
-        }
-
         // Update state for next iteration
         previous_was_image = current_is_image;
 
@@ -953,55 +847,44 @@ pub async fn run(cli: &Opts) -> Result<()> {
         match input.next()? {
             Event::Input(key) => {
                 match (key.code, key.modifiers) {
-                    // Check for image preview keybind FIRST (before other Ctrl+key checks)
+                    // Fullscreen image preview keybind
                     (code, mods) if cli.keybinds.matches_image_preview(code, mods) => {
-                        if let Some(selected) = ui.selected {
-                            if selected < ui.shown.len() {
-                                let item = &ui.shown[selected];
-                                if ui.display_image_to_terminal(item) {
-                                    // Loop to keep image displayed until Esc/q is pressed
-                                    loop {
-                                        // Use the SAME input channel as the main loop to prevent buffering/race conditions
-                                        if let Ok(crate::ui::InputEvent::Input(key_event)) =
-                                            input.next()
-                                        {
-                                            match (key_event.code, key_event.modifiers) {
-                                                (KeyCode::Esc, _)
-                                                | (KeyCode::Char('q'), _)
-                                                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                                                    break
-                                                }
-                                                _ => {} // Ignore all other keys
+                        if current_is_image {
+                            if let (Some(_rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
+                                // Fullscreen modal loop
+                                loop {
+                                    terminal.draw(|f| {
+                                        manager.render(f, f.area());
+                                    })?;
+
+                                    if let Ok(Event::Input(key_event)) = input.next() {
+                                        match (key_event.code, key_event.modifiers) {
+                                            (KeyCode::Esc, _)
+                                            | (KeyCode::Char('q'), _)
+                                            | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                                                break;
                                             }
+                                            _ => {} // Ignore other keys
                                         }
-                                        // Small sleep to prevent tight loop if channel is empty (though next() blocks)
-                                        // actually input.next() blocks so we don't need sleep
                                     }
-                                    terminal.clear().wrap_err("Failed to clear terminal")?;
-                                    // Reset display state to force refresh of inline preview when returning
-                                    if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                        *state = crate::ui::DisplayState::Empty;
-                                    }
-                                    // Reset previous_was_image so next iteration will detect state change
-                                    // and sync Ratatui's buffer properly after terminal.clear()
-                                    previous_was_image = false;
                                 }
+                                terminal.clear().wrap_err("Failed to clear terminal")?;
+                                // Reset display state to force refresh
+                                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                    *state = crate::ui::DisplayState::Empty;
+                                }
+                                previous_was_image = false;
                             }
                         }
                     }
                     // Tag keybind (Ctrl+T)
                     (code, mods) if cli.keybinds.matches_tag(code, mods) => {
                         // Clear any displayed image when entering tag mode
-                        let graphics = crate::ui::GraphicsAdapter::detect();
-                        if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
-                            // For Kitty: use graphics protocol to clear images
-                            graphics.image_hide().ok();
-                        } else if matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
-                            // For Sixel/Foot: clear entire screen to remove any lingering images
-                            let _ = terminal.clear();
-                            // Force Ratatui buffer sync on next draw
-                            force_sixel_sync = true;
+                        if let Some(manager) = &mut image_manager {
+                            manager.clear();
                         }
+                        let _ = terminal.clear();
+                        force_sixel_sync = true;
                         // Reset display state
                         if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
                             *state = crate::ui::DisplayState::Empty;
@@ -1478,157 +1361,24 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 // Normal mode: copy to clipboard
                                 if let Some(selected) = ui.selected {
                                     if selected < ui.shown.len() {
-                                        // parse the original cclip line to get rowid and mime_type
                                         let original_line = &ui.shown[selected].original_line;
-                                        let parts: Vec<&str> =
-                                            original_line.splitn(3, '\t').collect();
-                                        if parts.len() >= 2 {
-                                            let rowid = parts[0];
-                                            let mime_type = parts[1];
-
-                                            // copy to clipboard using proper piping (no shell injection)
-                                            let copy_result = if std::env::var("WAYLAND_DISPLAY")
-                                                .is_ok()
-                                            {
-                                                // wayland
-                                                let cclip_child =
-                                                    std::process::Command::new("cclip")
-                                                        .args(["get", rowid])
-                                                        .stdout(std::process::Stdio::piped())
-                                                        .stderr(std::process::Stdio::null())
-                                                        .spawn();
-
-                                                if let Ok(mut cclip) = cclip_child {
-                                                    if let Some(cclip_stdout) = cclip.stdout.take()
-                                                    {
-                                                        let wl_copy =
-                                                            std::process::Command::new("wl-copy")
-                                                                .args(["-t", mime_type])
-                                                                .stdin(std::process::Stdio::piped())
-                                                                .stdout(std::process::Stdio::null())
-                                                                .stderr(std::process::Stdio::null())
-                                                                .spawn();
-
-                                                        if let Ok(mut wl) = wl_copy {
-                                                            if let Some(wl_stdin) = wl.stdin.take()
-                                                            {
-                                                                std::thread::spawn(move || {
-                                                                    let mut cclip_stdout =
-                                                                        cclip_stdout;
-                                                                    let mut wl_stdin = wl_stdin;
-                                                                    std::io::copy(
-                                                                        &mut cclip_stdout,
-                                                                        &mut wl_stdin,
-                                                                    )
-                                                                    .ok();
-                                                                });
-
-                                                                let _ = cclip.wait();
-                                                                wl.wait().ok()
-                                                            } else {
-                                                                None
-                                                            }
-                                                        } else {
-                                                            None
-                                                        }
-                                                    } else {
-                                                        None
-                                                    }
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                // X11 - try xclip first, then xsel
-                                                let x11_tools = [
-                                                    (
-                                                        "xclip",
-                                                        vec![
-                                                            "-selection",
-                                                            "clipboard",
-                                                            "-t",
-                                                            mime_type,
-                                                        ],
-                                                    ),
-                                                    ("xsel", vec!["--clipboard", "--input"]),
-                                                ];
-
-                                                let mut result = None;
-                                                for (tool, args) in &x11_tools {
-                                                    let cclip_child =
-                                                        std::process::Command::new("cclip")
-                                                            .args(["get", rowid])
-                                                            .stdout(std::process::Stdio::piped())
-                                                            .stderr(std::process::Stdio::null())
-                                                            .spawn();
-
-                                                    if let Ok(mut cclip) = cclip_child {
-                                                        if let Some(cclip_stdout) =
-                                                            cclip.stdout.take()
-                                                        {
-                                                            let x11_child =
-                                                                std::process::Command::new(tool)
-                                                                    .args(args)
-                                                                    .stdin(
-                                                                        std::process::Stdio::piped(
-                                                                        ),
-                                                                    )
-                                                                    .stdout(
-                                                                        std::process::Stdio::null(),
-                                                                    )
-                                                                    .stderr(
-                                                                        std::process::Stdio::null(),
-                                                                    )
-                                                                    .spawn();
-
-                                                            if let Ok(mut x11) = x11_child {
-                                                                if let Some(x11_stdin) =
-                                                                    x11.stdin.take()
-                                                                {
-                                                                    std::thread::spawn(move || {
-                                                                        let mut cclip_stdout =
-                                                                            cclip_stdout;
-                                                                        let mut x11_stdin =
-                                                                            x11_stdin;
-                                                                        std::io::copy(
-                                                                            &mut cclip_stdout,
-                                                                            &mut x11_stdin,
-                                                                        )
-                                                                        .ok();
-                                                                    });
-
-                                                                    let _ = cclip.wait();
-                                                                    if let Ok(status) = x11.wait() {
-                                                                        if status.success() {
-                                                                            result = Some(status);
-                                                                            break;
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                result
-                                            };
-
-                                            match copy_result {
-                                                Some(status) if status.success() => {
-                                                    // clean up terminal completely
-                                                    terminal
-                                                        .show_cursor()
-                                                        .wrap_err("Failed to show cursor")?;
-                                                    drop(terminal);
-                                                    let _ =
-                                                        io::stderr().execute(DisableMouseCapture);
-                                                    let _ =
-                                                        io::stderr().execute(LeaveAlternateScreen);
-                                                    let _ = disable_raw_mode();
-                                                    return Ok(());
-                                                }
-                                                _ => {
-                                                    // Ignore clipboard copy errors for now
-                                                }
+                                        if let Ok(cclip_item) =
+                                            super::CclipItem::from_line(original_line.clone())
+                                        {
+                                            if let Err(e) = cclip_item.copy_to_clipboard() {
+                                                ui.set_temp_message(format!("Copy failed: {}", e));
+                                                continue;
                                             }
+
+                                            // clean up terminal completely and exit
+                                            terminal
+                                                .show_cursor()
+                                                .wrap_err("Failed to show cursor")?;
+                                            drop(terminal);
+                                            let _ = io::stderr().execute(DisableMouseCapture);
+                                            let _ = io::stderr().execute(LeaveAlternateScreen);
+                                            let _ = disable_raw_mode();
+                                            return Ok(());
                                         }
                                     }
                                 }

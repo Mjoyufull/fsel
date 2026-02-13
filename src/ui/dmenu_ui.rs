@@ -430,20 +430,17 @@ impl<'a> DmenuUI<'a> {
                         // Show minimal or blank content for images
                         self.text = vec![Line::from(Span::raw(String::new()))];
                     } else {
-                        // Placeholder text (image drawn after ratatui)
-                        let image_info = self.get_image_info(&item_clone);
+                        // Info for the image manager to render
                         self.text = vec![
-                            Line::from(Span::raw("  [INLINE IMAGE PREVIEW]".to_string())),
-                            Line::from(Span::raw(image_info)),
-                            Line::from(Span::raw(String::new())),
-                            Line::from(Span::raw(
-                                "󱇛 Press 'Alt+i' for fullscreen view".to_string(),
-                            )),
-                            Line::from(Span::raw(
-                                " Press 'Enter' to copy to clipboard".to_string(),
-                            )),
-                            Line::from(Span::raw(String::new())),
-                            Line::from(Span::raw("Loading image preview...".to_string())),
+                            Line::from(vec![
+                                Span::styled("󰋩 IMAGE PREVIEW ", Style::default().add_modifier(Modifier::BOLD)),
+                                Span::styled("- Loading...", Style::default().fg(Color::Yellow)),
+                            ]),
+                            Line::from(""),
+                            Line::from("  󱇛 Press 'Alt+i' for Fullscreen View"),
+                            Line::from("  󰆏 Press 'Enter' to Copy to Clipboard"),
+                            Line::from(""),
+                            Line::from(self.get_image_info(&item_clone)),
                         ];
                     }
                     return;
@@ -675,175 +672,37 @@ impl<'a> DmenuUI<'a> {
     }
 
     /// Get image info for display in the preview panel
-    fn get_image_info(&self, item: &crate::common::Item) -> String {
-        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+    pub fn get_image_info(&self, item: &crate::common::Item) -> String {
+        if !self.is_cclip_image_item(item) {
+            return String::new();
+        }
+
+        let parts: Vec<&str> = item.original_line.split('\t').collect();
         if parts.len() >= 3 {
-            let mime_type = parts[1].trim();
-            let preview = parts[2].trim();
-            format!("Type: {}\nInfo: {}", mime_type, preview)
+            // Usually: rowid, mime_type, preview (which contains size/meta)
+            parts[2].to_string()
         } else {
-            "Image information unavailable".to_string()
+            "Unknown Image".to_string()
         }
     }
+
 
     /// Get the rowid for any cclip item (not just images)
     pub fn get_cclip_rowid(&self, item: &crate::common::Item) -> Option<String> {
-        if !self.is_cclip_item(item) {
+        let original_line = &item.original_line;
+        if original_line.is_empty() {
             return None;
         }
 
-        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
-        if !parts.is_empty() {
-            Some(parts[0].trim().to_string())
-        } else {
-            None
-        }
-    }
-
-    /// Display image directly to terminal, bypassing ratatui
-    /// Returns true if image was displayed successfully
-    pub fn display_image_to_terminal(&self, item: &crate::common::Item) -> bool {
-        use std::io::Write;
-        if !self.is_cclip_image_item(item) {
-            return false;
-        }
-
-        // Parse the tab-separated cclip format to get rowid
-        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
-        if !parts.is_empty() {
+        // Try to parse the tab-separated format (rowid\tmime\tpreview)
+        let parts: Vec<&str> = original_line.splitn(2, '\t').collect();
+        if parts.len() >= 1 {
             let rowid = parts[0].trim();
-
-            // Detect terminal and choose appropriate format for fullscreen display
-            let terminal_type = std::env::var("TERM").unwrap_or_default();
-            let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
-
-            // Try multiple image formats
-            let formats = if term_program == "kitty" || terminal_type.contains("kitty") {
-                vec!["kitty", "sixels"]
-            } else if terminal_type.starts_with("foot") {
-                vec!["sixels"] // Foot specifically (includes foot-extra)
-            } else {
-                vec!["sixels", "iterm2"] // Default for wezterm, xterm, etc.
-            };
-
-            // Get terminal size for proper centering
-            let (term_width, term_height) = if let Ok((w, h)) = crossterm::terminal::size() {
-                (w as usize, h as usize)
-            } else {
-                (80, 24) // fallback
-            };
-
-            // Size policy:
-            // - Kitty: almost full-screen (keeps small margins)
-            // - Foot/Sixel: true full-screen to avoid any alignment quirks
-            let is_foot = terminal_type.starts_with("foot");
-
-            let (image_width, image_height) = if is_foot {
-                (term_width, term_height) // fill entire screen for foot
-            } else {
-                (
-                    (term_width * 90 / 100).max(40),  // 90% width
-                    (term_height * 85 / 100).max(20), // 85% height
-                )
-            };
-
-            // Clear any existing inline images before showing fullscreen
-            let graphics = crate::ui::GraphicsAdapter::detect();
-            if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
-                // For Kitty: use graphics protocol to clear images
-                graphics.image_hide().ok();
-            } else if matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
-                // For Sixel/Foot: clear entire screen to remove any lingering images
-                use crossterm::execute;
-                use crossterm::terminal::Clear as TerminalClear;
-                use crossterm::terminal::ClearType;
-                let mut stderr = std::io::stderr();
-                let _ = execute!(stderr, TerminalClear(ClearType::All));
-                let _ = stderr.flush();
+            if !rowid.is_empty() && rowid.chars().all(|c| c.is_ascii_digit()) {
+                return Some(rowid.to_string());
             }
-
-            // try multiple formats until one works
-            let mut success = false;
-
-            for format in formats {
-                // Clear screen completely for both Kitty and Foot to show clean fullscreen image
-                {
-                    use crossterm::cursor::MoveTo;
-                    use crossterm::execute;
-                    use crossterm::terminal::Clear as TerminalClear;
-                    use crossterm::terminal::ClearType;
-                    let mut stderr = std::io::stderr();
-                    // Clear entire screen
-                    let _ = execute!(stderr, TerminalClear(ClearType::All));
-                    // Move cursor to top-left for clean fullscreen display
-                    let _ = execute!(stderr, MoveTo(0, 0));
-                    let _ = stderr.flush();
-                }
-
-                // pipe cclip output to chafa
-                let cclip_child = std::process::Command::new("cclip")
-                    .args(["get", rowid])
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::null())
-                    .spawn();
-
-                if let Ok(mut cclip) = cclip_child {
-                    if let Some(cclip_stdout) = cclip.stdout.take() {
-                        let size_arg = format!("{}x{}", image_width, image_height);
-
-                        // Reposition cursor for centering/fullscreen before spawning chafa
-                        // - For foot: top-left for true fullscreen
-                        // - For others: best-effort centering using MoveTo
-                        {
-                            use crossterm::cursor::MoveTo;
-                            use crossterm::execute;
-                            use std::io::Write;
-                            let mut stderr = std::io::stderr();
-                            let start_x = if is_foot {
-                                0
-                            } else {
-                                term_width.saturating_sub(image_width) / 2
-                            } as u16;
-                            let start_y = if is_foot {
-                                0
-                            } else {
-                                term_height.saturating_sub(image_height) / 2
-                            } as u16;
-                            let _ = execute!(stderr, MoveTo(start_x, start_y));
-                            let _ = stderr.flush();
-                        }
-
-                        let chafa_child = std::process::Command::new("chafa")
-                            .args(["--size", &size_arg, "--align", "center", "-f", format, "-"])
-                            .stdin(std::process::Stdio::piped())
-                            .stdout(std::process::Stdio::inherit())
-                            .stderr(std::process::Stdio::null())
-                            .spawn();
-
-                        if let Ok(mut chafa) = chafa_child {
-                            if let Some(mut chafa_stdin) = chafa.stdin.take() {
-                                std::thread::spawn(move || {
-                                    let mut cclip_stdout = cclip_stdout;
-                                    std::io::copy(&mut cclip_stdout, &mut chafa_stdin).ok();
-                                });
-
-                                let _ = cclip.wait();
-                                if let Ok(status) = chafa.wait() {
-                                    if status.success() {
-                                        success = true;
-                                        break; // found a working format
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            success
-        } else {
-            false
         }
+        None
     }
 
     /// Updates shown and hidden items with matching (fuzzy or exact)
