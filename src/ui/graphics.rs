@@ -3,7 +3,6 @@ use ratatui::layout::Rect;
 use ratatui::Frame;
 use ratatui_image::picker::Picker;
 use ratatui_image::{Resize, StatefulImage};
-use std::io;
 use std::process::Stdio;
 use std::sync::Mutex;
 
@@ -33,23 +32,17 @@ pub struct ImageManager {
 impl ImageManager {
     /// Initialize the image manager by detecting terminal capabilities
     /// This should be called after entering alternate screen
-    pub fn new() -> io::Result<Self> {
-        let picker =
-            Picker::from_query_stdio().map_err(|e| io::Error::other(format!("{:?}", e)))?;
-        Ok(Self {
+    pub fn new(picker: Picker) -> Self {
+        Self {
             picker,
             protocol: None,
-        })
+        }
     }
 
     /// Check if the terminal supports any high-resolution graphics protocol
+    /// Note: Halfblocks is considered a lower-fidelity but valid fallback.
     pub fn supports_graphics(&self) -> bool {
-        !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
-    }
-
-    /// Is the current protocol Kitty? (Used for specific clearing logic)
-    pub fn is_kitty(&self) -> bool {
-        matches!(self.picker.protocol_type(), ProtocolType::Kitty)
+        true
     }
 
     /// Is the current protocol Sixel?
@@ -81,7 +74,17 @@ impl ImageManager {
         let bytes =
             match tokio::time::timeout(std::time::Duration::from_millis(1500), read_future).await {
                 Ok(res) => {
-                    let _ = child.wait().await;
+                    // Also wrap child.wait() in a timeout to avoid blocking the executor
+                    match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait())
+                        .await
+                    {
+                        Ok(wait_res) => {
+                            let _ = wait_res;
+                        }
+                        Err(_) => {
+                            let _ = child.kill().await;
+                        }
+                    }
                     res?
                 }
                 Err(_) => {
@@ -135,8 +138,8 @@ pub enum GraphicsAdapter {
 
 impl GraphicsAdapter {
     /// Detect the best graphics adapter (legacy)
-    pub fn detect() -> Self {
-        if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
+    pub fn detect(picker: Option<&Picker>) -> Self {
+        if let Some(picker) = picker {
             use ratatui_image::picker::ProtocolType;
             match picker.protocol_type() {
                 ProtocolType::Kitty => return Self::Kitty,

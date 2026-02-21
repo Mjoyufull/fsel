@@ -211,12 +211,20 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Initialize ImageManager for ratatui-image
-    let mut image_manager = match crate::ui::ImageManager::new() {
-        Ok(manager) => Some(manager),
-        Err(e) => {
-            eprintln!("warning: ImageManager init failed: {}", e);
-            None
-        }
+    // Detect terminal capabilities ONCE
+    let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+    let picker_fallback = || ratatui_image::picker::Picker::halfblocks();
+
+    let mut image_manager = picker
+        .clone()
+        .map(crate::ui::ImageManager::new)
+        .or_else(|| Some(crate::ui::ImageManager::new(picker_fallback())));
+
+    // Track initialization errors to show in UI later
+    let mut image_init_error = if picker.is_none() {
+        Some("Terminal graphics detection failed (using half-block fallback)".to_string())
+    } else {
+        None
     };
 
     // Input handler - use Null key to prevent Escape from killing the input thread
@@ -245,6 +253,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
         ui.selected = Some(0);
     }
 
+    // Show init error if any
+    if let Some(err) = image_init_error.take() {
+        ui.set_temp_message(err);
+    }
+
     // enable inline preview if terminal supports graphics and chafa is available (or user forced it)
     let image_preview_enabled = cli.cclip_image_preview.unwrap_or_else(|| {
         image_manager
@@ -254,9 +267,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
     });
 
     // warn if image preview is enabled but requirements aren't met
-    if image_preview_enabled && image_manager.is_none() {
-        eprintln!("warning: image_preview is enabled but terminal graphics detection failed");
-        eprintln!("supported terminals: Kitty, Foot, WezTerm, xterm (with sixel support)");
+    if image_preview_enabled && picker.is_none() {
+        ui.set_temp_message(
+            "image_preview enabled but terminal graphics detection failed".to_string(),
+        );
     }
 
     // Get effective colors with cclip -> dmenu -> regular inheritance
@@ -450,6 +464,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 cli.dmenu_input_panel_height,
                 cli.input_panel_height,
             );
+
+            // Re-detect graphics adapter with the shared picker
+            let graphics = crate::ui::GraphicsAdapter::detect(picker.as_ref());
+
+            // Layout calculation
 
             // Layout calculation
             let total_height = f.area().height;
@@ -722,10 +741,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
             // - Sixel: clear ALL panels when we did terminal.clear() to sync Ratatui's buffer
             //   This prevents disappearing text because Ratatui knows all panels were cleared
             use ratatui::widgets::Clear;
-            let is_kitty = image_manager
-                .as_ref()
-                .map(|m| m.is_kitty())
-                .unwrap_or(false);
+            let is_kitty = matches!(graphics, crate::ui::GraphicsAdapter::Kitty);
 
             if is_kitty {
                 // Kitty: Use Clear widget for all panels (Kitty requires explicit clearing)
@@ -855,7 +871,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     // Untag keybind (Alt+T)
                     (KeyCode::Char('t'), KeyModifiers::ALT) => {
                         if let Some(selected_idx) = ui.selected {
-                            if !ui.shown.is_empty() {
+                            if selected_idx < ui.shown.len() {
                                 let item = &ui.shown[selected_idx];
                                 let selected_item = Some(item.original_line.clone());
                                 if let Ok(cclip_item) =
@@ -906,59 +922,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     };
 
                                                 if let Ok(updated_items) = updated_items_res {
-                                                    // Recreate items
-                                                    let new_items: Vec<Item> = updated_items
-                                                        .into_iter()
-                                                        .enumerate()
-                                                        .map(|(idx, cclip_item)| {
-                                                            let display_name = if show_line_numbers {
-                                                                cclip_item.get_display_name_with_number_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                            } else {
-                                                                cclip_item.get_display_name_with_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                            };
-
-                                                            let mut item = Item::new_simple(
-                                                                cclip_item.original_line.clone(),
-                                                                display_name,
-                                                                idx + 1,
-                                                            );
-                                                            item.tags =
-                                                                Some(cclip_item.tags.clone());
-                                                            item
-                                                        })
-                                                        .collect();
-
-                                                    // Preserve current selection and scroll
-                                                    let old_selected = ui.selected;
-                                                    let old_scroll_offset = ui.scroll_offset;
-
-                                                    // Update UI with new items
-                                                    ui.hidden = new_items;
-                                                    ui.shown.clear();
-                                                    ui.filter();
-
-                                                    // Restore selection and scroll
-                                                    ui.selected = old_selected;
-                                                    ui.scroll_offset = old_scroll_offset;
-
-                                                    // Adjust selection if it's now out of bounds
-                                                    if let Some(sel) = ui.selected {
-                                                        if sel >= ui.shown.len()
-                                                            && !ui.shown.is_empty()
-                                                        {
-                                                            ui.selected = Some(
-                                                                ui.shown.len().saturating_sub(1),
-                                                            );
-                                                        } else if ui.shown.is_empty() {
-                                                            ui.selected = None;
-                                                        }
-                                                    }
-
-                                                    // Ensure scroll offset is sane (selection visible)
-                                                    if let Some(sel) = ui.selected {
-                                                        ui.scroll_offset =
-                                                            ui.scroll_offset.min(sel);
-                                                    }
+                                                    reload_and_restore(
+                                                        &mut ui,
+                                                        updated_items,
+                                                        &tag_metadata_formatter,
+                                                        show_line_numbers,
+                                                        show_tag_color_names,
+                                                    );
                                                 }
                                             }
                                             Err(e) => {
@@ -1125,7 +1095,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                             if let Err(e) =
                                                 super::select::tag_item(rowid, &tag_name)
                                             {
-                                                eprintln!("Failed to tag item: {}", e);
+                                                ui.set_temp_message(format!(
+                                                    "Failed to tag item: {}",
+                                                    e
+                                                ));
                                                 ui.tag_mode = TagMode::Normal;
                                                 continue;
                                             }
@@ -1146,65 +1119,21 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         );
 
                                         // Reload clipboard history to get updated tags
-                                        if let Ok(updated_items) =
-                                            super::scan::get_clipboard_history()
-                                        {
-                                            // Recreate items with updated formatter
-                                            let new_items: Vec<Item> = updated_items
-                                                .into_iter()
-                                                .enumerate()
-                                                .map(|(idx, cclip_item)| {
-                                                    let display_name = if show_line_numbers {
-                                                        cclip_item.get_display_name_with_number_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                    } else {
-                                                        cclip_item.get_display_name_with_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                    };
+                                        let updated_items_res =
+                                            if let Some(ref tag_name) = cli.cclip_tag {
+                                                super::scan::get_clipboard_history_by_tag(tag_name)
+                                            } else {
+                                                super::scan::get_clipboard_history()
+                                            };
 
-                                                    let mut item = Item::new_simple(
-                                                        cclip_item.original_line.clone(),
-                                                        display_name,
-                                                        idx + 1
-                                                    );
-                                                    item.tags = Some(cclip_item.tags.clone());
-                                                    item
-                                                })
-                                                .collect();
-
-                                            // Preserve current selection by rowid (first field in original_line)
-                                            let selected_rowid = ui
-                                                .selected
-                                                .and_then(|idx| ui.shown.get(idx))
-                                                .and_then(|item| {
-                                                    item.original_line
-                                                        .split('\t')
-                                                        .next()
-                                                        .map(|s| s.to_string())
-                                                });
-
-                                            // Preserve scroll offset
-                                            let old_scroll_offset = ui.scroll_offset;
-
-                                            // Update UI with new items
-                                            ui.hidden = new_items;
-                                            ui.shown.clear();
-                                            ui.filter();
-
-                                            // Restore selection by finding the same rowid
-                                            if let Some(ref rowid) = selected_rowid {
-                                                if let Some(pos) =
-                                                    ui.shown.iter().position(|item| {
-                                                        item.original_line.split('\t').next()
-                                                            == Some(rowid.as_str())
-                                                    })
-                                                {
-                                                    ui.selected = Some(pos);
-                                                    // Restore scroll offset, ensuring selected item is visible
-                                                    ui.scroll_offset = old_scroll_offset.min(pos);
-                                                } else if !ui.shown.is_empty() {
-                                                    ui.selected = Some(0);
-                                                    ui.scroll_offset = 0;
-                                                }
-                                            }
+                                        if let Ok(updated_items) = updated_items_res {
+                                            reload_and_restore(
+                                                &mut ui,
+                                                updated_items,
+                                                &tag_metadata_formatter,
+                                                show_line_numbers,
+                                                show_tag_color_names,
+                                            );
                                         }
                                     }
                                 }
@@ -1232,69 +1161,29 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         if let Err(e) =
                                             super::select::untag_item(rowid, tag_to_remove)
                                         {
-                                            eprintln!("Failed to remove tag: {}", e);
+                                            ui.set_temp_message(format!(
+                                                "Failed to remove tag: {}",
+                                                e
+                                            ));
                                         } else {
                                             // Reload clipboard history to get updated tags
-                                            if let Ok(updated_items) =
-                                                super::scan::get_clipboard_history()
+                                            // Reload clipboard history to get updated tags
+                                            let updated_items_res = if let Some(ref tag_name) =
+                                                cli.cclip_tag
                                             {
-                                                // Recreate items with current formatter
-                                                let new_items: Vec<Item> = updated_items
-                                                    .into_iter()
-                                                    .enumerate()
-                                                    .map(|(idx, cclip_item)| {
-                                                        let display_name = if show_line_numbers {
-                                                            cclip_item.get_display_name_with_number_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                        } else {
-                                                            cclip_item.get_display_name_with_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                        };
+                                                super::scan::get_clipboard_history_by_tag(tag_name)
+                                            } else {
+                                                super::scan::get_clipboard_history()
+                                            };
 
-                                                        let mut item = Item::new_simple(
-                                                            cclip_item.original_line.clone(),
-                                                            display_name,
-                                                            idx + 1
-                                                        );
-                                                        item.tags = Some(cclip_item.tags.clone());
-                                                        item
-                                                    })
-                                                    .collect();
-
-                                                // Preserve current selection by rowid (first field in original_line)
-                                                let selected_rowid = ui
-                                                    .selected
-                                                    .and_then(|idx| ui.shown.get(idx))
-                                                    .and_then(|item| {
-                                                        item.original_line
-                                                            .split('\t')
-                                                            .next()
-                                                            .map(|s| s.to_string())
-                                                    });
-
-                                                // Preserve scroll offset
-                                                let old_scroll_offset = ui.scroll_offset;
-
-                                                // Update UI with new items
-                                                ui.hidden = new_items;
-                                                ui.shown.clear();
-                                                ui.filter();
-
-                                                // Restore selection by finding the same rowid
-                                                if let Some(ref rowid) = selected_rowid {
-                                                    if let Some(pos) =
-                                                        ui.shown.iter().position(|item| {
-                                                            item.original_line.split('\t').next()
-                                                                == Some(rowid.as_str())
-                                                        })
-                                                    {
-                                                        ui.selected = Some(pos);
-                                                        // Restore scroll offset, ensuring selected item is visible
-                                                        ui.scroll_offset =
-                                                            old_scroll_offset.min(pos);
-                                                    } else if !ui.shown.is_empty() {
-                                                        ui.selected = Some(0);
-                                                        ui.scroll_offset = 0;
-                                                    }
-                                                }
+                                            if let Ok(updated_items) = updated_items_res {
+                                                reload_and_restore(
+                                                    &mut ui,
+                                                    updated_items,
+                                                    &tag_metadata_formatter,
+                                                    show_line_numbers,
+                                                    show_tag_color_names,
+                                                );
                                             }
                                         }
                                     }
@@ -1709,5 +1598,72 @@ pub async fn run(cli: &Opts) -> Result<()> {
             Event::Tick => {}
             Event::Render => {} // Handled by draw loop
         }
+    }
+}
+
+/// Helper to reload clipboard items and restore selection/scroll
+fn reload_and_restore(
+    ui: &mut DmenuUI,
+    updated_items: Vec<super::CclipItem>,
+    tag_metadata_formatter: &super::TagMetadataFormatter,
+    show_line_numbers: bool,
+    show_tag_color_names: bool,
+) {
+    // Recreate items
+    let new_items: Vec<Item> = updated_items
+        .into_iter()
+        .enumerate()
+        .map(|(idx, cclip_item)| {
+            let display_name = if show_line_numbers {
+                cclip_item.get_display_name_with_number_formatter_options(
+                    Some(tag_metadata_formatter),
+                    show_tag_color_names,
+                )
+            } else {
+                cclip_item.get_display_name_with_formatter_options(
+                    Some(tag_metadata_formatter),
+                    show_tag_color_names,
+                )
+            };
+
+            let mut item =
+                Item::new_simple(cclip_item.original_line.clone(), display_name, idx + 1);
+            item.tags = Some(cclip_item.tags.clone());
+            item
+        })
+        .collect();
+
+    // Preserve current selection by rowid (first field in original_line)
+    let selected_rowid = ui
+        .selected
+        .and_then(|idx| ui.shown.get(idx))
+        .and_then(|item| item.original_line.split('\t').next().map(|s| s.to_string()));
+
+    // Preserve scroll offset
+    let old_scroll_offset = ui.scroll_offset;
+
+    // Update UI with new items
+    ui.hidden = new_items;
+    ui.shown.clear();
+    ui.filter();
+
+    // Restore selection by finding the same rowid
+    if let Some(ref rowid) = selected_rowid {
+        if let Some(pos) = ui
+            .shown
+            .iter()
+            .position(|item| item.original_line.split('\t').next() == Some(rowid.as_str()))
+        {
+            ui.selected = Some(pos);
+            // Restore scroll offset, ensuring selected item is visible
+            ui.scroll_offset = old_scroll_offset.min(pos);
+        } else if !ui.shown.is_empty() {
+            ui.selected = Some(0);
+            ui.scroll_offset = 0;
+        }
+    } else if !ui.shown.is_empty() && ui.selected.is_none() {
+        // If nothing was selected before but we have items now, select first
+        ui.selected = Some(0);
+        ui.scroll_offset = 0;
     }
 }
