@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::Frame;
 use ratatui_image::picker::Picker;
 use ratatui_image::{Resize, StatefulImage};
+use std::collections::HashMap;
 use std::process::Stdio;
 
 use ratatui_image::picker::ProtocolType;
@@ -28,7 +29,8 @@ pub static DISPLAY_STATE: tokio::sync::Mutex<DisplayState> =
 /// Manages image loading and rendering using ratatui-image
 pub struct ImageManager {
     picker: Picker,
-    protocol: Option<StatefulProtocol>,
+    current_rowid: Option<String>,
+    cache: HashMap<String, StatefulProtocol>,
 }
 
 impl ImageManager {
@@ -37,100 +39,87 @@ impl ImageManager {
     pub fn new(picker: Picker) -> Self {
         Self {
             picker,
-            protocol: None,
+            current_rowid: None,
+            cache: HashMap::new(),
         }
     }
 
-    /// Check if the terminal supports any high-resolution graphics protocol
-    /// Note: Halfblocks is considered a lower-fidelity but valid fallback.
-    pub fn supports_graphics(&self) -> bool {
-        !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
-    }
-
-    /// Is the current protocol Sixel?
     pub fn is_sixel(&self) -> bool {
         matches!(self.picker.protocol_type(), ProtocolType::Sixel)
     }
 
+    /// Check if an image is already in cache
+    pub fn is_cached(&self, rowid: &str) -> bool {
+        self.cache.contains_key(rowid)
+    }
+
+    /// Check if the terminal supports any high-resolution graphics protocol
+    pub fn supports_graphics(&self) -> bool {
+        !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
+    }
+
+    /// Set current image to display (must be in cache)
+    pub fn set_image(&mut self, rowid: &str) {
+        if self.cache.contains_key(rowid) {
+            self.current_rowid = Some(rowid.to_string());
+        }
+    }
+
     /// Load image data from cclip and prepare it for rendering
     pub async fn load_cclip_image(&mut self, rowid: &str) -> Result<()> {
+        // Check cache first
+        if self.cache.contains_key(rowid) {
+            self.current_rowid = Some(rowid.to_string());
+            return Ok(());
+        }
+
         // Run cclip get to fetch image bytes using tokio
-        let mut child = tokio::process::Command::new("cclip")
+        let child = tokio::process::Command::new("cclip")
             .args(["get", rowid])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
 
-        let mut child_stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| eyre!("Failed to capture stdout"))?;
+        let output = child.wait_with_output().await?;
+        if !output.status.success() {
+            return Err(eyre!("cclip get failed for rowid: {}", rowid));
+        }
 
-        let read_future = async move {
-            let mut bytes = Vec::new();
-            tokio::io::AsyncReadExt::read_to_end(&mut child_stdout, &mut bytes).await?;
-            Ok::<Vec<u8>, std::io::Error>(bytes)
-        };
-
-        // Wrap the execution + stdout read in a timeout
-        let bytes =
-            match tokio::time::timeout(std::time::Duration::from_millis(1500), read_future).await {
-                Ok(res) => {
-                    // Also wrap child.wait() in a timeout to avoid blocking the executor
-                    match tokio::time::timeout(std::time::Duration::from_millis(500), child.wait())
-                        .await
-                    {
-                        Ok(wait_res) => {
-                            let status = wait_res?;
-                            if !status.success() {
-                                return Err(eyre!("cclip get failed with exit code: {}", status));
-                            }
-                        }
-                        Err(_) => {
-                            let _ = child.kill().await;
-                            return Err(eyre!("Timeout waiting for cclip get process to exit"));
-                        }
-                    }
-                    res?
-                }
-                Err(_) => {
-                    let _ = child.kill().await;
-                    return Err(eyre!("Timeout reading image data from cclip get {}", rowid));
-                }
-            };
-
+        let bytes = output.stdout;
         if bytes.is_empty() {
             return Err(eyre!("No data received from cclip get {}", rowid));
         }
 
         let picker = self.picker.clone();
-
         let protocol = tokio::task::spawn_blocking(move || {
             let dyn_img = image::load_from_memory(&bytes)?;
             Ok::<_, eyre::Report>(picker.new_resize_protocol(dyn_img))
         })
         .await??;
 
-        // Create new protocol state
-        self.protocol = Some(protocol);
+        // Add to cache and set as current
+        self.cache.insert(rowid.to_string(), protocol);
+        self.current_rowid = Some(rowid.to_string());
 
         Ok(())
     }
 
     /// Render the current image into the given area
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        if let Some(ref mut protocol) = self.protocol {
-            f.render_stateful_widget(
-                StatefulImage::default().resize(Resize::Fit(None)),
-                area,
-                protocol,
-            );
+        if let Some(rowid) = &self.current_rowid {
+            if let Some(protocol) = self.cache.get_mut(rowid) {
+                f.render_stateful_widget(
+                    StatefulImage::default().resize(Resize::Fit(None)),
+                    area,
+                    protocol,
+                );
+            }
         }
     }
 
-    /// Clear the current image protocol
+    /// Clear the current image from display
     pub fn clear(&mut self) {
-        self.protocol = None;
+        self.current_rowid = None;
     }
 }
 
