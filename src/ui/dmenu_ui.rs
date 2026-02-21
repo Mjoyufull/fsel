@@ -680,7 +680,7 @@ impl<'a> DmenuUI<'a> {
             return String::new();
         }
 
-        let parts: Vec<&str> = item.original_line.split('\t').collect();
+        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
         if parts.len() >= 3 {
             // Usually: rowid, mime_type, preview (which contains size/meta)
             parts[2].to_string()
@@ -696,7 +696,7 @@ impl<'a> DmenuUI<'a> {
             return None;
         }
 
-        // Try to parse the tab-separated format (rowid\tmime\tpreview)
+        // Try to parse the tab-separated format safely
         let parts: Vec<&str> = original_line.splitn(2, '\t').collect();
         let rowid = parts[0].trim();
         if !rowid.is_empty() && rowid.chars().all(|c| c.is_ascii_digit()) {

@@ -3,8 +3,8 @@ use ratatui::layout::Rect;
 use ratatui::Frame;
 use ratatui_image::picker::Picker;
 use ratatui_image::{Resize, StatefulImage};
-use std::io::{self, Read};
-use std::process::{Command, Stdio};
+use std::io;
+use std::process::Stdio;
 use std::sync::Mutex;
 
 use ratatui_image::protocol::StatefulProtocol;
@@ -31,8 +31,8 @@ impl ImageManager {
     /// Initialize the image manager by detecting terminal capabilities
     /// This should be called after entering alternate screen
     pub fn new() -> io::Result<Self> {
-        let picker = Picker::from_query_stdio()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{:?}", e)))?;
+        let picker =
+            Picker::from_query_stdio().map_err(|e| io::Error::other(format!("{:?}", e)))?;
         Ok(Self {
             picker,
             protocol: None,
@@ -58,25 +58,43 @@ impl ImageManager {
     }
 
     /// Load image data from cclip and prepare it for rendering
-    pub fn load_cclip_image(&mut self, rowid: &str) -> Result<()> {
-        // Run cclip get to fetch image bytes
-        let mut child = Command::new("cclip")
+    pub async fn load_cclip_image(&mut self, rowid: &str) -> Result<()> {
+        // Run cclip get to fetch image bytes using tokio
+        let mut child = tokio::process::Command::new("cclip")
             .args(["get", rowid])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()?;
 
-        let mut bytes = Vec::new();
-        if let Some(mut stdout) = child.stdout.take() {
-            stdout.read_to_end(&mut bytes)?;
-        }
-        child.wait()?;
+        let mut child_stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| eyre!("Failed to capture stdout"))?;
+
+        let read_future = async move {
+            let mut bytes = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut child_stdout, &mut bytes).await?;
+            Ok::<Vec<u8>, std::io::Error>(bytes)
+        };
+
+        // Wrap the execution + stdout read in a timeout
+        let bytes =
+            match tokio::time::timeout(std::time::Duration::from_millis(1500), read_future).await {
+                Ok(res) => {
+                    let _ = child.wait().await?;
+                    res?
+                }
+                Err(_) => {
+                    let _ = child.kill().await;
+                    return Err(eyre!("Timeout reading image data from cclip get {}", rowid));
+                }
+            };
 
         if bytes.is_empty() {
             return Err(eyre!("No data received from cclip get {}", rowid));
         }
 
-        // Decode image bytes
+        // Decode image bytes (can be slow, but keeping existing flow as requested)
         let dyn_img = image::load_from_memory(&bytes)?;
 
         // Create new protocol state
@@ -113,6 +131,15 @@ pub enum GraphicsAdapter {
 impl GraphicsAdapter {
     /// Detect the best graphics adapter (legacy)
     pub fn detect() -> Self {
+        if let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio() {
+            use ratatui_image::picker::ProtocolType;
+            match picker.protocol_type() {
+                ProtocolType::Kitty => return Self::Kitty,
+                ProtocolType::Sixel => return Self::Sixel,
+                _ => {}
+            }
+        }
+
         let term = std::env::var("TERM").unwrap_or_default();
         let term_program = std::env::var("TERM_PROGRAM").unwrap_or_default();
 

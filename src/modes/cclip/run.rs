@@ -129,11 +129,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
     };
 
     if cclip_items.is_empty() {
-        if cli.cclip_tag.is_some() {
-            println!(
-                "No clipboard items with tag '{}'",
-                cli.cclip_tag.as_ref().unwrap()
-            );
+        if let Some(tag_name) = &cli.cclip_tag {
+            println!("No clipboard items with tag '{}'", tag_name);
         } else {
             println!("No clipboard history available");
         }
@@ -419,11 +416,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
                     if displayed_rowid_opt.as_deref() != Some(rowid) {
                         // Load the new image
-                        if manager.load_cclip_image(rowid).is_ok() {
+                        if manager.load_cclip_image(rowid).await.is_ok() {
                             if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
                                 *state = crate::ui::DisplayState::Image(
                                     ratatui::layout::Rect::default(),
-                                    rowid.clone(),
+                                    rowid.to_string(),
                                 );
                             }
                         } else {
@@ -912,9 +909,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         }
                         previous_was_image = false;
 
-                        if ui.selected.is_some() && !ui.shown.is_empty() {
-                            let selected_idx = ui.selected.unwrap();
-                            if selected_idx < ui.shown.len() {
+                        if let Some(selected_idx) = ui.selected {
+                            if !ui.shown.is_empty() && selected_idx < ui.shown.len() {
                                 let selected_item = ui.shown[selected_idx].original_line.clone();
                                 // Get available tags with just names (no formatting)
                                 let available_tags =
@@ -930,28 +926,29 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     }
                     // Untag keybind (Alt+T)
                     (KeyCode::Char('t'), KeyModifiers::ALT) => {
-                        if ui.selected.is_some() && !ui.shown.is_empty() {
-                            let selected_idx = ui.selected.unwrap();
-                            let item = &ui.shown[selected_idx];
-                            let selected_item = Some(item.original_line.clone());
-                            if let Ok(cclip_item) =
-                                super::CclipItem::from_line(item.original_line.clone())
-                            {
-                                if !cclip_item.tags.is_empty() {
-                                    let first_tag = cclip_item.tags[0].clone();
-                                    ui.tag_mode = TagMode::RemovingTag {
-                                        input: first_tag,
-                                        tags: cclip_item.tags.clone(),
-                                        selected: Some(0),
-                                        selected_item,
-                                    };
-                                } else {
-                                    ui.tag_mode = TagMode::RemovingTag {
-                                        input: String::new(),
-                                        tags: Vec::new(),
-                                        selected: None,
-                                        selected_item,
-                                    };
+                        if let Some(selected_idx) = ui.selected {
+                            if !ui.shown.is_empty() {
+                                let item = &ui.shown[selected_idx];
+                                let selected_item = Some(item.original_line.clone());
+                                if let Ok(cclip_item) =
+                                    super::CclipItem::from_line(item.original_line.clone())
+                                {
+                                    if !cclip_item.tags.is_empty() {
+                                        let first_tag = cclip_item.tags[0].clone();
+                                        ui.tag_mode = TagMode::RemovingTag {
+                                            input: first_tag,
+                                            tags: cclip_item.tags.clone(),
+                                            selected: Some(0),
+                                            selected_item,
+                                        };
+                                    } else {
+                                        ui.tag_mode = TagMode::RemovingTag {
+                                            input: String::new(),
+                                            tags: Vec::new(),
+                                            selected: None,
+                                            selected_item,
+                                        };
+                                    }
                                 }
                             }
                         }
@@ -1719,130 +1716,24 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             let clicked_item_index = ui.scroll_offset + row_in_content as usize;
 
                             if clicked_item_index < ui.shown.len() {
-                                // parse the original cclip line to get rowid and mime_type
                                 let original_line = &ui.shown[clicked_item_index].original_line;
-                                let parts: Vec<&str> = original_line.splitn(3, '\t').collect();
-                                if parts.len() >= 2 {
-                                    let rowid = parts[0];
-                                    let mime_type = parts[1];
-
-                                    // copy to clipboard using proper piping (no shell injection)
-                                    let copy_result = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                                        // wayland
-                                        let cclip_child = std::process::Command::new("cclip")
-                                            .args(["get", rowid])
-                                            .stdout(std::process::Stdio::piped())
-                                            .stderr(std::process::Stdio::null())
-                                            .spawn();
-
-                                        if let Ok(mut cclip) = cclip_child {
-                                            if let Some(cclip_stdout) = cclip.stdout.take() {
-                                                let wl_copy = std::process::Command::new("wl-copy")
-                                                    .args(["-t", mime_type])
-                                                    .stdin(std::process::Stdio::piped())
-                                                    .stdout(std::process::Stdio::null())
-                                                    .stderr(std::process::Stdio::null())
-                                                    .spawn();
-
-                                                if let Ok(mut wl) = wl_copy {
-                                                    if let Some(wl_stdin) = wl.stdin.take() {
-                                                        std::thread::spawn(move || {
-                                                            let mut cclip_stdout = cclip_stdout;
-                                                            let mut wl_stdin = wl_stdin;
-                                                            std::io::copy(
-                                                                &mut cclip_stdout,
-                                                                &mut wl_stdin,
-                                                            )
-                                                            .ok();
-                                                        });
-
-                                                        let _ = cclip.wait();
-                                                        wl.wait().ok()
-                                                    } else {
-                                                        None
-                                                    }
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                None
-                                            }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        // X11 - try xclip first, then xsel
-                                        let x11_tools = [
-                                            (
-                                                "xclip",
-                                                vec!["-selection", "clipboard", "-t", mime_type],
-                                            ),
-                                            ("xsel", vec!["--clipboard", "--input"]),
-                                        ];
-
-                                        let mut result = None;
-                                        for (tool, args) in &x11_tools {
-                                            let cclip_child = std::process::Command::new("cclip")
-                                                .args(["get", rowid])
-                                                .stdout(std::process::Stdio::piped())
-                                                .stderr(std::process::Stdio::null())
-                                                .spawn();
-
-                                            if let Ok(mut cclip) = cclip_child {
-                                                if let Some(cclip_stdout) = cclip.stdout.take() {
-                                                    let x11_child =
-                                                        std::process::Command::new(tool)
-                                                            .args(args)
-                                                            .stdin(std::process::Stdio::piped())
-                                                            .stdout(std::process::Stdio::null())
-                                                            .stderr(std::process::Stdio::null())
-                                                            .spawn();
-
-                                                    if let Ok(mut x11) = x11_child {
-                                                        if let Some(x11_stdin) = x11.stdin.take() {
-                                                            std::thread::spawn(move || {
-                                                                let mut cclip_stdout = cclip_stdout;
-                                                                let mut x11_stdin = x11_stdin;
-                                                                std::io::copy(
-                                                                    &mut cclip_stdout,
-                                                                    &mut x11_stdin,
-                                                                )
-                                                                .ok();
-                                                            });
-
-                                                            let _ = cclip.wait();
-                                                            if let Ok(status) = x11.wait() {
-                                                                if status.success() {
-                                                                    result = Some(status);
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        result
-                                    };
-
-                                    match copy_result {
-                                        Some(status) if status.success() => {
-                                            // clean up terminal completely
-                                            terminal
-                                                .show_cursor()
-                                                .wrap_err("Failed to show cursor")?;
-                                            drop(terminal);
-                                            if !disable_mouse {
-                                                let _ = io::stderr().execute(DisableMouseCapture);
-                                            }
-                                            let _ = io::stderr().execute(LeaveAlternateScreen);
-                                            let _ = disable_raw_mode();
-                                            return Ok(());
-                                        }
-                                        _ => {
-                                            // ignore clipboard copy errors for now
-                                        }
+                                if let Ok(cclip_item) =
+                                    super::CclipItem::from_line(original_line.clone())
+                                {
+                                    if let Err(e) = cclip_item.copy_to_clipboard() {
+                                        ui.set_temp_message(format!("Copy failed: {}", e));
+                                        continue;
                                     }
+
+                                    // clean up terminal completely and exit
+                                    terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                    drop(terminal);
+                                    if !disable_mouse {
+                                        let _ = io::stderr().execute(DisableMouseCapture);
+                                    }
+                                    let _ = io::stderr().execute(LeaveAlternateScreen);
+                                    let _ = disable_raw_mode();
+                                    return Ok(());
                                 }
                             }
                         }
