@@ -44,7 +44,7 @@ impl ImageManager {
     /// Check if the terminal supports any high-resolution graphics protocol
     /// Note: Halfblocks is considered a lower-fidelity but valid fallback.
     pub fn supports_graphics(&self) -> bool {
-        true
+        !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
     }
 
     /// Is the current protocol Sixel?

@@ -251,6 +251,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
     // Only show an error if initialization failed completely (should not happen with fallback)
     if image_manager.is_none() {
         ui.set_temp_message("image_manager initialization failed".to_string());
+    } else if picker.is_none() {
+        ui.set_temp_message(
+            "Terminal graphics detection failed (using half-block fallback)".to_string(),
+        );
     }
 
     // Wrap failed_rowids for thread-safe background loading
@@ -261,12 +265,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
         ui.selected = Some(0);
     }
 
-    // enable inline preview if terminal supports graphics and chafa is available (or user forced it)
     let mut image_preview_enabled = cli.cclip_image_preview.unwrap_or(false);
-    if cli.cclip_image_preview.is_none() {
-        if let Some(ref manager) = image_manager {
-            image_preview_enabled = manager.lock().await.supports_graphics();
+    let mut cached_is_sixel = false;
+    if let Some(ref manager) = image_manager {
+        let manager_lock = manager.lock().await;
+        if cli.cclip_image_preview.is_none() {
+            image_preview_enabled = manager_lock.supports_graphics();
         }
+        cached_is_sixel = manager_lock.is_sixel();
     }
 
     // warn if image preview is enabled but terminal graphics detection failed (and no fallback)
@@ -412,11 +418,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
         // For Sixel/Foot: Clear when state changes (only if still using legacy clearing for some reason)
         let mut needs_sixel_clear = false;
         if image_preview_enabled {
-            let is_sixel = if let Some(ref manager) = image_manager {
-                manager.lock().await.is_sixel()
-            } else {
-                false
-            };
+            let is_sixel = cached_is_sixel;
             if is_sixel && (previous_was_image != current_is_image) {
                 let _ = terminal.clear();
                 needs_sixel_clear = true;
