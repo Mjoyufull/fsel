@@ -431,13 +431,31 @@ impl<'a> DmenuUI<'a> {
                         self.text = vec![Line::from(Span::raw(String::new()))];
                     } else {
                         // Info for the image manager to render
+                        let mut status_span =
+                            Span::styled("- Loading...", Style::default().fg(Color::Yellow));
+                        if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
+                            match &*state {
+                                crate::ui::DisplayState::Failed(msg) => {
+                                    status_span = Span::styled(
+                                        format!("- Failed: {}", msg),
+                                        Style::default().fg(Color::Red),
+                                    );
+                                }
+                                crate::ui::DisplayState::Image(_) => {
+                                    status_span =
+                                        Span::styled("- Ready", Style::default().fg(Color::Green));
+                                }
+                                _ => {}
+                            }
+                        }
+
                         self.text = vec![
                             Line::from(vec![
                                 Span::styled(
                                     "󰋩 IMAGE PREVIEW ",
                                     Style::default().add_modifier(Modifier::BOLD),
                                 ),
-                                Span::styled("- Loading...", Style::default().fg(Color::Yellow)),
+                                status_span,
                             ]),
                             Line::from(""),
                             Line::from("  󱇛 Press 'Alt+i' for Fullscreen View"),
@@ -680,7 +698,8 @@ impl<'a> DmenuUI<'a> {
             return String::new();
         }
 
-        let parts: Vec<&str> = item.original_line.splitn(3, '\t').collect();
+        // cclip tab-separated format is: rowid\tmime_type\tpreview[\ttags]
+        let parts: Vec<&str> = item.original_line.splitn(4, '\t').collect();
         if parts.len() >= 3 {
             // Usually: rowid, mime_type, preview (which contains size/meta)
             parts[2].to_string()

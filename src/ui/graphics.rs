@@ -7,6 +7,7 @@ use std::io;
 use std::process::Stdio;
 use std::sync::Mutex;
 
+use ratatui_image::picker::ProtocolType;
 use ratatui_image::protocol::StatefulProtocol;
 
 /// Combined display state to track what's currently on screen
@@ -14,8 +15,10 @@ use ratatui_image::protocol::StatefulProtocol;
 pub enum DisplayState {
     /// No content displayed
     Empty,
-    /// Image content is displayed with area and rowid
-    Image(Rect, String),
+    /// Image content is displayed with rowid
+    Image(String),
+    /// Failed to load with error message
+    Failed(String),
 }
 
 /// Single atomic state tracker to eliminate lock contention
@@ -41,19 +44,16 @@ impl ImageManager {
 
     /// Check if the terminal supports any high-resolution graphics protocol
     pub fn supports_graphics(&self) -> bool {
-        use ratatui_image::picker::ProtocolType;
         !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
     }
 
     /// Is the current protocol Kitty? (Used for specific clearing logic)
     pub fn is_kitty(&self) -> bool {
-        use ratatui_image::picker::ProtocolType;
         matches!(self.picker.protocol_type(), ProtocolType::Kitty)
     }
 
     /// Is the current protocol Sixel?
     pub fn is_sixel(&self) -> bool {
-        use ratatui_image::picker::ProtocolType;
         matches!(self.picker.protocol_type(), ProtocolType::Sixel)
     }
 
@@ -81,7 +81,7 @@ impl ImageManager {
         let bytes =
             match tokio::time::timeout(std::time::Duration::from_millis(1500), read_future).await {
                 Ok(res) => {
-                    let _ = child.wait().await?;
+                    let _ = child.wait().await;
                     res?
                 }
                 Err(_) => {
@@ -94,11 +94,16 @@ impl ImageManager {
             return Err(eyre!("No data received from cclip get {}", rowid));
         }
 
-        // Decode image bytes (can be slow, but keeping existing flow as requested)
-        let dyn_img = image::load_from_memory(&bytes)?;
+        let picker = self.picker.clone();
+
+        let protocol = tokio::task::spawn_blocking(move || {
+            let dyn_img = image::load_from_memory(&bytes)?;
+            Ok::<_, eyre::Report>(picker.new_resize_protocol(dyn_img))
+        })
+        .await??;
 
         // Create new protocol state
-        self.protocol = Some(self.picker.new_resize_protocol(dyn_img));
+        self.protocol = Some(protocol);
 
         Ok(())
     }

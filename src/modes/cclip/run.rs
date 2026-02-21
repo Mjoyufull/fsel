@@ -277,89 +277,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     // Update info with image support
     // Calculate layout to get actual chunk width
-    let term_size = terminal.size()?;
-    let terminal_area = ratatui::layout::Rect {
-        x: 0,
-        y: 0,
-        width: term_size.width,
-        height: term_size.height,
-    };
-
-    let content_height_percent = get_cclip_u16(
-        cli.cclip_title_panel_height_percent,
-        cli.dmenu_title_panel_height_percent,
-        cli.title_panel_height_percent,
-    );
-    let content_height =
-        (term_size.height as f32 * content_height_percent as f32 / 100.0).round() as u16;
-    let content_height = content_height.max(3);
-    let input_panel_height = get_cclip_u16(
-        cli.cclip_input_panel_height,
-        cli.dmenu_input_panel_height,
-        cli.input_panel_height,
-    );
-    let content_panel_position = get_cclip_panel_position(
-        cli.cclip_title_panel_position,
-        cli.dmenu_title_panel_position,
-        cli.title_panel_position
-            .unwrap_or(crate::cli::PanelPosition::Top),
-    );
-
-    // Calculate layout to get actual chunk dimensions
-    let (chunks, content_panel_index, _, _) = match content_panel_position {
-        crate::cli::PanelPosition::Top => {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(content_height),
-                    Constraint::Min(1),
-                    Constraint::Length(input_panel_height),
-                ])
-                .split(terminal_area);
-            (layout, 0, 1, 2)
-        }
-        crate::cli::PanelPosition::Middle => {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(1),
-                    Constraint::Length(content_height),
-                    Constraint::Length(input_panel_height),
-                ])
-                .split(terminal_area);
-            (layout, 1, 0, 2)
-        }
-        crate::cli::PanelPosition::Bottom => {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(1),
-                    Constraint::Length(input_panel_height),
-                    Constraint::Length(content_height),
-                ])
-                .split(terminal_area);
-            (layout, 2, 0, 1)
-        }
-    };
-
-    // Use actual chunk width and height from layout
-    let content_panel_width = chunks[content_panel_index].width;
-    let content_panel_height = chunks[content_panel_index].height.saturating_sub(2); // Account for borders
 
     // Get hide image message setting
     let hide_image_message = cli.cclip_hide_inline_image_message.unwrap_or(false);
-
-    ui.info_with_image_support(
-        get_cclip_color(
-            cli.cclip_highlight_color,
-            cli.dmenu_highlight_color,
-            cli.highlight_color,
-        ),
-        image_preview_enabled,
-        hide_image_message,
-        content_panel_width,
-        content_panel_height,
-    );
 
     // List state for ratatui
     let mut list_state = ListState::default();
@@ -368,6 +288,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
     let mut previous_was_image = false;
     // Flag to force Ratatui buffer sync after clearing in tag mode
     let mut force_sixel_sync = false;
+
+    // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
+    let term_is_foot = std::env::var("TERM")
+        .unwrap_or_default()
+        .starts_with("foot");
+
+    let mut failed_rowids = std::collections::HashSet::new();
 
     // Get effective cursor string with inheritance
     let cursor = cli
@@ -403,7 +330,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
         if image_preview_enabled {
             let displayed_rowid_opt = if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
                 match &*state {
-                    crate::ui::DisplayState::Image(_, displayed_rowid) => {
+                    crate::ui::DisplayState::Image(displayed_rowid) => {
                         Some(displayed_rowid.clone())
                     }
                     _ => None,
@@ -414,20 +341,24 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
             if current_is_image {
                 if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
-                    if displayed_rowid_opt.as_deref() != Some(rowid) {
+                    if displayed_rowid_opt.as_deref() != Some(rowid)
+                        && !failed_rowids.contains(rowid)
+                    {
                         // Load the new image
-                        if manager.load_cclip_image(rowid).await.is_ok() {
-                            if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                *state = crate::ui::DisplayState::Image(
-                                    ratatui::layout::Rect::default(),
-                                    rowid.to_string(),
-                                );
+                        match manager.load_cclip_image(rowid).await {
+                            Ok(_) => {
+                                failed_rowids.remove(rowid);
+                                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                    *state = crate::ui::DisplayState::Image(rowid.to_string());
+                                }
                             }
-                        } else {
-                            // Load failed — clear stale image state
-                            manager.clear();
-                            if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                *state = crate::ui::DisplayState::Empty;
+                            Err(e) => {
+                                // Load failed
+                                failed_rowids.insert(rowid.clone());
+                                manager.clear();
+                                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                    *state = crate::ui::DisplayState::Failed(e.to_string());
+                                }
                             }
                         }
                     }
@@ -437,6 +368,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 if let Some(manager) = &mut image_manager {
                     manager.clear();
                 }
+                failed_rowids.clear();
                 if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
                     *state = crate::ui::DisplayState::Empty;
                 }
@@ -455,10 +387,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 needs_sixel_clear = true;
             }
         }
-        // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
-        let term_is_foot = std::env::var("TERM")
-            .unwrap_or_default()
-            .starts_with("foot");
         if term_is_foot {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026h");
@@ -1380,23 +1308,33 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 if let Some(selected) = ui.selected {
                                     if selected < ui.shown.len() {
                                         let original_line = &ui.shown[selected].original_line;
-                                        if let Ok(cclip_item) =
-                                            super::CclipItem::from_line(original_line.clone())
-                                        {
-                                            if let Err(e) = cclip_item.copy_to_clipboard() {
-                                                ui.set_temp_message(format!("Copy failed: {}", e));
+                                        match super::CclipItem::from_line(original_line.clone()) {
+                                            Ok(cclip_item) => {
+                                                if let Err(e) = cclip_item.copy_to_clipboard() {
+                                                    ui.set_temp_message(format!(
+                                                        "Copy failed: {}",
+                                                        e
+                                                    ));
+                                                    continue;
+                                                }
+
+                                                // clean up terminal completely and exit
+                                                terminal
+                                                    .show_cursor()
+                                                    .wrap_err("Failed to show cursor")?;
+                                                drop(terminal);
+                                                if !disable_mouse {
+                                                    let _ =
+                                                        io::stderr().execute(DisableMouseCapture);
+                                                }
+                                                let _ = io::stderr().execute(LeaveAlternateScreen);
+                                                let _ = disable_raw_mode();
+                                                return Ok(());
+                                            }
+                                            Err(e) => {
+                                                ui.set_temp_message(format!("Parse failed: {}", e));
                                                 continue;
                                             }
-
-                                            // clean up terminal completely and exit
-                                            terminal
-                                                .show_cursor()
-                                                .wrap_err("Failed to show cursor")?;
-                                            drop(terminal);
-                                            let _ = io::stderr().execute(DisableMouseCapture);
-                                            let _ = io::stderr().execute(LeaveAlternateScreen);
-                                            let _ = disable_raw_mode();
-                                            return Ok(());
                                         }
                                     }
                                 }
@@ -1717,23 +1655,27 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                             if clicked_item_index < ui.shown.len() {
                                 let original_line = &ui.shown[clicked_item_index].original_line;
-                                if let Ok(cclip_item) =
-                                    super::CclipItem::from_line(original_line.clone())
-                                {
-                                    if let Err(e) = cclip_item.copy_to_clipboard() {
-                                        ui.set_temp_message(format!("Copy failed: {}", e));
+                                match super::CclipItem::from_line(original_line.clone()) {
+                                    Ok(cclip_item) => {
+                                        if let Err(e) = cclip_item.copy_to_clipboard() {
+                                            ui.set_temp_message(format!("Copy failed: {}", e));
+                                            continue;
+                                        }
+
+                                        // clean up terminal completely and exit
+                                        terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                        drop(terminal);
+                                        if !disable_mouse {
+                                            let _ = io::stderr().execute(DisableMouseCapture);
+                                        }
+                                        let _ = io::stderr().execute(LeaveAlternateScreen);
+                                        let _ = disable_raw_mode();
+                                        return Ok(());
+                                    }
+                                    Err(e) => {
+                                        ui.set_temp_message(format!("Parse failed: {}", e));
                                         continue;
                                     }
-
-                                    // clean up terminal completely and exit
-                                    terminal.show_cursor().wrap_err("Failed to show cursor")?;
-                                    drop(terminal);
-                                    if !disable_mouse {
-                                        let _ = io::stderr().execute(DisableMouseCapture);
-                                    }
-                                    let _ = io::stderr().execute(LeaveAlternateScreen);
-                                    let _ = disable_raw_mode();
-                                    return Ok(());
                                 }
                             }
                         }
