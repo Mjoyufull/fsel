@@ -220,12 +220,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     let mut image_manager = picker
         .clone()
-        .map(|p| Arc::new(Mutex::new(crate::ui::ImageManager::new(p))))
-        .or_else(|| {
-            Some(Arc::new(Mutex::new(crate::ui::ImageManager::new(
-                picker_fallback(),
-            ))))
-        });
+        .map(|p| Arc::new(Mutex::new(crate::ui::ImageManager::new(p))));
+
+    // Fallback to halfblocks only if we actually NEED an image manager but detection failed
+    if image_manager.is_none() {
+        image_manager = Some(Arc::new(Mutex::new(crate::ui::ImageManager::new(
+            picker_fallback(),
+        ))));
+    }
 
     // Input handler - use Null key to prevent Escape from killing the input thread
     // (Escape is handled manually in the main loop for tag mode cancellation)
@@ -248,15 +250,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     ui.filter(); // Initial filter to show all items (or filtered by search_string)
 
-    // Only show an error if initialization failed completely (should not happen with fallback)
-    if image_manager.is_none() {
-        ui.set_temp_message("image_manager initialization failed".to_string());
-    } else if picker.is_none() {
-        ui.set_temp_message(
-            "Terminal graphics detection failed (using half-block fallback)".to_string(),
-        );
-    }
-
     // Wrap failed_rowids for thread-safe background loading
     let failed_rowids = Arc::new(Mutex::new(HashSet::<String>::new()));
 
@@ -265,6 +258,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
         ui.selected = Some(0);
     }
 
+    // Determine image preview enablement and cache capabilities
     let mut image_preview_enabled = cli.cclip_image_preview.unwrap_or(false);
     let mut cached_is_sixel = false;
     if let Some(ref manager) = image_manager {
@@ -275,11 +269,19 @@ pub async fn run(cli: &Opts) -> Result<()> {
         cached_is_sixel = manager_lock.is_sixel();
     }
 
-    // warn if image preview is enabled but terminal graphics detection failed (and no fallback)
-    if image_preview_enabled && picker.is_none() && image_manager.is_none() {
-        ui.set_temp_message(
-            "image_preview enabled but terminal graphics detection failed".to_string(),
-        );
+    // Show initialization warnings/errors
+    if image_manager.is_none() {
+        ui.set_temp_message("image_manager initialization failed".to_string());
+    } else if picker.is_none() {
+        if image_preview_enabled {
+            ui.set_temp_message(
+                "image_preview enabled but terminal graphics detection failed (using half-block fallback)".to_string(),
+            );
+        } else {
+            ui.set_temp_message(
+                "Terminal graphics detection failed (using half-block fallback)".to_string(),
+            );
+        }
     }
 
     // Get effective colors with cclip -> dmenu -> regular inheritance
@@ -353,7 +355,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
                     let mut is_loading = false;
                     let mut already_loaded = false;
-                    if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
+                    {
+                        let state = crate::ui::DISPLAY_STATE.lock().await;
                         match &*state {
                             crate::ui::DisplayState::Image(id) if id == rowid => {
                                 already_loaded = true
@@ -371,7 +374,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                         if !is_failed {
                             // Set state to loading
-                            if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                            {
+                                let mut state = crate::ui::DISPLAY_STATE.lock().await;
                                 *state = crate::ui::DisplayState::Loading(rowid.clone());
                             }
 
@@ -383,16 +387,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 match manager_lock.load_cclip_image(&rowid_clone).await {
                                     Ok(_) => {
                                         failed_lock.lock().await.remove(&rowid_clone);
-                                        if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                            *state = crate::ui::DisplayState::Image(rowid_clone);
-                                        }
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        *state = crate::ui::DisplayState::Image(rowid_clone);
                                     }
                                     Err(e) => {
                                         failed_lock.lock().await.insert(rowid_clone.clone());
                                         manager_lock.clear();
-                                        if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                            *state = crate::ui::DisplayState::Failed(e.to_string());
-                                        }
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        *state = crate::ui::DisplayState::Failed(e.to_string());
                                     }
                                 }
                             });
@@ -409,7 +411,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 if let Ok(mut failed) = failed_rowids.try_lock() {
                     failed.clear();
                 }
-                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                {
+                    let mut state = crate::ui::DISPLAY_STATE.lock().await;
                     *state = crate::ui::DisplayState::Empty;
                 }
             }
@@ -810,9 +813,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
         // Note: Post-draw clearing removed - using Clear widget inside draw loop instead
         // Clear widget ensures all widget areas are cleaned before rendering new content
 
-        // Update state for next iteration
-        previous_was_image = current_is_image;
-
         // Handle input events with full navigation and clipboard copying
         match input.next()? {
             Event::Input(key) => {
@@ -858,11 +858,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 terminal.clear().wrap_err("Failed to clear terminal")?;
                                 // Restore display state instead of purging to force reload
                                 if let Some(rowid) = &current_rowid_opt {
-                                    if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                        *state = crate::ui::DisplayState::Image(rowid.clone());
-                                    }
+                                    let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                    *state = crate::ui::DisplayState::Image(rowid.clone());
                                 }
-                                previous_was_image = true;
                             }
                         }
                     }
@@ -877,10 +875,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         let _ = terminal.clear();
                         force_sixel_sync = true;
                         // Reset display state
-                        if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                        {
+                            let mut state = crate::ui::DISPLAY_STATE.lock().await;
                             *state = crate::ui::DisplayState::Empty;
                         }
-                        previous_was_image = false;
 
                         if let Some(selected_idx) = ui.selected {
                             if !ui.shown.is_empty() && selected_idx < ui.shown.len() {
@@ -903,18 +901,27 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             if selected_idx < ui.shown.len() {
                                 let item = &ui.shown[selected_idx];
                                 let selected_item = Some(item.original_line.clone());
-                                if let Ok(cclip_item) =
-                                    super::CclipItem::from_line(item.original_line.clone())
-                                {
-                                    if !cclip_item.tags.is_empty() {
-                                        let first_tag = cclip_item.tags[0].clone();
-                                        ui.tag_mode = TagMode::RemovingTag {
-                                            input: first_tag,
-                                            tags: cclip_item.tags.clone(),
-                                            selected: Some(0),
-                                            selected_item,
-                                        };
-                                    } else {
+                                match super::CclipItem::from_line(item.original_line.clone()) {
+                                    Ok(cclip_item) => {
+                                        if !cclip_item.tags.is_empty() {
+                                            let first_tag = cclip_item.tags[0].clone();
+                                            ui.tag_mode = TagMode::RemovingTag {
+                                                input: first_tag,
+                                                tags: cclip_item.tags.clone(),
+                                                selected: Some(0),
+                                                selected_item,
+                                            };
+                                        } else {
+                                            ui.tag_mode = TagMode::RemovingTag {
+                                                input: String::new(),
+                                                tags: Vec::new(),
+                                                selected: None,
+                                                selected_item,
+                                            };
+                                        }
+                                    }
+                                    Err(e) => {
+                                        ui.set_temp_message(format!("Failed to parse item: {}", e));
                                         ui.tag_mode = TagMode::RemovingTag {
                                             input: String::new(),
                                             tags: Vec::new(),
@@ -1626,6 +1633,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
             Event::Tick => {}
             Event::Render => {} // Handled by draw loop
         }
+
+        // Update state for next iteration
+        previous_was_image = current_is_image;
     }
 }
 
@@ -1667,9 +1677,6 @@ fn reload_and_restore(
         .and_then(|idx| ui.shown.get(idx))
         .and_then(|item| item.original_line.split('\t').next().map(|s| s.to_string()));
 
-    // Preserve scroll offset
-    let old_scroll_offset = ui.scroll_offset;
-
     // Update UI with new items
     ui.hidden = new_items;
     ui.shown.clear();
@@ -1683,8 +1690,8 @@ fn reload_and_restore(
             .position(|item| item.original_line.split('\t').next() == Some(rowid.as_str()))
         {
             ui.selected = Some(pos);
-            // Restore scroll offset, ensuring selected item is visible
-            ui.scroll_offset = old_scroll_offset.min(pos);
+            // Restore scroll offset by scrolling selected item to top
+            ui.scroll_offset = pos;
         } else if !ui.shown.is_empty() {
             ui.selected = Some(0);
             ui.scroll_offset = 0;

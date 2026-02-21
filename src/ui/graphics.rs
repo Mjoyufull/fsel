@@ -4,7 +4,7 @@ use ratatui::Frame;
 use ratatui_image::picker::Picker;
 use ratatui_image::{Resize, StatefulImage};
 use std::process::Stdio;
-use std::sync::Mutex;
+// use std::sync::Mutex; (removed)
 
 use ratatui_image::picker::ProtocolType;
 use ratatui_image::protocol::StatefulProtocol;
@@ -23,7 +23,8 @@ pub enum DisplayState {
 }
 
 /// Single atomic state tracker to eliminate lock contention
-pub static DISPLAY_STATE: Mutex<DisplayState> = Mutex::new(DisplayState::Empty);
+pub static DISPLAY_STATE: tokio::sync::Mutex<DisplayState> =
+    tokio::sync::Mutex::const_new(DisplayState::Empty);
 
 /// Manages image loading and rendering using ratatui-image
 pub struct ImageManager {
@@ -81,10 +82,14 @@ impl ImageManager {
                         .await
                     {
                         Ok(wait_res) => {
-                            let _ = wait_res;
+                            let status = wait_res?;
+                            if !status.success() {
+                                return Err(eyre!("cclip get failed with exit code: {}", status));
+                            }
                         }
                         Err(_) => {
                             let _ = child.kill().await;
+                            return Err(eyre!("Timeout waiting for cclip get process to exit"));
                         }
                     }
                     res?
@@ -144,7 +149,7 @@ impl GraphicsAdapter {
         if let Some(picker) = picker {
             use ratatui_image::picker::ProtocolType;
             match picker.protocol_type() {
-                ProtocolType::Kitty => return Self::Kitty,
+                ProtocolType::Kitty | ProtocolType::Iterm2 => return Self::Kitty,
                 ProtocolType::Sixel => return Self::Sixel,
                 _ => {}
             }

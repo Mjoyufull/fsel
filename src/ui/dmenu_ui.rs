@@ -433,7 +433,7 @@ impl<'a> DmenuUI<'a> {
                         // Info for the image manager to render
                         let mut status_span =
                             Span::styled("- Loading...", Style::default().fg(Color::Yellow));
-                        if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
+                        if let Ok(state) = crate::ui::DISPLAY_STATE.try_lock() {
                             match &*state {
                                 crate::ui::DisplayState::Failed(msg) => {
                                     status_span = Span::styled(
@@ -701,8 +701,12 @@ impl<'a> DmenuUI<'a> {
         // cclip tab-separated format is: rowid\tmime_type\tpreview[\ttags]
         let parts: Vec<&str> = item.original_line.splitn(4, '\t').collect();
         if parts.len() >= 3 {
-            // Usually: rowid, mime_type, preview (which contains size/meta)
-            parts[2].to_string()
+            let preview = parts[2].trim();
+            if !preview.is_empty() {
+                preview.to_string()
+            } else {
+                "Unknown Image".to_string()
+            }
         } else {
             "Unknown Image".to_string()
         }
