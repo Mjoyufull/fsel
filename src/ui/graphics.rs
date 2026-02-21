@@ -4,7 +4,6 @@ use ratatui::Frame;
 use ratatui_image::picker::Picker;
 use ratatui_image::{Resize, StatefulImage};
 use std::process::Stdio;
-// use std::sync::Mutex; (removed)
 
 use ratatui_image::picker::ProtocolType;
 use ratatui_image::protocol::StatefulProtocol;

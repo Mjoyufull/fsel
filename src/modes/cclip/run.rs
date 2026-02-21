@@ -218,16 +218,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
     let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
     let picker_fallback = || ratatui_image::picker::Picker::halfblocks();
 
-    let mut image_manager = picker
-        .clone()
-        .map(|p| Arc::new(Mutex::new(crate::ui::ImageManager::new(p))));
-
-    // Fallback to halfblocks only if we actually NEED an image manager but detection failed
-    if image_manager.is_none() {
-        image_manager = Some(Arc::new(Mutex::new(crate::ui::ImageManager::new(
-            picker_fallback(),
-        ))));
-    }
+    let mut image_manager = Some(Arc::new(Mutex::new(crate::ui::ImageManager::new(
+        picker.clone().unwrap_or_else(picker_fallback),
+    ))));
 
     // Input handler - use Null key to prevent Escape from killing the input thread
     // (Escape is handled manually in the main loop for tag mode cancellation)
@@ -270,9 +263,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     }
 
     // Show initialization warnings/errors
-    if image_manager.is_none() {
-        ui.set_temp_message("image_manager initialization failed".to_string());
-    } else if picker.is_none() {
+    if picker.is_none() {
         if image_preview_enabled {
             ui.set_temp_message(
                 "image_preview enabled but terminal graphics detection failed (using half-block fallback)".to_string(),
@@ -325,6 +316,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
         .as_ref()
         .or(cli.dmenu_cursor.as_ref())
         .unwrap_or(&cli.cursor);
+
+    // Pre-detect graphics adapter for performance
+    let graphics_adapter = crate::ui::GraphicsAdapter::detect(picker.as_ref());
 
     // Main TUI loop
     loop {
@@ -491,8 +485,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 cli.input_panel_height,
             );
 
-            // Re-detect graphics adapter with the shared picker
-            let graphics = crate::ui::GraphicsAdapter::detect(picker.as_ref());
+            // Use pre-detected graphics adapter
+            let graphics = graphics_adapter;
 
             // Layout calculation
             let total_height = f.area().height;
@@ -781,12 +775,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 force_sixel_sync = false;
             }
 
-            // Render all components in their dynamic positions
-            f.render_widget(content_paragraph, chunks[content_panel_index]);
-            f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
-            f.render_widget(input_paragraph, chunks[input_panel_index]);
-
             // Render image if enabled and we have a manager
+            let mut image_rendered = false;
             if image_preview_enabled && current_is_image {
                 if let Some(manager) = &mut image_manager {
                     if let Ok(mut manager_lock) = manager.try_lock() {
@@ -799,9 +789,31 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             height: content_chunk.height.saturating_sub(2),
                         };
                         manager_lock.render(f, image_area);
+                        image_rendered = true;
                     }
                 }
             }
+
+            // Render all components in their dynamic positions
+            // If image was rendered, we use a simpler block for the content panel to avoid drawing text over/under image
+            if image_rendered {
+                let content_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        " Clipboard Preview ",
+                        Style::default()
+                            .add_modifier(Modifier::BOLD)
+                            .fg(header_title_color),
+                    ))
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(main_border_color));
+                f.render_widget(content_block, chunks[content_panel_index]);
+            } else {
+                f.render_widget(content_paragraph, chunks[content_panel_index]);
+            }
+
+            f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
+            f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
 
         if term_is_foot {
