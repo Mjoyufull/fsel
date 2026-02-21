@@ -34,4 +34,3 @@ impl CclipItem {
         Ok(output.stdout)
     }
 }
-

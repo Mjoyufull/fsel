@@ -7,9 +7,7 @@ use std::process::{Command, Stdio};
 impl CclipItem {
     /// Copy this item back to the clipboard (Wayland)
     fn copy_to_clipboard_wayland(&self) -> Result<()> {
-        let status = Command::new("cclip")
-            .args(["copy", &self.rowid])
-            .status()?;
+        let status = Command::new("cclip").args(["copy", &self.rowid]).status()?;
 
         if !status.success() {
             return Err(eyre!("cclip copy failed"));

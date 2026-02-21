@@ -433,7 +433,10 @@ impl<'a> DmenuUI<'a> {
                         // Info for the image manager to render
                         self.text = vec![
                             Line::from(vec![
-                                Span::styled("󰋩 IMAGE PREVIEW ", Style::default().add_modifier(Modifier::BOLD)),
+                                Span::styled(
+                                    "󰋩 IMAGE PREVIEW ",
+                                    Style::default().add_modifier(Modifier::BOLD),
+                                ),
                                 Span::styled("- Loading...", Style::default().fg(Color::Yellow)),
                             ]),
                             Line::from(""),
@@ -686,7 +689,6 @@ impl<'a> DmenuUI<'a> {
         }
     }
 
-
     /// Get the rowid for any cclip item (not just images)
     pub fn get_cclip_rowid(&self, item: &crate::common::Item) -> Option<String> {
         let original_line = &item.original_line;
@@ -696,11 +698,9 @@ impl<'a> DmenuUI<'a> {
 
         // Try to parse the tab-separated format (rowid\tmime\tpreview)
         let parts: Vec<&str> = original_line.splitn(2, '\t').collect();
-        if parts.len() >= 1 {
-            let rowid = parts[0].trim();
-            if !rowid.is_empty() && rowid.chars().all(|c| c.is_ascii_digit()) {
-                return Some(rowid.to_string());
-            }
+        let rowid = parts[0].trim();
+        if !rowid.is_empty() && rowid.chars().all(|c| c.is_ascii_digit()) {
+            return Some(rowid.to_string());
         }
         None
     }

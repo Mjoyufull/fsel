@@ -1,3 +1,4 @@
+use eyre::{eyre, Result};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use ratatui_image::picker::Picker;
@@ -5,7 +6,6 @@ use ratatui_image::{Resize, StatefulImage};
 use std::io::{self, Read};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use eyre::{eyre, Result};
 
 use ratatui_image::protocol::StatefulProtocol;
 
@@ -42,10 +42,7 @@ impl ImageManager {
     /// Check if the terminal supports any high-resolution graphics protocol
     pub fn supports_graphics(&self) -> bool {
         use ratatui_image::picker::ProtocolType;
-        match self.picker.protocol_type() {
-            ProtocolType::Halfblocks => false,
-            _ => true,
-        }
+        !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
     }
 
     /// Is the current protocol Kitty? (Used for specific clearing logic)

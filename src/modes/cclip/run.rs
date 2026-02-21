@@ -214,7 +214,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Initialize ImageManager for ratatui-image
-    let mut image_manager = crate::ui::ImageManager::new().ok();
+    let mut image_manager = match crate::ui::ImageManager::new() {
+        Ok(manager) => Some(manager),
+        Err(e) => {
+            eprintln!("warning: ImageManager init failed: {}", e);
+            None
+        }
+    };
 
     // Input handler - use Null key to prevent Escape from killing the input thread
     // (Escape is handled manually in the main loop for tag mode cancellation)
@@ -307,42 +313,33 @@ pub async fn run(cli: &Opts) -> Result<()> {
         crate::cli::PanelPosition::Top => {
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Length(content_height),
-                        Constraint::Min(1),
-                        Constraint::Length(input_panel_height),
-                    ]
-                
-                )
+                .constraints([
+                    Constraint::Length(content_height),
+                    Constraint::Min(1),
+                    Constraint::Length(input_panel_height),
+                ])
                 .split(terminal_area);
             (layout, 0, 1, 2)
         }
         crate::cli::PanelPosition::Middle => {
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Min(1),
-                        Constraint::Length(content_height),
-                        Constraint::Length(input_panel_height),
-                    ]
-                
-                )
+                .constraints([
+                    Constraint::Min(1),
+                    Constraint::Length(content_height),
+                    Constraint::Length(input_panel_height),
+                ])
                 .split(terminal_area);
             (layout, 1, 0, 2)
         }
         crate::cli::PanelPosition::Bottom => {
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Min(1),
-                        Constraint::Length(input_panel_height),
-                        Constraint::Length(content_height),
-                    ]
-                
-                )
+                .constraints([
+                    Constraint::Min(1),
+                    Constraint::Length(input_panel_height),
+                    Constraint::Length(content_height),
+                ])
                 .split(terminal_area);
             (layout, 2, 0, 1)
         }
@@ -424,7 +421,16 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         // Load the new image
                         if manager.load_cclip_image(rowid).is_ok() {
                             if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                *state = crate::ui::DisplayState::Image(ratatui::layout::Rect::default(), rowid.clone());
+                                *state = crate::ui::DisplayState::Image(
+                                    ratatui::layout::Rect::default(),
+                                    rowid.clone(),
+                                );
+                            }
+                        } else {
+                            // Load failed — clear stale image state
+                            manager.clear();
+                            if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                *state = crate::ui::DisplayState::Empty;
                             }
                         }
                     }
@@ -443,13 +449,16 @@ pub async fn run(cli: &Opts) -> Result<()> {
         // For Sixel/Foot: Clear when state changes (only if still using legacy clearing for some reason)
         let mut needs_sixel_clear = false;
         if image_preview_enabled {
-            let is_sixel = image_manager.as_ref().map(|m| m.is_sixel()).unwrap_or(false);
+            let is_sixel = image_manager
+                .as_ref()
+                .map(|m| m.is_sixel())
+                .unwrap_or(false);
             if is_sixel && (previous_was_image != current_is_image) {
                 let _ = terminal.clear();
                 needs_sixel_clear = true;
             }
         }
- // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
+        // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
         let term_is_foot = std::env::var("TERM")
             .unwrap_or_default()
             .starts_with("foot");
@@ -537,13 +546,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         // Top: content, items, input (original layout)
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Length(content_height.max(3)),
-                                    Constraint::Min(1),
-                                    Constraint::Length(input_panel_height),
-                                ]
-                            )
+                            .constraints([
+                                Constraint::Length(content_height.max(3)),
+                                Constraint::Min(1),
+                                Constraint::Length(input_panel_height),
+                            ])
                             .split(f.area());
                         (layout, 0, 1, 2)
                     }
@@ -551,13 +558,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         // Middle: items, content, input
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),
-                                    Constraint::Length(content_height.max(3)),
-                                    Constraint::Length(input_panel_height),
-                                ]
-                            )
+                            .constraints([
+                                Constraint::Min(1),
+                                Constraint::Length(content_height.max(3)),
+                                Constraint::Length(input_panel_height),
+                            ])
                             .split(f.area());
                         (layout, 1, 0, 2)
                     }
@@ -565,13 +570,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         // Bottom: items, input, content
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),                        // Items panel (remaining space)
-                                    Constraint::Length(input_panel_height),    // Input panel
-                                    Constraint::Length(content_height.max(3)), // Content panel at bottom
-                                ]
-                            )
+                            .constraints([
+                                Constraint::Min(1),                        // Items panel (remaining space)
+                                Constraint::Length(input_panel_height),    // Input panel
+                                Constraint::Length(content_height.max(3)), // Content panel at bottom
+                            ])
                             .split(f.area());
                         (layout, 2, 0, 1)
                     }
@@ -794,7 +797,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
             // - Sixel: clear ALL panels when we did terminal.clear() to sync Ratatui's buffer
             //   This prevents disappearing text because Ratatui knows all panels were cleared
             use ratatui::widgets::Clear;
-            let is_kitty = image_manager.as_ref().map(|m| m.is_kitty()).unwrap_or(false);
+            let is_kitty = image_manager
+                .as_ref()
+                .map(|m| m.is_kitty())
+                .unwrap_or(false);
 
             if is_kitty {
                 // Kitty: Use Clear widget for all panels (Kitty requires explicit clearing)
@@ -850,21 +856,36 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     // Fullscreen image preview keybind
                     (code, mods) if cli.keybinds.matches_image_preview(code, mods) => {
                         if current_is_image {
-                            if let (Some(_rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
-                                // Fullscreen modal loop
+                            if let (Some(_rowid), Some(manager)) =
+                                (&current_rowid_opt, &mut image_manager)
+                            {
+                                // Fullscreen modal loop with bounded error tolerance
+                                let mut consecutive_errors: u8 = 0;
                                 loop {
                                     terminal.draw(|f| {
                                         manager.render(f, f.area());
                                     })?;
 
-                                    if let Ok(Event::Input(key_event)) = input.next() {
-                                        match (key_event.code, key_event.modifiers) {
-                                            (KeyCode::Esc, _)
-                                            | (KeyCode::Char('q'), _)
-                                            | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                                    match input.next() {
+                                        Ok(Event::Input(key_event)) => {
+                                            consecutive_errors = 0;
+                                            match (key_event.code, key_event.modifiers) {
+                                                (KeyCode::Esc, _)
+                                                | (KeyCode::Char('q'), _)
+                                                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                                                    break;
+                                                }
+                                                _ => {} // Ignore other keys
+                                            }
+                                        }
+                                        Ok(_) => {
+                                            consecutive_errors = 0;
+                                        }
+                                        Err(_) => {
+                                            consecutive_errors += 1;
+                                            if consecutive_errors >= 3 {
                                                 break;
                                             }
-                                            _ => {} // Ignore other keys
                                         }
                                     }
                                 }
