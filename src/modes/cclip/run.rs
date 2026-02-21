@@ -12,6 +12,7 @@ use crossterm::{
     ExecutableCommand,
 };
 use eyre::{eyre, Result, WrapErr};
+use futures::FutureExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
@@ -21,6 +22,7 @@ use ratatui::Terminal;
 use scopeguard::defer;
 use std::collections::HashSet;
 use std::io;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -262,17 +264,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
         cached_is_sixel = manager_lock.is_sixel();
     }
 
-    // Show initialization warnings/errors
-    if picker.is_none() {
-        if image_preview_enabled {
-            ui.set_temp_message(
-                "image_preview enabled but terminal graphics detection failed (using half-block fallback)".to_string(),
-            );
-        } else {
-            ui.set_temp_message(
-                "Terminal graphics detection failed (using half-block fallback)".to_string(),
-            );
-        }
+    // Show initialization warnings/errors only if image preview is intended
+    if picker.is_none() && image_preview_enabled {
+        ui.set_temp_message(
+            "image_preview enabled but terminal graphics detection failed (using half-block fallback)".to_string(),
+        );
     }
 
     // Get effective colors with cclip -> dmenu -> regular inheritance
@@ -319,6 +315,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     // Pre-detect graphics adapter for performance
     let graphics_adapter = crate::ui::GraphicsAdapter::detect(picker.as_ref());
+
+    // Track visible height for scroll management
+    let mut max_visible = 0;
 
     // Main TUI loop
     loop {
@@ -377,18 +376,36 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             let manager_clone = manager.clone();
                             let rowid_clone = rowid.clone();
                             tokio::spawn(async move {
-                                let mut manager_lock = manager_clone.lock().await;
-                                match manager_lock.load_cclip_image(&rowid_clone).await {
-                                    Ok(_) => {
+                                let result = AssertUnwindSafe(async {
+                                    let mut manager_lock = manager_clone.lock().await;
+                                    manager_lock.load_cclip_image(&rowid_clone).await
+                                })
+                                .catch_unwind()
+                                .await;
+
+                                match result {
+                                    Ok(Ok(_)) => {
                                         failed_lock.lock().await.remove(&rowid_clone);
                                         let mut state = crate::ui::DISPLAY_STATE.lock().await;
                                         *state = crate::ui::DisplayState::Image(rowid_clone);
                                     }
-                                    Err(e) => {
+                                    Ok(Err(e)) => {
                                         failed_lock.lock().await.insert(rowid_clone.clone());
-                                        manager_lock.clear();
+                                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                            manager_lock.clear();
+                                        }
                                         let mut state = crate::ui::DISPLAY_STATE.lock().await;
                                         *state = crate::ui::DisplayState::Failed(e.to_string());
+                                    }
+                                    Err(_) => {
+                                        failed_lock.lock().await.insert(rowid_clone.clone());
+                                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                            manager_lock.clear();
+                                        }
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        *state = crate::ui::DisplayState::Failed(
+                                            "Task panicked during image load".to_string(),
+                                        );
                                     }
                                 }
                             });
@@ -607,7 +624,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
             // Items panel
             let items_panel_height = chunks[items_panel_index].height;
-            let max_visible = items_panel_height.saturating_sub(2) as usize;
+            max_visible = items_panel_height.saturating_sub(2) as usize;
 
             let visible_items = ui
                 .shown
@@ -976,6 +993,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                         &tag_metadata_formatter,
                                                         show_line_numbers,
                                                         show_tag_color_names,
+                                                        max_visible,
                                                     );
                                                 }
                                             }
@@ -1181,6 +1199,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                 &tag_metadata_formatter,
                                                 show_line_numbers,
                                                 show_tag_color_names,
+                                                max_visible,
                                             );
                                         }
                                     }
@@ -1230,6 +1249,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     &tag_metadata_formatter,
                                                     show_line_numbers,
                                                     show_tag_color_names,
+                                                    max_visible,
                                                 );
                                             }
                                         }
@@ -1650,7 +1670,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
         previous_was_image = current_is_image;
     }
 }
-
 /// Helper to reload clipboard items and restore selection/scroll
 fn reload_and_restore(
     ui: &mut DmenuUI,
@@ -1658,6 +1677,7 @@ fn reload_and_restore(
     tag_metadata_formatter: &super::TagMetadataFormatter,
     show_line_numbers: bool,
     show_tag_color_names: bool,
+    visible_height: usize,
 ) {
     // Recreate items
     let new_items: Vec<Item> = updated_items
@@ -1702,9 +1722,12 @@ fn reload_and_restore(
             .position(|item| item.original_line.split('\t').next() == Some(rowid.as_str()))
         {
             ui.selected = Some(pos);
-            // Keep item visible only adjust scroll if item would be out of view
-            // (Scroll adjustment logic depends on knowing visible height,
-            // which may require passing it as a parameter)
+            // Adjust scroll to keep selection visible
+            if pos < ui.scroll_offset {
+                ui.scroll_offset = pos;
+            } else if pos >= ui.scroll_offset + visible_height {
+                ui.scroll_offset = pos + 1 - visible_height;
+            }
         } else if !ui.shown.is_empty() {
             ui.selected = Some(0);
             ui.scroll_offset = 0;
@@ -1713,5 +1736,11 @@ fn reload_and_restore(
         // If nothing was selected before but we have items now, select first
         ui.selected = Some(0);
         ui.scroll_offset = 0;
+    }
+
+    // Final boundary check for scroll offset
+    let max_scroll = ui.shown.len().saturating_sub(visible_height);
+    if ui.scroll_offset > max_scroll {
+        ui.scroll_offset = max_scroll;
     }
 }
