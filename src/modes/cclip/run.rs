@@ -1690,8 +1690,9 @@ fn reload_and_restore(
             .position(|item| item.original_line.split('\t').next() == Some(rowid.as_str()))
         {
             ui.selected = Some(pos);
-            // Restore scroll offset by scrolling selected item to top
-            ui.scroll_offset = pos;
+            // Keep item visible only adjust scroll if item would be out of view
+            // (Scroll adjustment logic depends on knowing visible height,
+            // which may require passing it as a parameter)
         } else if !ui.shown.is_empty() {
             ui.selected = Some(0);
             ui.scroll_offset = 0;
