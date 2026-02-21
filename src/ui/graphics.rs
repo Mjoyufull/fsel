@@ -16,6 +16,8 @@ pub enum DisplayState {
     Empty,
     /// Image content is displayed with rowid
     Image(String),
+    /// Image is currently loading in background
+    Loading(String),
     /// Failed to load with error message
     Failed(String),
 }
@@ -153,7 +155,11 @@ impl GraphicsAdapter {
 
         if term_program == "kitty" || term.contains("kitty") {
             Self::Kitty
-        } else if term.starts_with("foot") || term.contains("xterm") || term_program == "WezTerm" {
+        } else if term.starts_with("foot")
+            || term_program == "WezTerm"
+            || term.contains("sixel")
+            || term.contains("mlterm")
+        {
             Self::Sixel
         } else {
             Self::None

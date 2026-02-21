@@ -19,7 +19,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 use scopeguard::defer;
+use std::collections::HashSet;
 use std::io;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Run cclip mode - async TUI event loop for clipboard history
 pub async fn run(cli: &Opts) -> Result<()> {
@@ -217,15 +220,12 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     let mut image_manager = picker
         .clone()
-        .map(crate::ui::ImageManager::new)
-        .or_else(|| Some(crate::ui::ImageManager::new(picker_fallback())));
-
-    // Track initialization errors to show in UI later
-    let mut image_init_error = if picker.is_none() {
-        Some("Terminal graphics detection failed (using half-block fallback)".to_string())
-    } else {
-        None
-    };
+        .map(|p| Arc::new(Mutex::new(crate::ui::ImageManager::new(p))))
+        .or_else(|| {
+            Some(Arc::new(Mutex::new(crate::ui::ImageManager::new(
+                picker_fallback(),
+            ))))
+        });
 
     // Input handler - use Null key to prevent Escape from killing the input thread
     // (Escape is handled manually in the main loop for tag mode cancellation)
@@ -248,26 +248,29 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     ui.filter(); // Initial filter to show all items (or filtered by search_string)
 
+    // Only show an error if initialization failed completely (should not happen with fallback)
+    if image_manager.is_none() {
+        ui.set_temp_message("image_manager initialization failed".to_string());
+    }
+
+    // Wrap failed_rowids for thread-safe background loading
+    let failed_rowids = Arc::new(Mutex::new(HashSet::<String>::new()));
+
     // Ensure we have a valid selection if there are items
     if !ui.shown.is_empty() && ui.selected.is_none() {
         ui.selected = Some(0);
     }
 
-    // Show init error if any
-    if let Some(err) = image_init_error.take() {
-        ui.set_temp_message(err);
+    // enable inline preview if terminal supports graphics and chafa is available (or user forced it)
+    let mut image_preview_enabled = cli.cclip_image_preview.unwrap_or(false);
+    if cli.cclip_image_preview.is_none() {
+        if let Some(ref manager) = image_manager {
+            image_preview_enabled = manager.lock().await.supports_graphics();
+        }
     }
 
-    // enable inline preview if terminal supports graphics and chafa is available (or user forced it)
-    let image_preview_enabled = cli.cclip_image_preview.unwrap_or_else(|| {
-        image_manager
-            .as_ref()
-            .map(|m| m.supports_graphics())
-            .unwrap_or(false)
-    });
-
-    // warn if image preview is enabled but requirements aren't met
-    if image_preview_enabled && picker.is_none() {
+    // warn if image preview is enabled but terminal graphics detection failed (and no fallback)
+    if image_preview_enabled && picker.is_none() && image_manager.is_none() {
         ui.set_temp_message(
             "image_preview enabled but terminal graphics detection failed".to_string(),
         );
@@ -308,8 +311,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
         .unwrap_or_default()
         .starts_with("foot");
 
-    let mut failed_rowids = std::collections::HashSet::new();
-
     // Get effective cursor string with inheritance
     let cursor = cli
         .cclip_cursor
@@ -342,47 +343,66 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
         // Handle image loading if it changed
         if image_preview_enabled {
-            let displayed_rowid_opt = if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
-                match &*state {
-                    crate::ui::DisplayState::Image(displayed_rowid) => {
-                        Some(displayed_rowid.clone())
-                    }
-                    _ => None,
-                }
-            } else {
-                None
-            };
-
             if current_is_image {
                 if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
-                    if displayed_rowid_opt.as_deref() != Some(rowid)
-                        && !failed_rowids.contains(rowid)
-                    {
-                        // Load the new image
-                        match manager.load_cclip_image(rowid).await {
-                            Ok(_) => {
-                                failed_rowids.remove(rowid);
-                                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                    *state = crate::ui::DisplayState::Image(rowid.to_string());
-                                }
+                    let mut is_loading = false;
+                    let mut already_loaded = false;
+                    if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
+                        match &*state {
+                            crate::ui::DisplayState::Image(id) if id == rowid => {
+                                already_loaded = true
                             }
-                            Err(e) => {
-                                // Load failed
-                                failed_rowids.insert(rowid.clone());
-                                manager.clear();
-                                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                    *state = crate::ui::DisplayState::Failed(e.to_string());
-                                }
+                            crate::ui::DisplayState::Loading(id) if id == rowid => {
+                                is_loading = true
                             }
+                            _ => {}
+                        }
+                    }
+
+                    if !already_loaded && !is_loading {
+                        let failed_lock = failed_rowids.clone();
+                        let is_failed = failed_lock.lock().await.contains(rowid);
+
+                        if !is_failed {
+                            // Set state to loading
+                            if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                *state = crate::ui::DisplayState::Loading(rowid.clone());
+                            }
+
+                            // Spawn background loading task
+                            let manager_clone = manager.clone();
+                            let rowid_clone = rowid.clone();
+                            tokio::spawn(async move {
+                                let mut manager_lock = manager_clone.lock().await;
+                                match manager_lock.load_cclip_image(&rowid_clone).await {
+                                    Ok(_) => {
+                                        failed_lock.lock().await.remove(&rowid_clone);
+                                        if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                            *state = crate::ui::DisplayState::Image(rowid_clone);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        failed_lock.lock().await.insert(rowid_clone.clone());
+                                        manager_lock.clear();
+                                        if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                            *state = crate::ui::DisplayState::Failed(e.to_string());
+                                        }
+                                    }
+                                }
+                            });
                         }
                     }
                 }
             } else if previous_was_image {
                 // Clear the image manager if we transitioned away from an image
                 if let Some(manager) = &mut image_manager {
-                    manager.clear();
+                    if let Ok(mut manager_lock) = manager.try_lock() {
+                        manager_lock.clear();
+                    }
                 }
-                failed_rowids.clear();
+                if let Ok(mut failed) = failed_rowids.try_lock() {
+                    failed.clear();
+                }
                 if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
                     *state = crate::ui::DisplayState::Empty;
                 }
@@ -392,10 +412,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
         // For Sixel/Foot: Clear when state changes (only if still using legacy clearing for some reason)
         let mut needs_sixel_clear = false;
         if image_preview_enabled {
-            let is_sixel = image_manager
-                .as_ref()
-                .map(|m| m.is_sixel())
-                .unwrap_or(false);
+            let is_sixel = if let Some(ref manager) = image_manager {
+                manager.lock().await.is_sixel()
+            } else {
+                false
+            };
             if is_sixel && (previous_was_image != current_is_image) {
                 let _ = terminal.clear();
                 needs_sixel_clear = true;
@@ -467,8 +488,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
             // Re-detect graphics adapter with the shared picker
             let graphics = crate::ui::GraphicsAdapter::detect(picker.as_ref());
-
-            // Layout calculation
 
             // Layout calculation
             let total_height = f.area().height;
@@ -765,15 +784,17 @@ pub async fn run(cli: &Opts) -> Result<()> {
             // Render image if enabled and we have a manager
             if image_preview_enabled && current_is_image {
                 if let Some(manager) = &mut image_manager {
-                    // Calculate image area INSIDE the content panel borders
-                    let content_chunk = chunks[content_panel_index];
-                    let image_area = ratatui::layout::Rect {
-                        x: content_chunk.x + 1,
-                        y: content_chunk.y + 1,
-                        width: content_chunk.width.saturating_sub(2),
-                        height: content_chunk.height.saturating_sub(2),
-                    };
-                    manager.render(f, image_area);
+                    if let Ok(mut manager_lock) = manager.try_lock() {
+                        // Calculate image area INSIDE the content panel borders
+                        let content_chunk = chunks[content_panel_index];
+                        let image_area = ratatui::layout::Rect {
+                            x: content_chunk.x + 1,
+                            y: content_chunk.y + 1,
+                            width: content_chunk.width.saturating_sub(2),
+                            height: content_chunk.height.saturating_sub(2),
+                        };
+                        manager_lock.render(f, image_area);
+                    }
                 }
             }
         })?;
@@ -804,7 +825,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 let mut consecutive_errors: u8 = 0;
                                 loop {
                                     terminal.draw(|f| {
-                                        manager.render(f, f.area());
+                                        if let Ok(mut manager_lock) = manager.try_lock() {
+                                            manager_lock.render(f, f.area());
+                                        }
                                     })?;
 
                                     match input.next() {
@@ -831,11 +854,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     }
                                 }
                                 terminal.clear().wrap_err("Failed to clear terminal")?;
-                                // Reset display state to force refresh
-                                if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                    *state = crate::ui::DisplayState::Empty;
+                                // Restore display state instead of purging to force reload
+                                if let Some(rowid) = &current_rowid_opt {
+                                    if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
+                                        *state = crate::ui::DisplayState::Image(rowid.clone());
+                                    }
                                 }
-                                previous_was_image = false;
+                                previous_was_image = true;
                             }
                         }
                     }
@@ -843,7 +868,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     (code, mods) if cli.keybinds.matches_tag(code, mods) => {
                         // Clear any displayed image when entering tag mode
                         if let Some(manager) = &mut image_manager {
-                            manager.clear();
+                            if let Ok(mut manager_lock) = manager.try_lock() {
+                                manager_lock.clear();
+                            }
                         }
                         let _ = terminal.clear();
                         force_sixel_sync = true;
@@ -1166,7 +1193,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                 e
                                             ));
                                         } else {
-                                            // Reload clipboard history to get updated tags
                                             // Reload clipboard history to get updated tags
                                             let updated_items_res = if let Some(ref tag_name) =
                                                 cli.cclip_tag
