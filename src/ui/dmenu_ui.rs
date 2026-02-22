@@ -714,13 +714,13 @@ impl<'a> DmenuUI<'a> {
 
     /// Get the rowid for any cclip item (not just images)
     pub fn get_cclip_rowid(&self, item: &crate::common::Item) -> Option<String> {
-        let original_line = &item.original_line;
-        if original_line.is_empty() {
+        let trimmed = item.original_line.trim();
+        if trimmed.is_empty() {
             return None;
         }
 
         // Try to parse the tab-separated format safely
-        let parts: Vec<&str> = original_line.splitn(2, '\t').collect();
+        let parts: Vec<&str> = trimmed.splitn(2, '\t').collect();
         let rowid = parts[0].trim();
         if !rowid.is_empty() && rowid.chars().all(|c| c.is_ascii_digit()) {
             return Some(rowid.to_string());

@@ -394,6 +394,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 match result {
                                     Ok(Ok(_)) => {
                                         failed_lock.lock().await.remove(&rowid_clone);
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        *state =
+                                            crate::ui::DisplayState::Image(rowid_clone.clone());
                                     }
                                     Ok(Err(e)) => {
                                         failed_lock.lock().await.insert(rowid_clone.clone());
@@ -1418,7 +1421,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     cli.dmenu_hard_stop,
                                     cli.hard_stop,
                                 );
-                                ui.selected = if selected < ui.shown.len() - 1 {
+                                ui.selected = if ui.shown.is_empty() {
+                                    Some(selected)
+                                } else if selected + 1 < ui.shown.len() {
                                     Some(selected + 1)
                                 } else if !hard_stop {
                                     Some(0)
@@ -1488,7 +1493,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 );
                                 ui.selected = if selected > 0 {
                                     Some(selected - 1)
-                                } else if !hard_stop {
+                                } else if !hard_stop && !ui.shown.is_empty() {
                                     Some(ui.shown.len() - 1)
                                 } else {
                                     Some(selected)

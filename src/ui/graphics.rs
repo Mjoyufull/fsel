@@ -79,8 +79,14 @@ impl ImageManager {
 
     /// Update the global display state (sync version)
     fn update_display_state(&self, state: DisplayState) {
-        if let Ok(mut lock) = DISPLAY_STATE.try_lock() {
-            *lock = state;
+        match DISPLAY_STATE.try_lock() {
+            Ok(mut lock) => *lock = state,
+            Err(_) => {
+                eprintln!(
+                    "Warning: update_display_state failed to acquire lock (state would have been {:?}); display state may be stale",
+                    state
+                );
+            }
         }
     }
 
@@ -104,7 +110,20 @@ impl ImageManager {
             .stderr(Stdio::null())
             .spawn()?;
 
-        let output = child.wait_with_output().await?;
+        const CCLIP_GET_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+        let output = match tokio::time::timeout(CCLIP_GET_TIMEOUT, child.wait_with_output()).await {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => return Err(eyre!("cclip get io error for rowid {}: {}", rowid, e)),
+            Err(_) => {
+                // Timed out: the future is dropped and the Child inside it is dropped,
+                // which terminates the cclip process.
+                return Err(eyre!(
+                    "cclip get timed out after {:?} for rowid: {}",
+                    CCLIP_GET_TIMEOUT,
+                    rowid
+                ));
+            }
+        };
         if !output.status.success() {
             return Err(eyre!("cclip get failed for rowid: {}", rowid));
         }
