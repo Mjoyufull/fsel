@@ -394,8 +394,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 match result {
                                     Ok(Ok(_)) => {
                                         failed_lock.lock().await.remove(&rowid_clone);
-                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
-                                        *state = crate::ui::DisplayState::Image(rowid_clone);
                                     }
                                     Ok(Err(e)) => {
                                         failed_lock.lock().await.insert(rowid_clone.clone());
@@ -430,10 +428,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 if let Ok(mut failed) = failed_rowids.try_lock() {
                     failed.clear();
                 }
-                {
-                    let mut state = crate::ui::DISPLAY_STATE.lock().await;
-                    *state = crate::ui::DisplayState::Empty;
-                }
             }
         }
 
@@ -452,6 +446,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
             let _ = std::io::Write::flush(&mut stderr);
         }
 
+        let mut render_error = Ok(());
         terminal.draw(|f| {
             // Get effective colors and settings for cclip mode with inheritance
             let highlight_color = get_cclip_color(
@@ -800,7 +795,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 force_sixel_sync = false;
             }
 
-            // Render image if enabled and we have a manager
             let mut image_rendered = false;
             if image_preview_enabled && current_is_image {
                 if let Some(manager) = &mut image_manager {
@@ -813,7 +807,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             width: content_chunk.width.saturating_sub(2),
                             height: content_chunk.height.saturating_sub(2),
                         };
-                        manager_lock.render(f, image_area);
+                        if let Err(e) = manager_lock.render(f, image_area) {
+                            render_error = Err(e);
+                        }
                         image_rendered = true;
                     }
                 }
@@ -840,6 +836,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
             f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
             f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
+        render_error?;
 
         if term_is_foot {
             let mut stderr = std::io::stderr();
@@ -864,11 +861,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     // Fullscreen modal loop with bounded error tolerance
                                     let mut consecutive_errors: u8 = 0;
                                     loop {
+                                        let mut render_err = Ok(());
                                         terminal.draw(|f| {
                                             if let Ok(mut manager_lock) = manager.try_lock() {
-                                                manager_lock.render(f, f.area());
+                                                if let Err(e) = manager_lock.render(f, f.area()) {
+                                                    render_err = Err(e);
+                                                }
                                             }
                                         })?;
+                                        render_err?;
 
                                         match input.next().await {
                                             Some(Event::Input(key_event)) => {
@@ -912,11 +913,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             }
                             let _ = terminal.clear();
                             force_sixel_sync = true;
-                            // Reset display state
-                            {
-                                let mut state = crate::ui::DISPLAY_STATE.lock().await;
-                                *state = crate::ui::DisplayState::Empty;
-                            }
 
                             if let Some(selected_idx) = ui.selected {
                                 if !ui.shown.is_empty() && selected_idx < ui.shown.len() {

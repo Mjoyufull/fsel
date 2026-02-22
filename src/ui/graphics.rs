@@ -1,13 +1,11 @@
 use eyre::{eyre, Result};
 use ratatui::layout::Rect;
 use ratatui::Frame;
-use ratatui_image::picker::Picker;
-use ratatui_image::{Resize, StatefulImage};
-use std::collections::HashMap;
-use std::process::Stdio;
-
-use ratatui_image::picker::ProtocolType;
+use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::{Resize, StatefulImage};
+use std::collections::{HashMap, VecDeque};
+use std::process::Stdio;
 
 /// Combined display state to track what's currently on screen
 #[derive(Debug, Clone, PartialEq)]
@@ -31,6 +29,8 @@ pub struct ImageManager {
     picker: Picker,
     current_rowid: Option<String>,
     cache: HashMap<String, StatefulProtocol>,
+    cache_order: VecDeque<String>,
+    cache_capacity: usize,
 }
 
 impl ImageManager {
@@ -41,6 +41,8 @@ impl ImageManager {
             picker,
             current_rowid: None,
             cache: HashMap::new(),
+            cache_order: VecDeque::new(),
+            cache_capacity: 50,
         }
     }
 
@@ -62,6 +64,23 @@ impl ImageManager {
     pub fn set_image(&mut self, rowid: &str) {
         if self.cache.contains_key(rowid) {
             self.current_rowid = Some(rowid.to_string());
+            self.update_lru(rowid);
+            self.update_display_state(DisplayState::Image(rowid.to_string()));
+        }
+    }
+
+    /// Update LRU order for a rowid
+    fn update_lru(&mut self, rowid: &str) {
+        if let Some(pos) = self.cache_order.iter().position(|r| r == rowid) {
+            self.cache_order.remove(pos);
+        }
+        self.cache_order.push_back(rowid.to_string());
+    }
+
+    /// Update the global display state (sync version)
+    fn update_display_state(&self, state: DisplayState) {
+        if let Ok(mut lock) = DISPLAY_STATE.try_lock() {
+            *lock = state;
         }
     }
 
@@ -70,6 +89,11 @@ impl ImageManager {
         // Check cache first
         if self.cache.contains_key(rowid) {
             self.current_rowid = Some(rowid.to_string());
+            self.update_lru(rowid);
+
+            // Update display state (async)
+            self.update_display_state_async().await;
+
             return Ok(());
         }
 
@@ -99,13 +123,25 @@ impl ImageManager {
 
         // Add to cache and set as current
         self.cache.insert(rowid.to_string(), protocol);
+        self.update_lru(rowid);
+
+        // Enforce cache capacity
+        if self.cache_order.len() > self.cache_capacity {
+            if let Some(old_rowid) = self.cache_order.pop_front() {
+                self.cache.remove(&old_rowid);
+            }
+        }
+
         self.current_rowid = Some(rowid.to_string());
+
+        // Update display state (async)
+        self.update_display_state_async().await;
 
         Ok(())
     }
 
     /// Render the current image into the given area
-    pub fn render(&mut self, f: &mut Frame, area: Rect) {
+    pub fn render(&mut self, f: &mut Frame, area: Rect) -> Result<()> {
         if let Some(rowid) = &self.current_rowid {
             if let Some(protocol) = self.cache.get_mut(rowid) {
                 f.render_stateful_widget(
@@ -113,13 +149,29 @@ impl ImageManager {
                     area,
                     protocol,
                 );
+
+                // Propagate encoding/resize errors
+                if let Some(Err(e)) = protocol.last_encoding_result() {
+                    return Err(eyre!("Image encoding failed: {}", e));
+                }
             }
         }
+        Ok(())
     }
 
-    /// Clear the current image from display
     pub fn clear(&mut self) {
         self.current_rowid = None;
+        self.cache.clear();
+        self.cache_order.clear();
+        self.update_display_state(DisplayState::Empty);
+    }
+
+    /// Update the global display state (async version)
+    async fn update_display_state_async(&self) {
+        if let Some(rowid) = &self.current_rowid {
+            let mut lock = DISPLAY_STATE.lock().await;
+            *lock = DisplayState::Image(rowid.clone());
+        }
     }
 }
 
@@ -135,11 +187,10 @@ impl GraphicsAdapter {
     /// Detect the best graphics adapter (legacy)
     pub fn detect(picker: Option<&Picker>) -> Self {
         if let Some(picker) = picker {
-            use ratatui_image::picker::ProtocolType;
             match picker.protocol_type() {
                 ProtocolType::Kitty | ProtocolType::Iterm2 => return Self::Kitty,
                 ProtocolType::Sixel => return Self::Sixel,
-                _ => {}
+                ProtocolType::Halfblocks => return Self::None,
             }
         }
 
