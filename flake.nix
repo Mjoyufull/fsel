@@ -1,5 +1,5 @@
 {
-  description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v3.0.0-kiwicrab";
+  description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v3.1.0-kiwicrab";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -24,7 +24,7 @@
         packages = {
           default = naersk'.buildPackage {
             pname = "fsel";
-            version = "3.0.0-kiwicrab";
+            version = "3.1.0-kiwicrab";
             src = ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config ];
@@ -36,7 +36,7 @@
             '';
 
             meta = with pkgs.lib; {
-              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v3.0.0-kiwicrab";
+              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v3.1.0-kiwicrab";
               homepage = "https://github.com/Mjoyufull/fsel";
               license = licenses.bsd2;
               maintainers = [ ];

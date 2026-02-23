@@ -1,4 +1,4 @@
-.TH FSEL 1 "2026-02-02" "3.0.0-kiwicrab" "User Commands"
+.TH FSEL 1 "2026-02-23" "3.1.0-kiwicrab" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -117,7 +117,7 @@ Prompt-only mode: no list, just input
 .SS "Clipboard Mode Options"
 .TP
 .B \-\-cclip
-Clipboard history mode: browse cclip history with previews (requires cclip)
+Clipboard history mode: browse cclip history with inline and fullscreen image previews (requires cclip). Image preview uses built-in terminal graphics (Kitty/Sixel/Halfblocks); no external viewer required.
 .TP
 .BR \-\-tag " " \fINAME\fR
 Filter clipboard items by tag (use with --cclip)
@@ -197,6 +197,7 @@ show_line_numbers = true
 # Clipboard mode overrides (optional)
 [cclip]
 image_preview = true
+hide_inline_image_message = false
 
 # Custom keybinds (optional)
 [keybinds]
@@ -238,7 +239,7 @@ Jump to first/last item
 .SS "Clipboard Mode Keybinds"
 .TP
 .BR "Alt-i"
-Open fullscreen image viewer for selected clipboard item
+Open fullscreen image preview for selected clipboard item (native TUI; press Esc or q to return)
 .TP
 .BR "Ctrl-T"
 Tag selected clipboard item
@@ -447,7 +448,7 @@ Keybind customization file (optional, can use [keybinds] in config.toml)
 .I ~/.local/share/fsel/hist_db.redb
 Launch history, frecency data, and pinned apps database (redb format)
 .TP
-.I ~/.cache/fsel/fsel-fsel.lock
+.I ~/.local/share/fsel/fsel-fsel.lock
 Lock file for single instance (app launcher mode)
 .TP
 .I ~/.cache/fsel/fsel-cclip.lock

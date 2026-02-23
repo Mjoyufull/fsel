@@ -62,8 +62,7 @@ fsel is written in Rust. You will need:
 For full functionality during development:
 
 - **cclip** - For testing clipboard history mode
-- **chafa** - For testing image previews
-- **kitty** or Sixel-capable terminal (Foot, WezTerm) - For testing inline images
+- **Kitty, Foot, WezTerm, or other Sixel/Kitty/Halfblocks-capable terminal** - For testing inline image previews (3.1.0+ uses built-in [ratatui-image](https://github.com/benjajaja/ratatui-image); pre-3.1.0 used chafa)
 - **uwsm** - For testing Universal Wayland Session Manager integration
 - **systemd** - For testing systemd-run integration (usually pre-installed)
 
@@ -678,7 +677,7 @@ What you expected to happen.
 What actually happened.
 
 **Environment**
-- fsel version: [e.g., 3.0.0-kiwicrab]
+- fsel version: [e.g., 3.1.0-kiwicrab]
 - OS: [e.g., Arch Linux, kernel 6.6.1]
 - Terminal: [e.g., kitty 0.30.0]
 - Rust version: [output of `rustc --version`]
@@ -763,7 +762,7 @@ A maintainer creates a release branch when:
    ```sh
    git checkout dev
    git pull origin dev
-   git checkout -b release/v3.0.0-kiwicrab  # Replace with actual version
+   git checkout -b release/3.1.0-kiwicrab  # Replace with actual version
    ```
 4. Update version references on the release branch:
    - `Cargo.toml` (root directory)
@@ -772,7 +771,7 @@ A maintainer creates a release branch when:
    - Man pages (`fsel.1` or similar)
 5. Commit version bump:
    ```sh
-   git commit -am "chore: bump version to 3.0.0-kiwicrab"
+   git commit -am "chore: bump version to 3.1.0-kiwicrab"
    ```
 6. Prepare release notes following [Keep a Changelog](https://keepachangelog.com/)
 7. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance
@@ -798,20 +797,20 @@ This policy started from version 2.0.0. All 3.x.x releases use `kiwicrab`.
 # 1. Merge release branch to main
 git checkout main
 git pull origin main
-git merge release/v3.0.0-kiwicrab
+git merge release/3.1.0-kiwicrab
 
-# 2. Tag the release
-git tag -a v3.0.0-kiwicrab -m "v3.0.0-kiwicrab: release notes here"
+# 2. Tag the release (version number only, no "v" prefix per PROJECT_STANDARDS)
+git tag -a 3.1.0 -m "3.1.0"
 git push origin main --tags
 
 # 3. Merge release branch back to dev (so dev has the version bump)
 git checkout dev
-git merge release/v3.0.0-kiwicrab
+git merge release/3.1.0-kiwicrab
 git push origin dev
 
 # 4. Delete the release branch
-git branch -d release/v3.0.0-kiwicrab
-git push origin --delete release/v3.0.0-kiwicrab
+git branch -d release/3.1.0-kiwicrab
+git push origin --delete release/3.1.0-kiwicrab
 ```
 
 **Why this workflow:**
@@ -826,9 +825,10 @@ git push origin --delete release/v3.0.0-kiwicrab
 Create a release using [Keep a Changelog](https://keepachangelog.com/) format:
 
 ```markdown
-## [3.0.0-kiwicrab] - 2026-02-02
+## [3.1.0-kiwicrab] - YYYY-MM-DD
 
 ### Added
+- Native inline and fullscreen image previews in cclip mode via [ratatui-image](https://github.com/benjajaja/ratatui-image) (Kitty, Sixel, Halfblocks; no chafa required)
 - Tag system for clipboard items with color/emoji metadata
 - Sixel image support for Foot terminal
 

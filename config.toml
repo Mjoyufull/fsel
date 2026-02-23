@@ -171,7 +171,7 @@ exit_if_empty = false            # Exit if stdin is empty
 show_line_numbers = true         # Show cclip rowid
 wrap_long_lines = true           # Wrap long lines
 
-# Images (requires chafa + Kitty/Sixel terminal)
+# Images (Kitty/Sixel/Halfblocks-capable terminal; built-in ratatui-image, no chafa)
 image_preview = true             # Show inline image previews
 hide_inline_image_message = false # Hide "[Inline Image Preview]" text
 

@@ -42,8 +42,9 @@
 
 **Optional:**
 - [`cclip`](https://github.com/heather7283/cclip) - for clipboard history mode
-- `chafa` - for image previews in cclip mode
-- Kitty or Sixel-capable terminal - for best image support
+- Kitty, Sixel-, or Halfblocks-capable terminal - for native inline image previews in cclip mode (see [ratatui-image](https://github.com/benjajaja/ratatui-image))
+
+**Note:** Image previews in cclip mode use built-in [ratatui-image](https://github.com/benjajaja/ratatui-image) (no external viewer). Versions before 3.1.0 required `chafa` for image previews; 3.1.0 and later do not.
 
 ## Quickstart
 
@@ -101,11 +102,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@3.0.0-kiwicrab
+    $ cargo install fsel@3.1.0-kiwicrab
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@3.0.0-kiwicrab --force
+    $ cargo install fsel@3.1.0-kiwicrab --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -148,8 +149,7 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 * **uwsm** - Universal Wayland Session Manager (for `--uwsm` flag)
 * **systemd** - For `--systemd-run` flag (usually pre-installed)
 * [**cclip**](https://github.com/heather7283/cclip) - Clipboard manager (for `--cclip` mode)
-* **chafa** - Terminal image viewer (for image previews in cclip mode)
-* **Kitty terminal** - Recommended for best inline image support (Sixel terminals also supported)
+* **Kitty, Foot, WezTerm, or other Sixel/Kitty/Halfblocks-capable terminal** - For native inline image previews in cclip mode (powered by [ratatui-image](https://github.com/benjajaja/ratatui-image); no chafa needed in 3.1.0+)
 * [**otter-launcher**](https://github.com/kuokuo123/otter-launcher) - Pairs nicely with fsel for a complete launcher setup
 
 ## Usage
@@ -307,7 +307,7 @@ fsel --cclip --cclip-show-tag-color-names
 
 #### Clipboard Features
 
-- **Image Previews**: Inline rendering (Kitty/Sixel terminals)
+- **Native image previews**: Inline and fullscreen (Alt+i) image rendering via [ratatui-image](https://github.com/benjajaja/ratatui-image) — automatic protocol detection (Kitty, Sixel, Halfblocks); no external viewer required
 - **Content Preview**: Full text preview panel
 - **Fuzzy Search**: Filter clipboard history
 - **Smart Copy**: Auto-copies selection to clipboard
@@ -582,10 +582,9 @@ fsel is a **unified TUI workflow tool** built for terminal-centric setups. It co
 - Try `disable_mouse = false` in config
 
 **Images not showing in cclip mode?**
-- Use Kitty (best) or Sixel-capable terminal (Foot, WezTerm, etc.)
-- Install `chafa` for image rendering
+- Use a Kitty-, Sixel-, or Halfblocks-capable terminal (e.g. Kitty, Foot, WezTerm). Image preview uses built-in [ratatui-image](https://github.com/benjajaja/ratatui-image); no chafa or other external viewer is needed (3.1.0+).
 - Check `image_preview = true` in config
-- Images automatically render inside content panel borders
+- Images render inside the content panel; press Alt+i for fullscreen preview
 
 **Fuzzy matching too loose?**
 - Try `--match-mode=exact` for stricter matching

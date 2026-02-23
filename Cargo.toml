@@ -1,6 +1,6 @@
 [package]
 name = "fsel"
-version = "3.0.0-kiwicrab"
+version = "3.1.0-kiwicrab"
 authors = ["Mjoyufull <https://github.com/Mjoyufull>"]
 edition = "2021"
 rust-version = "1.89"
