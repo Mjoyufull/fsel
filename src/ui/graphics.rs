@@ -6,6 +6,7 @@ use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
 use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
+use std::sync::Mutex;
 
 /// Combined display state to track what's currently on screen
 #[derive(Debug, Clone, PartialEq)]
@@ -21,8 +22,7 @@ pub enum DisplayState {
 }
 
 /// Single atomic state tracker to eliminate lock contention
-pub static DISPLAY_STATE: tokio::sync::Mutex<DisplayState> =
-    tokio::sync::Mutex::const_new(DisplayState::Empty);
+pub static DISPLAY_STATE: Mutex<DisplayState> = Mutex::new(DisplayState::Empty);
 
 /// Manages image loading and rendering using ratatui-image
 pub struct ImageManager {
@@ -79,14 +79,8 @@ impl ImageManager {
 
     /// Update the global display state (sync version)
     fn update_display_state(&self, state: DisplayState) {
-        match DISPLAY_STATE.try_lock() {
-            Ok(mut lock) => *lock = state,
-            Err(_) => {
-                eprintln!(
-                    "Warning: update_display_state failed to acquire lock (state would have been {:?}); display state may be stale",
-                    state
-                );
-            }
+        if let Ok(mut lock) = DISPLAY_STATE.lock() {
+            *lock = state;
         }
     }
 
@@ -97,9 +91,8 @@ impl ImageManager {
             self.current_rowid = Some(rowid.to_string());
             self.update_lru(rowid);
 
-            // Update display state (async)
-            self.update_display_state_async().await;
-
+            // Update display state
+            self.update_display_state(DisplayState::Image(rowid.to_string()));
             return Ok(());
         }
 
@@ -153,8 +146,8 @@ impl ImageManager {
 
         self.current_rowid = Some(rowid.to_string());
 
-        // Update display state (async)
-        self.update_display_state_async().await;
+        // Update display state
+        self.update_display_state(DisplayState::Image(rowid.to_string()));
 
         Ok(())
     }
@@ -183,14 +176,6 @@ impl ImageManager {
         self.cache.clear();
         self.cache_order.clear();
         self.update_display_state(DisplayState::Empty);
-    }
-
-    /// Update the global display state (async version)
-    async fn update_display_state_async(&self) {
-        if let Some(rowid) = &self.current_rowid {
-            let mut lock = DISPLAY_STATE.lock().await;
-            *lock = DisplayState::Image(rowid.clone());
-        }
     }
 }
 

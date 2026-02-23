@@ -84,9 +84,6 @@ pub fn run(cli: &Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
-    // Pre-detect terminal graphics capabilities
-    let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
-
     // Input handler - use a key that won't interfere with our escape handling
     let input = InputConfig {
         disable_mouse,
@@ -355,7 +352,7 @@ pub fn run(cli: &Opts) -> Result<()> {
             // Clear all widget areas FIRST to remove any old content
             // ONLY for Kitty - Foot/Sixel terminals auto-refresh and clearing causes flashing
             use ratatui::widgets::Clear;
-            let graphics = crate::ui::GraphicsAdapter::detect(picker.as_ref());
+            let graphics = crate::ui::GraphicsAdapter::detect(None);
             if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
                 f.render_widget(Clear, chunks[content_panel_index]);
                 f.render_widget(Clear, chunks[items_panel_index]);

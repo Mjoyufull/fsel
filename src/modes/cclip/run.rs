@@ -357,7 +357,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     }
 
                     if !already_loaded {
-                        let state = crate::ui::DISPLAY_STATE.lock().await;
+                        let state = crate::ui::DISPLAY_STATE.lock().unwrap();
                         match &*state {
                             crate::ui::DisplayState::Image(id) if id == rowid => {
                                 already_loaded = true
@@ -376,7 +376,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         if !is_failed {
                             // Set state to loading
                             {
-                                let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                let mut state = crate::ui::DISPLAY_STATE.lock().unwrap();
                                 *state = crate::ui::DisplayState::Loading(rowid.clone());
                             }
 
@@ -394,7 +394,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 match result {
                                     Ok(Ok(_)) => {
                                         failed_lock.lock().await.remove(&rowid_clone);
-                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().unwrap();
                                         *state =
                                             crate::ui::DisplayState::Image(rowid_clone.clone());
                                     }
@@ -403,7 +403,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         if let Ok(mut manager_lock) = manager_clone.try_lock() {
                                             manager_lock.clear();
                                         }
-                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().unwrap();
                                         *state = crate::ui::DisplayState::Failed(e.to_string());
                                     }
                                     Err(_) => {
@@ -411,7 +411,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         if let Ok(mut manager_lock) = manager_clone.try_lock() {
                                             manager_lock.clear();
                                         }
-                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().unwrap();
                                         *state = crate::ui::DisplayState::Failed(
                                             "Task panicked during image load".to_string(),
                                         );
@@ -900,7 +900,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     terminal.clear().wrap_err("Failed to clear terminal")?;
                                     // Restore display state instead of purging to force reload
                                     if let Some(rowid) = &current_rowid_opt {
-                                        let mut state = crate::ui::DISPLAY_STATE.lock().await;
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().unwrap();
                                         *state = crate::ui::DisplayState::Image(rowid.clone());
                                     }
                                 }
