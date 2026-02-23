@@ -150,9 +150,9 @@ git push origin dev
 ```
 main (production releases only)
   |
-  └── merge from release/v2.x.x (at release time) ← then tag (e.g. 2.5.0) and create GitHub release with body
+  └── merge from release/2.x.x (at release time) ← then tag (e.g. 2.5.0) and create GitHub release with body
        |
-       release/v2.x.x (release preparation branch)
+       release/2.x.x (release preparation branch)
          |
          └── created from dev (freeze point)
               |
@@ -440,7 +440,7 @@ A maintainer creates a release branch when:
    ```bash
    git checkout dev
    git pull origin dev
-   git checkout -b release/v3.0.0-kiwicrab  # Replace with actual version
+   git checkout -b release/3.0.0-kiwicrab  # Replace with actual version
    ```
 4. Update version references on the release branch:
    - `Cargo.toml` (root directory)
@@ -466,7 +466,7 @@ A maintainer creates a release branch when:
 # 1. Merge release branch to main
 git checkout main
 git pull origin main
-git merge release/v3.0.0-kiwicrab
+git merge release/3.0.0-kiwicrab
 
 # 2. Tag the release (tag = version number only, no codename)
 git tag -a 3.0.0 -m "3.0.0"
@@ -474,12 +474,12 @@ git push origin main --tags
 
 # 3. Merge release branch back to dev (so dev has the version bump)
 git checkout dev
-git merge release/v3.0.0-kiwicrab
+git merge release/3.0.0-kiwicrab
 git push origin dev
 
 # 4. Delete the release branch only after it is merged to both main and dev
-git branch -d release/v3.0.0-kiwicrab
-git push origin --delete release/v3.0.0-kiwicrab
+git branch -d release/3.0.0-kiwicrab
+git push origin --delete release/3.0.0-kiwicrab
 ```
 
 **Always merge the release branch to both main and dev before deleting it.** If you already deleted the release branch, merge main into dev once as a one-off recovery.
