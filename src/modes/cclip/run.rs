@@ -1724,8 +1724,8 @@ fn reload_and_restore(
         .collect();
 
     // Preserve current selection by rowid (first field in original_line)
-    let selected_rowid = ui
-        .selected
+    let old_selection = ui.selected;
+    let selected_rowid = old_selection
         .and_then(|idx| ui.shown.get(idx))
         .and_then(|item| item.original_line.split('\t').next().map(|s| s.to_string()));
 
@@ -1734,7 +1734,9 @@ fn reload_and_restore(
     ui.shown.clear();
     ui.filter();
 
-    // Restore selection by finding the same rowid
+    // Restore selection:
+    // 1. Try to find the same rowid (item was updated but not deleted)
+    // 2. If rowid not found, keep the same index (item was deleted, select the one below it)
     if let Some(ref rowid) = selected_rowid {
         if let Some(pos) = ui
             .shown
@@ -1742,19 +1744,27 @@ fn reload_and_restore(
             .position(|item| item.original_line.split('\t').next() == Some(rowid.as_str()))
         {
             ui.selected = Some(pos);
-            // Adjust scroll to keep selection visible
-            if pos < ui.scroll_offset {
-                ui.scroll_offset = pos;
-            } else if pos >= ui.scroll_offset + visible_height {
-                ui.scroll_offset = pos + 1 - visible_height;
+        } else if let Some(old_idx) = old_selection {
+            // Rowid not found - likely deleted. Keep same index if possible.
+            if !ui.shown.is_empty() {
+                ui.selected = Some(old_idx.min(ui.shown.len() - 1));
+            } else {
+                ui.selected = None;
             }
-        } else if !ui.shown.is_empty() {
-            ui.selected = Some(0);
-            ui.scroll_offset = 0;
         }
     } else if !ui.shown.is_empty() && ui.selected.is_none() {
         // If nothing was selected before but we have items now, select first
         ui.selected = Some(0);
+    }
+
+    // Adjust scroll to keep selection visible
+    if let Some(pos) = ui.selected {
+        if pos < ui.scroll_offset {
+            ui.scroll_offset = pos;
+        } else if pos >= ui.scroll_offset + visible_height {
+            ui.scroll_offset = pos + 1 - visible_height;
+        }
+    } else {
         ui.scroll_offset = 0;
     }
 
