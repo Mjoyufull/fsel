@@ -12,6 +12,7 @@ use crossterm::{
     ExecutableCommand,
 };
 use eyre::{eyre, Result, WrapErr};
+use futures::FutureExt;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
@@ -19,7 +20,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Terminal;
 use scopeguard::defer;
+use std::collections::HashSet;
 use std::io;
+use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Run cclip mode - async TUI event loop for clipboard history
 pub async fn run(cli: &Opts) -> Result<()> {
@@ -129,11 +134,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
     };
 
     if cclip_items.is_empty() {
-        if cli.cclip_tag.is_some() {
-            println!(
-                "No clipboard items with tag '{}'",
-                cli.cclip_tag.as_ref().unwrap()
-            );
+        if let Some(tag_name) = &cli.cclip_tag {
+            println!("No clipboard items with tag '{}'", tag_name);
         } else {
             println!("No clipboard history available");
         }
@@ -213,14 +215,23 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
-    // Input handler - use Null key to prevent Escape from killing the input thread
-    // (Escape is handled manually in the main loop for tag mode cancellation)
-    let input = InputConfig {
+    // Initialize ImageManager for ratatui-image
+    // Detect terminal capabilities ONCE
+    let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+    let picker_fallback = || ratatui_image::picker::Picker::halfblocks();
+
+    let mut image_manager = Some(Arc::new(Mutex::new(crate::ui::ImageManager::new(
+        picker.clone().unwrap_or_else(picker_fallback),
+    ))));
+
+    // Initialize Async Input with 16ms tick rate for responsive image loading
+    let mut input = InputConfig {
         exit_key: KeyCode::Null,
         disable_mouse,
+        tick_rate: std::time::Duration::from_millis(16),
         ..InputConfig::default()
     }
-    .init();
+    .init_async();
 
     // Create dmenu UI using cclip settings with inheritance
     // Wrapping should be enabled by default for proper text display
@@ -234,30 +245,30 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     ui.filter(); // Initial filter to show all items (or filtered by search_string)
 
+    // Wrap failed_rowids for thread-safe background loading
+    let failed_rowids = Arc::new(Mutex::new(HashSet::<String>::new()));
+
     // Ensure we have a valid selection if there are items
     if !ui.shown.is_empty() && ui.selected.is_none() {
         ui.selected = Some(0);
     }
 
-    // Check if terminal supports graphics and chafa is available
-    let chafa_available = super::preview::check_chafa_available();
-
-    // enable inline preview for both Kitty and Sixel protocols
-    let graphics_adapter = crate::ui::GraphicsAdapter::detect();
-    let supports_graphics = !matches!(graphics_adapter, crate::ui::GraphicsAdapter::None);
-
-    let image_preview_enabled = cli
-        .cclip_image_preview
-        .unwrap_or(chafa_available && supports_graphics);
-
-    // warn if image preview is enabled but requirements aren't met
-    if image_preview_enabled && !chafa_available {
-        eprintln!("warning: image_preview is enabled but chafa is not installed");
-        eprintln!("install chafa for image previews: https://github.com/hpjansson/chafa");
+    // Determine image preview enablement and cache capabilities
+    let mut image_preview_enabled = cli.cclip_image_preview.unwrap_or(false);
+    let mut cached_is_sixel = false;
+    if let Some(ref manager) = image_manager {
+        let manager_lock = manager.lock().await;
+        if cli.cclip_image_preview.is_none() {
+            image_preview_enabled = manager_lock.supports_graphics();
+        }
+        cached_is_sixel = manager_lock.is_sixel();
     }
-    if image_preview_enabled && !supports_graphics {
-        eprintln!("warning: image_preview is enabled but your terminal doesn't support graphics");
-        eprintln!("supported terminals: Kitty, Foot, WezTerm, xterm (with sixel support)");
+
+    // Show initialization warnings/errors only if image preview is intended
+    if picker.is_none() && image_preview_enabled {
+        ui.set_temp_message(
+            "image_preview enabled but terminal graphics detection failed (using half-block fallback)".to_string(),
+        );
     }
 
     // Get effective colors with cclip -> dmenu -> regular inheritance
@@ -278,98 +289,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     // Update info with image support
     // Calculate layout to get actual chunk width
-    let term_size = terminal.size()?;
-    let terminal_area = ratatui::layout::Rect {
-        x: 0,
-        y: 0,
-        width: term_size.width,
-        height: term_size.height,
-    };
-
-    let content_height_percent = get_cclip_u16(
-        cli.cclip_title_panel_height_percent,
-        cli.dmenu_title_panel_height_percent,
-        cli.title_panel_height_percent,
-    );
-    let content_height =
-        (term_size.height as f32 * content_height_percent as f32 / 100.0).round() as u16;
-    let content_height = content_height.max(3);
-    let input_panel_height = get_cclip_u16(
-        cli.cclip_input_panel_height,
-        cli.dmenu_input_panel_height,
-        cli.input_panel_height,
-    );
-    let content_panel_position = get_cclip_panel_position(
-        cli.cclip_title_panel_position,
-        cli.dmenu_title_panel_position,
-        cli.title_panel_position
-            .unwrap_or(crate::cli::PanelPosition::Top),
-    );
-
-    // Calculate layout to get actual chunk dimensions
-    let (chunks, content_panel_index, _, _) = match content_panel_position {
-        crate::cli::PanelPosition::Top => {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Length(content_height),
-                        Constraint::Min(1),
-                        Constraint::Length(input_panel_height),
-                    ]
-                    .as_ref(),
-                )
-                .split(terminal_area);
-            (layout, 0, 1, 2)
-        }
-        crate::cli::PanelPosition::Middle => {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Min(1),
-                        Constraint::Length(content_height),
-                        Constraint::Length(input_panel_height),
-                    ]
-                    .as_ref(),
-                )
-                .split(terminal_area);
-            (layout, 1, 0, 2)
-        }
-        crate::cli::PanelPosition::Bottom => {
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(
-                    [
-                        Constraint::Min(1),
-                        Constraint::Length(input_panel_height),
-                        Constraint::Length(content_height),
-                    ]
-                    .as_ref(),
-                )
-                .split(terminal_area);
-            (layout, 2, 0, 1)
-        }
-    };
-
-    // Use actual chunk width and height from layout
-    let content_panel_width = chunks[content_panel_index].width;
-    let content_panel_height = chunks[content_panel_index].height.saturating_sub(2); // Account for borders
 
     // Get hide image message setting
     let hide_image_message = cli.cclip_hide_inline_image_message.unwrap_or(false);
-
-    ui.info_with_image_support(
-        get_cclip_color(
-            cli.cclip_highlight_color,
-            cli.dmenu_highlight_color,
-            cli.highlight_color,
-        ),
-        image_preview_enabled,
-        hide_image_message,
-        content_panel_width,
-        content_panel_height,
-    );
 
     // List state for ratatui
     let mut list_state = ListState::default();
@@ -379,12 +301,23 @@ pub async fn run(cli: &Opts) -> Result<()> {
     // Flag to force Ratatui buffer sync after clearing in tag mode
     let mut force_sixel_sync = false;
 
+    // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
+    let term_is_foot = std::env::var("TERM")
+        .unwrap_or_default()
+        .starts_with("foot");
+
     // Get effective cursor string with inheritance
     let cursor = cli
         .cclip_cursor
         .as_ref()
         .or(cli.dmenu_cursor.as_ref())
         .unwrap_or(&cli.cursor);
+
+    // Pre-detect graphics adapter for performance
+    let graphics_adapter = crate::ui::GraphicsAdapter::detect(picker.as_ref());
+
+    // Track visible height for scroll management
+    let mut max_visible = 0;
 
     // Main TUI loop
     loop {
@@ -396,83 +329,137 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
         // Check if current item is an image (only when not in tag mode)
         let mut current_is_image = false;
+        let mut current_rowid_opt = None;
         if image_preview_enabled && matches!(ui.tag_mode, TagMode::Normal) {
             if let Some(selected) = ui.selected {
                 if selected < ui.shown.len() {
                     let item = &ui.shown[selected];
-                    if ui.get_cclip_rowid(item).is_some() {
+                    if ui.is_cclip_image_item(item) {
                         current_is_image = true;
+                        current_rowid_opt = ui.get_cclip_rowid(item);
                     }
                 }
             }
         }
 
-        // For Sixel/Foot: Clear when state changes OR when showing different image
-        // We use terminal.clear() which clears the entire screen, then sync Ratatui's buffer
-        // for all panels using Clear widgets to prevent disappearing text
+        // Handle image loading if it changed
+        if image_preview_enabled {
+            if current_is_image {
+                if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
+                    let mut already_loaded = false;
+                    let mut is_loading = false;
+
+                    if let Ok(mut manager_lock) = manager.try_lock() {
+                        if manager_lock.is_cached(rowid) {
+                            manager_lock.set_image(rowid);
+                            already_loaded = true;
+                        }
+                    }
+
+                    if !already_loaded {
+                        let state = crate::ui::DISPLAY_STATE
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        match &*state {
+                            crate::ui::DisplayState::Image(id) if id == rowid => {
+                                already_loaded = true
+                            }
+                            crate::ui::DisplayState::Loading(id) if id == rowid => {
+                                is_loading = true
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if !already_loaded && !is_loading {
+                        let failed_lock = failed_rowids.clone();
+                        let is_failed = failed_lock.lock().await.contains(rowid);
+
+                        if !is_failed {
+                            // Set state to loading
+                            {
+                                let mut state = crate::ui::DISPLAY_STATE
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner());
+                                *state = crate::ui::DisplayState::Loading(rowid.clone());
+                            }
+
+                            // Spawn background loading task
+                            let manager_clone = manager.clone();
+                            let rowid_clone = rowid.clone();
+                            tokio::spawn(async move {
+                                let result = AssertUnwindSafe(async {
+                                    let mut manager_lock = manager_clone.lock().await;
+                                    manager_lock.load_cclip_image(&rowid_clone).await
+                                })
+                                .catch_unwind()
+                                .await;
+
+                                match result {
+                                    Ok(Ok(_)) => {
+                                        failed_lock.lock().await.remove(&rowid_clone);
+                                        let mut state = crate::ui::DISPLAY_STATE
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        *state =
+                                            crate::ui::DisplayState::Image(rowid_clone.clone());
+                                    }
+                                    Ok(Err(e)) => {
+                                        failed_lock.lock().await.insert(rowid_clone.clone());
+                                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                            manager_lock.clear();
+                                        }
+                                        let mut state = crate::ui::DISPLAY_STATE
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        *state = crate::ui::DisplayState::Failed(e.to_string());
+                                    }
+                                    Err(_) => {
+                                        failed_lock.lock().await.insert(rowid_clone.clone());
+                                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                            manager_lock.clear();
+                                        }
+                                        let mut state = crate::ui::DISPLAY_STATE
+                                            .lock()
+                                            .unwrap_or_else(|e| e.into_inner());
+                                        *state = crate::ui::DisplayState::Failed(
+                                            "Task panicked during image load".to_string(),
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            } else if previous_was_image {
+                // Clear the image manager if we transitioned away from an image
+                if let Some(manager) = &mut image_manager {
+                    if let Ok(mut manager_lock) = manager.try_lock() {
+                        manager_lock.clear();
+                    }
+                }
+                if let Ok(mut failed) = failed_rowids.try_lock() {
+                    failed.clear();
+                }
+            }
+        }
+
+        // For Sixel/Foot: Clear when state changes (only if still using legacy clearing for some reason)
         let mut needs_sixel_clear = false;
         if image_preview_enabled {
-            // Determine whether the currently displayed image (if any) differs
-            let displayed_rowid_opt = if let Ok(state) = crate::ui::DISPLAY_STATE.lock() {
-                match &*state {
-                    crate::ui::DisplayState::Image(_, displayed_rowid) => {
-                        Some(displayed_rowid.clone())
-                    }
-                    _ => None,
-                }
-            } else {
-                None
-            };
-
-            let current_rowid_opt = if current_is_image {
-                if let Some(selected) = ui.selected {
-                    if selected < ui.shown.len() {
-                        ui.get_cclip_rowid(&ui.shown[selected])
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            // Decide if we need to clear the content panel area based on state transitions
-            let need_area_clear = match (previous_was_image, current_is_image) {
-                // image -> text: must clear to remove sixel
-                (true, false) => true,
-                // text -> image: clear to avoid any leftover artifacts before drawing image
-                (false, true) => true,
-                // image -> image: clear only if different rowid
-                (true, true) => displayed_rowid_opt.as_deref() != current_rowid_opt.as_deref(),
-                // text -> text: never clear (this prevents text from disappearing)
-                (false, false) => false,
-            };
-
-            // Decide graphics adapter once
-            let graphics = crate::ui::GraphicsAdapter::detect();
-
-            // For Sixel: use terminal.clear() when transitioning states to properly clear images
-            // This clears the entire screen, so we'll need to sync Ratatui's buffer for all panels
-            if need_area_clear && matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
-                // Clear entire terminal to remove lingering Sixel images
+            let is_sixel = cached_is_sixel;
+            if is_sixel && (previous_was_image != current_is_image) {
                 let _ = terminal.clear();
-                // Flag that we need to sync Ratatui's buffer for all panels
                 needs_sixel_clear = true;
             }
         }
-
-        // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
-        let term_is_foot = std::env::var("TERM")
-            .unwrap_or_default()
-            .starts_with("foot");
         if term_is_foot {
             let mut stderr = std::io::stderr();
             let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026h");
             let _ = std::io::Write::flush(&mut stderr);
         }
 
+        let mut render_error = Ok(());
         terminal.draw(|f| {
             // Get effective colors and settings for cclip mode with inheritance
             let highlight_color = get_cclip_color(
@@ -531,6 +518,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 cli.input_panel_height,
             );
 
+            // Use pre-detected graphics adapter
+            let graphics = graphics_adapter;
+
             // Layout calculation
             let total_height = f.area().height;
             let content_height =
@@ -551,14 +541,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         // Top: content, items, input (original layout)
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Length(content_height.max(3)),
-                                    Constraint::Min(1),
-                                    Constraint::Length(input_panel_height),
-                                ]
-                                .as_ref(),
-                            )
+                            .constraints([
+                                Constraint::Length(content_height.max(3)),
+                                Constraint::Min(1),
+                                Constraint::Length(input_panel_height),
+                            ])
                             .split(f.area());
                         (layout, 0, 1, 2)
                     }
@@ -566,14 +553,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         // Middle: items, content, input
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),
-                                    Constraint::Length(content_height.max(3)),
-                                    Constraint::Length(input_panel_height),
-                                ]
-                                .as_ref(),
-                            )
+                            .constraints([
+                                Constraint::Min(1),
+                                Constraint::Length(content_height.max(3)),
+                                Constraint::Length(input_panel_height),
+                            ])
                             .split(f.area());
                         (layout, 1, 0, 2)
                     }
@@ -581,14 +565,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         // Bottom: items, input, content
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),                        // Items panel (remaining space)
-                                    Constraint::Length(input_panel_height),    // Input panel
-                                    Constraint::Length(content_height.max(3)), // Content panel at bottom
-                                ]
-                                .as_ref(),
-                            )
+                            .constraints([
+                                Constraint::Min(1),                        // Items panel (remaining space)
+                                Constraint::Length(input_panel_height),    // Input panel
+                                Constraint::Length(content_height.max(3)), // Content panel at bottom
+                            ])
                             .split(f.area());
                         (layout, 2, 0, 1)
                     }
@@ -659,7 +640,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
             // Items panel
             let items_panel_height = chunks[items_panel_index].height;
-            let max_visible = items_panel_height.saturating_sub(2) as usize;
+            max_visible = items_panel_height.saturating_sub(2) as usize;
 
             let visible_items = ui
                 .shown
@@ -811,17 +792,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
             // - Sixel: clear ALL panels when we did terminal.clear() to sync Ratatui's buffer
             //   This prevents disappearing text because Ratatui knows all panels were cleared
             use ratatui::widgets::Clear;
-            let graphics_runtime = crate::ui::GraphicsAdapter::detect();
+            let is_kitty = matches!(graphics, crate::ui::GraphicsAdapter::Kitty);
 
-            if matches!(graphics_runtime, crate::ui::GraphicsAdapter::Kitty) {
+            if is_kitty {
                 // Kitty: Use Clear widget for all panels (Kitty requires explicit clearing)
                 f.render_widget(Clear, chunks[content_panel_index]);
                 f.render_widget(Clear, chunks[items_panel_index]);
                 f.render_widget(Clear, chunks[input_panel_index]);
             } else if needs_sixel_clear || force_sixel_sync {
                 // Sixel: Clear ALL panels to sync Ratatui's buffer with terminal state
-                // terminal.clear() wiped the entire screen, so we need to tell Ratatui
-                // that all panels were cleared so it will redraw them properly
                 f.render_widget(Clear, chunks[content_panel_index]);
                 f.render_widget(Clear, chunks[items_panel_index]);
                 f.render_widget(Clear, chunks[input_panel_index]);
@@ -829,11 +808,48 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 force_sixel_sync = false;
             }
 
-            // NOW render all components in their dynamic positions
-            f.render_widget(content_paragraph, chunks[content_panel_index]);
+            let mut image_rendered = false;
+            if image_preview_enabled && current_is_image {
+                if let Some(manager) = &mut image_manager {
+                    if let Ok(mut manager_lock) = manager.try_lock() {
+                        // Calculate image area INSIDE the content panel borders
+                        let content_chunk = chunks[content_panel_index];
+                        let image_area = ratatui::layout::Rect {
+                            x: content_chunk.x + 1,
+                            y: content_chunk.y + 1,
+                            width: content_chunk.width.saturating_sub(2),
+                            height: content_chunk.height.saturating_sub(2),
+                        };
+                        if let Err(e) = manager_lock.render(f, image_area) {
+                            render_error = Err(e);
+                        }
+                        image_rendered = true;
+                    }
+                }
+            }
+
+            // Render all components in their dynamic positions
+            // If image was rendered, we use a simpler block for the content panel to avoid drawing text over/under image
+            if image_rendered {
+                let content_block = Block::default()
+                    .borders(Borders::ALL)
+                    .title(Span::styled(
+                        " Clipboard Preview ",
+                        Style::default()
+                            .add_modifier(Modifier::BOLD)
+                            .fg(header_title_color),
+                    ))
+                    .border_type(border_type)
+                    .border_style(Style::default().fg(main_border_color));
+                f.render_widget(content_block, chunks[content_panel_index]);
+            } else {
+                f.render_widget(content_paragraph, chunks[content_panel_index]);
+            }
+
             f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
             f.render_widget(input_paragraph, chunks[input_panel_index]);
         })?;
+        render_error?;
 
         if term_is_foot {
             let mut stderr = std::io::stderr();
@@ -844,789 +860,454 @@ pub async fn run(cli: &Opts) -> Result<()> {
         // Note: Post-draw clearing removed - using Clear widget inside draw loop instead
         // Clear widget ensures all widget areas are cleaned before rendering new content
 
-        // After ratatui draws, handle image display
-        if image_preview_enabled && current_is_image {
-            let graphics = crate::ui::GraphicsAdapter::detect();
-
-            // Show new image if current item is an image
-            {
-                if let Some(selected) = ui.selected {
-                    if selected < ui.shown.len() {
-                        let item = &ui.shown[selected];
-                        if let Some(rowid) = ui.get_cclip_rowid(item) {
-                            // Get the content panel chunk position from the last draw
-                            // We need to recalculate the layout to get the correct chunk positions
-                            let term_size = terminal.get_frame().area();
-                            let total_height = term_size.height;
-                            let content_panel_height_percent = get_cclip_u16(
-                                cli.cclip_title_panel_height_percent,
-                                cli.dmenu_title_panel_height_percent,
-                                cli.title_panel_height_percent,
-                            );
-                            let content_height =
-                                (total_height as f32 * content_panel_height_percent as f32 / 100.0)
-                                    .round() as u16;
-                            let content_height = content_height.max(3);
-                            let input_panel_height = get_cclip_u16(
-                                cli.cclip_input_panel_height,
-                                cli.dmenu_input_panel_height,
-                                cli.input_panel_height,
-                            );
-                            let content_panel_position = get_cclip_panel_position(
-                                cli.cclip_title_panel_position,
-                                cli.dmenu_title_panel_position,
-                                cli.title_panel_position
-                                    .unwrap_or(crate::cli::PanelPosition::Top),
-                            );
-
-                            // Recalculate layout to get chunk positions (same as in draw)
-                            let (chunks, content_panel_index, _, _) = match content_panel_position {
-                                crate::cli::PanelPosition::Top => {
-                                    let layout = Layout::default()
-                                        .direction(Direction::Vertical)
-                                        .constraints(
-                                            [
-                                                Constraint::Length(content_height),
-                                                Constraint::Min(1),
-                                                Constraint::Length(input_panel_height),
-                                            ]
-                                            .as_ref(),
-                                        )
-                                        .split(term_size);
-                                    (layout, 0, 1, 2)
-                                }
-                                crate::cli::PanelPosition::Middle => {
-                                    let layout = Layout::default()
-                                        .direction(Direction::Vertical)
-                                        .constraints(
-                                            [
-                                                Constraint::Min(1),
-                                                Constraint::Length(content_height),
-                                                Constraint::Length(input_panel_height),
-                                            ]
-                                            .as_ref(),
-                                        )
-                                        .split(term_size);
-                                    (layout, 1, 0, 2)
-                                }
-                                crate::cli::PanelPosition::Bottom => {
-                                    let layout = Layout::default()
-                                        .direction(Direction::Vertical)
-                                        .constraints(
-                                            [
-                                                Constraint::Min(1),
-                                                Constraint::Length(input_panel_height),
-                                                Constraint::Length(content_height),
-                                            ]
-                                            .as_ref(),
-                                        )
-                                        .split(term_size);
-                                    (layout, 2, 0, 1)
-                                }
-                            };
-
-                            // Get the content panel chunk
-                            let content_chunk = chunks[content_panel_index];
-
-                            // Calculate image area INSIDE the content panel borders
-                            let image_area = ratatui::layout::Rect {
-                                x: content_chunk.x + 1,                         // Inside left border
-                                y: content_chunk.y + 1,                         // Inside top border
-                                width: content_chunk.width.saturating_sub(2), // Account for left+right borders
-                                height: content_chunk.height.saturating_sub(2), // Account for top+bottom borders
-                            };
-
-                            // Show image inside the content panel
-                            let _ = graphics
-                                .show_cclip_image_if_different(&rowid, image_area)
-                                .await;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Update state for next iteration
-        previous_was_image = current_is_image;
-
         // Handle input events with full navigation and clipboard copying
-        match input.next()? {
-            Event::Input(key) => {
-                match (key.code, key.modifiers) {
-                    // Check for image preview keybind FIRST (before other Ctrl+key checks)
-                    (code, mods) if cli.keybinds.matches_image_preview(code, mods) => {
-                        if let Some(selected) = ui.selected {
-                            if selected < ui.shown.len() {
-                                let item = &ui.shown[selected];
-                                if ui.display_image_to_terminal(item) {
-                                    // Loop to keep image displayed until Esc/q is pressed
+        tokio::select! {
+            Some(event) = input.next() => match event {
+                Event::Input(key) => {
+                    match (key.code, key.modifiers) {
+                        // Fullscreen image preview keybind
+                        (code, mods) if cli.keybinds.matches_image_preview(code, mods) => {
+                            if current_is_image {
+                                if let (Some(_rowid), Some(manager)) =
+                                    (&current_rowid_opt, &mut image_manager)
+                                {
+                                    // Fullscreen modal loop with bounded error tolerance
+                                    let mut consecutive_errors: u8 = 0;
                                     loop {
-                                        // Use the SAME input channel as the main loop to prevent buffering/race conditions
-                                        if let Ok(crate::ui::InputEvent::Input(key_event)) =
-                                            input.next()
-                                        {
-                                            match (key_event.code, key_event.modifiers) {
-                                                (KeyCode::Esc, _)
-                                                | (KeyCode::Char('q'), _)
-                                                | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                                                    break
+                                        let mut render_err = Ok(());
+                                        terminal.draw(|f| {
+                                            if let Ok(mut manager_lock) = manager.try_lock() {
+                                                if let Err(e) = manager_lock.render(f, f.area()) {
+                                                    render_err = Err(e);
                                                 }
-                                                _ => {} // Ignore all other keys
+                                            }
+                                        })?;
+                                        render_err?;
+
+                                        match input.next().await {
+                                            Some(Event::Input(key_event)) => {
+                                                consecutive_errors = 0;
+                                                match (key_event.code, key_event.modifiers) {
+                                                    (KeyCode::Esc, _)
+                                                    | (KeyCode::Char('q'), _)
+                                                    | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                                                        break;
+                                                    }
+                                                    _ => {} // Ignore other keys
+                                                }
+                                            }
+                                            Some(_) => {
+                                                consecutive_errors = 0;
+                                            }
+                                            None => {
+                                                consecutive_errors += 1;
+                                                if consecutive_errors >= 3 {
+                                                    break;
+                                                }
                                             }
                                         }
-                                        // Small sleep to prevent tight loop if channel is empty (though next() blocks)
-                                        // actually input.next() blocks so we don't need sleep
                                     }
                                     terminal.clear().wrap_err("Failed to clear terminal")?;
-                                    // Reset display state to force refresh of inline preview when returning
-                                    if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                                        *state = crate::ui::DisplayState::Empty;
+                                    // Restore display state instead of purging to force reload
+                                    if let Some(rowid) = &current_rowid_opt {
+                                        let mut state = crate::ui::DISPLAY_STATE.lock().unwrap_or_else(|e| e.into_inner());
+                                        *state = crate::ui::DisplayState::Image(rowid.clone());
                                     }
-                                    // Reset previous_was_image so next iteration will detect state change
-                                    // and sync Ratatui's buffer properly after terminal.clear()
-                                    previous_was_image = false;
                                 }
                             }
                         }
-                    }
-                    // Tag keybind (Ctrl+T)
-                    (code, mods) if cli.keybinds.matches_tag(code, mods) => {
-                        // Clear any displayed image when entering tag mode
-                        let graphics = crate::ui::GraphicsAdapter::detect();
-                        if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
-                            // For Kitty: use graphics protocol to clear images
-                            graphics.image_hide().ok();
-                        } else if matches!(graphics, crate::ui::GraphicsAdapter::Sixel) {
-                            // For Sixel/Foot: clear entire screen to remove any lingering images
+                        // Tag keybind (Ctrl+T)
+                        (code, mods) if cli.keybinds.matches_tag(code, mods) => {
+                            // Clear any displayed image when entering tag mode
+                            if let Some(manager) = &mut image_manager {
+                                if let Ok(mut manager_lock) = manager.try_lock() {
+                                    manager_lock.clear();
+                                }
+                            }
                             let _ = terminal.clear();
-                            // Force Ratatui buffer sync on next draw
                             force_sixel_sync = true;
-                        }
-                        // Reset display state
-                        if let Ok(mut state) = crate::ui::DISPLAY_STATE.lock() {
-                            *state = crate::ui::DisplayState::Empty;
-                        }
-                        previous_was_image = false;
 
-                        if ui.selected.is_some() && !ui.shown.is_empty() {
-                            let selected_idx = ui.selected.unwrap();
-                            if selected_idx < ui.shown.len() {
-                                let selected_item = ui.shown[selected_idx].original_line.clone();
-                                // Get available tags with just names (no formatting)
-                                let available_tags =
-                                    super::scan::get_all_tags().unwrap_or_default();
-                                ui.tag_mode = TagMode::PromptingTagName {
-                                    input: String::new(),
-                                    selected_item: Some(selected_item),
-                                    available_tags,
-                                    selected_tag: None,
-                                };
-                            }
-                        }
-                    }
-                    // Untag keybind (Alt+T)
-                    (KeyCode::Char('t'), KeyModifiers::ALT) => {
-                        if ui.selected.is_some() && !ui.shown.is_empty() {
-                            let selected_idx = ui.selected.unwrap();
-                            let item = &ui.shown[selected_idx];
-                            let selected_item = Some(item.original_line.clone());
-                            if let Ok(cclip_item) =
-                                super::CclipItem::from_line(item.original_line.clone())
-                            {
-                                if !cclip_item.tags.is_empty() {
-                                    let first_tag = cclip_item.tags[0].clone();
-                                    ui.tag_mode = TagMode::RemovingTag {
-                                        input: first_tag,
-                                        tags: cclip_item.tags.clone(),
-                                        selected: Some(0),
-                                        selected_item,
-                                    };
-                                } else {
-                                    ui.tag_mode = TagMode::RemovingTag {
+                            if let Some(selected_idx) = ui.selected {
+                                if !ui.shown.is_empty() && selected_idx < ui.shown.len() {
+                                    let selected_item = ui.shown[selected_idx].original_line.clone();
+                                    // Get available tags with just names (no formatting)
+                                    let available_tags =
+                                        super::scan::get_all_tags().unwrap_or_default();
+                                    ui.tag_mode = TagMode::PromptingTagName {
                                         input: String::new(),
-                                        tags: Vec::new(),
-                                        selected: None,
-                                        selected_item,
+                                        selected_item: Some(selected_item),
+                                        available_tags,
+                                        selected_tag: None,
                                     };
                                 }
                             }
                         }
-                    }
-                    // Delete entry (Alt+Delete)
-                    (code, mods) if cli.keybinds.matches_cclip_delete(code, mods) => {
-                        if ui.tag_mode == TagMode::Normal {
-                            if let Some(selected) = ui.selected {
-                                if selected < ui.shown.len() {
-                                    let item = &ui.shown[selected];
-                                    if let Some(rowid) = ui.get_cclip_rowid(item) {
-                                        match super::select::delete_item(&rowid) {
-                                            Ok(()) => {
-                                                ui.set_temp_message(format!(
-                                                    "Deleted entry {}",
-                                                    rowid
-                                                ));
-
-                                                // Reload clipboard history (respecting tag filter if active)
-                                                let updated_items_res =
-                                                    if let Some(ref tag_name) = cli.cclip_tag {
-                                                        super::scan::get_clipboard_history_by_tag(
-                                                            tag_name,
-                                                        )
-                                                    } else {
-                                                        super::scan::get_clipboard_history()
-                                                    };
-
-                                                if let Ok(updated_items) = updated_items_res {
-                                                    // Recreate items
-                                                    let new_items: Vec<Item> = updated_items
-                                                        .into_iter()
-                                                        .enumerate()
-                                                        .map(|(idx, cclip_item)| {
-                                                            let display_name = if show_line_numbers {
-                                                                cclip_item.get_display_name_with_number_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                            } else {
-                                                                cclip_item.get_display_name_with_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                            };
-
-                                                            let mut item = Item::new_simple(
-                                                                cclip_item.original_line.clone(),
-                                                                display_name,
-                                                                idx + 1,
-                                                            );
-                                                            item.tags =
-                                                                Some(cclip_item.tags.clone());
-                                                            item
-                                                        })
-                                                        .collect();
-
-                                                    // Preserve current selection and scroll
-                                                    let old_selected = ui.selected;
-                                                    let old_scroll_offset = ui.scroll_offset;
-
-                                                    // Update UI with new items
-                                                    ui.hidden = new_items;
-                                                    ui.shown.clear();
-                                                    ui.filter();
-
-                                                    // Restore selection and scroll
-                                                    ui.selected = old_selected;
-                                                    ui.scroll_offset = old_scroll_offset;
-
-                                                    // Adjust selection if it's now out of bounds
-                                                    if let Some(sel) = ui.selected {
-                                                        if sel >= ui.shown.len()
-                                                            && !ui.shown.is_empty()
-                                                        {
-                                                            ui.selected = Some(
-                                                                ui.shown.len().saturating_sub(1),
-                                                            );
-                                                        } else if ui.shown.is_empty() {
-                                                            ui.selected = None;
-                                                        }
-                                                    }
-
-                                                    // Ensure scroll offset is sane (selection visible)
-                                                    if let Some(sel) = ui.selected {
-                                                        ui.scroll_offset =
-                                                            ui.scroll_offset.min(sel);
-                                                    }
-                                                }
+                        // Untag keybind (Alt+T)
+                        (KeyCode::Char('t'), KeyModifiers::ALT) => {
+                            if let Some(selected_idx) = ui.selected {
+                                if selected_idx < ui.shown.len() {
+                                    let item = &ui.shown[selected_idx];
+                                    let selected_item = Some(item.original_line.clone());
+                                    match super::CclipItem::from_line(item.original_line.clone()) {
+                                        Ok(cclip_item) => {
+                                            if !cclip_item.tags.is_empty() {
+                                                let first_tag = cclip_item.tags[0].clone();
+                                                ui.tag_mode = TagMode::RemovingTag {
+                                                    input: first_tag,
+                                                    tags: cclip_item.tags.clone(),
+                                                    selected: Some(0),
+                                                    selected_item,
+                                                };
+                                            } else {
+                                                ui.tag_mode = TagMode::RemovingTag {
+                                                    input: String::new(),
+                                                    tags: Vec::new(),
+                                                    selected: None,
+                                                    selected_item,
+                                                };
                                             }
-                                            Err(e) => {
-                                                ui.set_temp_message(format!(
-                                                    "Failed to delete entry {}: {}",
-                                                    rowid, e
-                                                ));
-                                            }
+                                        }
+                                        Err(e) => {
+                                            ui.set_temp_message(format!("Failed to parse item: {}", e));
+                                            ui.tag_mode = TagMode::RemovingTag {
+                                                input: String::new(),
+                                                tags: Vec::new(),
+                                                selected: None,
+                                                selected_item,
+                                            };
                                         }
                                     }
                                 }
                             }
-                            continue;
                         }
-                    }
-                    // Exit on escape or Ctrl+C/Q
-                    (KeyCode::Esc, _)
-                    | (KeyCode::Char('q'), KeyModifiers::CONTROL)
-                    | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                        // Tag mode cancellation
-                        if ui.tag_mode != TagMode::Normal {
-                            ui.tag_mode = TagMode::Normal;
-                            continue;
-                        } else {
-                            return Ok(()); // Exit without copying
-                        }
-                    }
-                    // Handle Enter key (clipboard copy or tag mode progression)
-                    (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                        match ui.tag_mode.clone() {
-                            TagMode::PromptingTagName {
-                                input,
-                                selected_item,
-                                selected_tag: _,
-                                available_tags: _,
-                            } => {
-                                let tag_name = input.trim().to_string();
+                        // Delete entry (Alt+Delete)
+                        (code, mods) if cli.keybinds.matches_cclip_delete(code, mods) => {
+                            if ui.tag_mode == TagMode::Normal {
+                                if let Some(selected) = ui.selected {
+                                    if selected < ui.shown.len() {
+                                        let item = &ui.shown[selected];
+                                        if let Some(rowid) = ui.get_cclip_rowid(item) {
+                                            match super::select::delete_item(&rowid) {
+                                                Ok(()) => {
+                                                    ui.set_temp_message(format!(
+                                                        "Deleted entry {}",
+                                                        rowid
+                                                    ));
 
-                                // If no name, proceed to emoji (tag can be emoji-only)
-                                if tag_name.is_empty() {
-                                    ui.tag_mode = TagMode::PromptingTagEmoji {
-                                        tag_name: String::new(),
-                                        input: String::new(),
+                                                    // Reload clipboard history (respecting tag filter if active)
+                                                    let updated_items_res =
+                                                        if let Some(ref tag_name) = cli.cclip_tag {
+                                                            super::scan::get_clipboard_history_by_tag(
+                                                                tag_name,
+                                                            )
+                                                        } else {
+                                                            super::scan::get_clipboard_history()
+                                                        };
+
+                                                    if let Ok(updated_items) = updated_items_res {
+                                                        reload_and_restore(
+                                                            &mut ui,
+                                                            updated_items,
+                                                            &tag_metadata_formatter,
+                                                            show_line_numbers,
+                                                            show_tag_color_names,
+                                                            max_visible,
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    ui.set_temp_message(format!(
+                                                        "Failed to delete entry {}: {}",
+                                                        rowid, e
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                        // Exit on escape or Ctrl+C/Q
+                        (KeyCode::Esc, _)
+                        | (KeyCode::Char('q'), KeyModifiers::CONTROL)
+                        | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                            // Tag mode cancellation
+                            if ui.tag_mode != TagMode::Normal {
+                                ui.tag_mode = TagMode::Normal;
+                                continue;
+                            } else {
+                                return Ok(()); // Exit without copying
+                            }
+                        }
+                        // Handle Enter key (clipboard copy or tag mode progression)
+                        (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                            match ui.tag_mode.clone() {
+                                TagMode::PromptingTagName {
+                                    input,
+                                    selected_item,
+                                    selected_tag: _,
+                                    available_tags: _,
+                                } => {
+                                    let tag_name = input.trim().to_string();
+
+                                    // If no name, proceed to emoji (tag can be emoji-only)
+                                    if tag_name.is_empty() {
+                                        ui.tag_mode = TagMode::PromptingTagEmoji {
+                                            tag_name: String::new(),
+                                            input: String::new(),
+                                            selected_item,
+                                        };
+                                        continue;
+                                    }
+
+                                    // Check if tag already exists on this item - if so, enter editing mode
+                                    let is_editing = if let Some(ref item_line) = selected_item {
+                                        if let Ok(cclip_item) =
+                                            super::CclipItem::from_line(item_line.clone())
+                                        {
+                                            cclip_item.tags.contains(&tag_name)
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+
+                                    // Load metadata if tag exists (either editing or selecting existing)
+                                    if tag_metadata_map.contains_key(&tag_name) {
+                                        let metadata = &tag_metadata_map[&tag_name];
+
+                                        if is_editing {
+                                            // Tag already on item - enter editing mode with message
+                                            ui.set_temp_message(format!(
+                                                "Tag '{}' already applied (editing)",
+                                                tag_name
+                                            ));
+                                        }
+
+                                        ui.tag_mode = TagMode::PromptingTagEmoji {
+                                            tag_name: tag_name.clone(),
+                                            input: metadata.emoji.clone().unwrap_or_default(),
+                                            selected_item,
+                                        };
+                                    } else {
+                                        // New tag - start with empty emoji
+                                        ui.tag_mode = TagMode::PromptingTagEmoji {
+                                            tag_name,
+                                            input: String::new(),
+                                            selected_item,
+                                        };
+                                    }
+                                    continue;
+                                }
+                                TagMode::PromptingTagEmoji {
+                                    tag_name,
+                                    input,
+                                    selected_item,
+                                } => {
+                                    let emoji = if input.trim().is_empty() {
+                                        None
+                                    } else {
+                                        Some(input.trim().to_string())
+                                    };
+
+                                    // If no name and no emoji, cancel
+                                    if tag_name.is_empty() && emoji.is_none() {
+                                        ui.set_temp_message(
+                                            "Tag requires either a name or an emoji".to_string(),
+                                        );
+                                        ui.tag_mode = TagMode::Normal;
+                                        continue;
+                                    }
+
+                                    // If no name, use emoji as the tag name
+                                    let final_tag_name = if tag_name.is_empty() {
+                                        emoji.clone().unwrap_or_default()
+                                    } else {
+                                        tag_name
+                                    };
+
+                                    // Load existing color if editing existing tag
+                                    let existing_color = tag_metadata_map
+                                        .get(&final_tag_name)
+                                        .and_then(|m| m.color.clone())
+                                        .unwrap_or_default();
+
+                                    ui.tag_mode = TagMode::PromptingTagColor {
+                                        tag_name: final_tag_name,
+                                        emoji,
+                                        input: existing_color,
                                         selected_item,
                                     };
                                     continue;
                                 }
+                                TagMode::PromptingTagColor {
+                                    tag_name,
+                                    emoji,
+                                    input,
+                                    selected_item,
+                                } => {
+                                    let color = if input.trim().is_empty() {
+                                        None
+                                    } else {
+                                        Some(input.trim().to_string())
+                                    };
 
-                                // Check if tag already exists on this item - if so, enter editing mode
-                                let is_editing = if let Some(ref item_line) = selected_item {
-                                    if let Ok(cclip_item) =
-                                        super::CclipItem::from_line(item_line.clone())
-                                    {
-                                        cclip_item.tags.contains(&tag_name)
+                                    // Check if this is editing an existing tag (already on item)
+                                    let is_editing = if let Some(ref item_line) = selected_item {
+                                        if let Ok(cclip_item) =
+                                            super::CclipItem::from_line(item_line.clone())
+                                        {
+                                            cclip_item.tags.contains(&tag_name)
+                                        } else {
+                                            false
+                                        }
                                     } else {
                                         false
-                                    }
-                                } else {
-                                    false
-                                };
-
-                                // Load metadata if tag exists (either editing or selecting existing)
-                                if tag_metadata_map.contains_key(&tag_name) {
-                                    let metadata = &tag_metadata_map[&tag_name];
-
-                                    if is_editing {
-                                        // Tag already on item - enter editing mode with message
-                                        ui.set_temp_message(format!(
-                                            "Tag '{}' already applied (editing)",
-                                            tag_name
-                                        ));
-                                    }
-
-                                    ui.tag_mode = TagMode::PromptingTagEmoji {
-                                        tag_name: tag_name.clone(),
-                                        input: metadata.emoji.clone().unwrap_or_default(),
-                                        selected_item,
                                     };
-                                } else {
-                                    // New tag - start with empty emoji
-                                    ui.tag_mode = TagMode::PromptingTagEmoji {
-                                        tag_name,
-                                        input: String::new(),
-                                        selected_item,
-                                    };
-                                }
-                                continue;
-                            }
-                            TagMode::PromptingTagEmoji {
-                                tag_name,
-                                input,
-                                selected_item,
-                            } => {
-                                let emoji = if input.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(input.trim().to_string())
-                                };
 
-                                // If no name and no emoji, cancel
-                                if tag_name.is_empty() && emoji.is_none() {
-                                    ui.set_temp_message(
-                                        "Tag requires either a name or an emoji".to_string(),
-                                    );
+                                    // Get rowid from selected_item
+                                    if let Some(ref item_line) = selected_item {
+                                        let parts: Vec<&str> =
+                                            item_line.splitn(4, '\t').collect::<Vec<&str>>();
+                                        if !parts.is_empty() {
+                                            let rowid = parts[0];
+
+                                            // Only call tag_item if not editing (would fail if tag already exists)
+                                            if !is_editing {
+                                                if let Err(e) =
+                                                    super::select::tag_item(rowid, &tag_name)
+                                                {
+                                                    ui.set_temp_message(format!(
+                                                        "Failed to tag item: {}",
+                                                        e
+                                                    ));
+                                                    ui.tag_mode = TagMode::Normal;
+                                                    continue;
+                                                }
+                                            }
+
+                                            // Save tag metadata (always update metadata even when editing)
+                                            tag_metadata_map.insert(
+                                                tag_name.clone(),
+                                                super::TagMetadata {
+                                                    name: tag_name.clone(),
+                                                    color,
+                                                    emoji,
+                                                },
+                                            );
+                                            let _ = super::save_tag_metadata(&db, &tag_metadata_map);
+                                            tag_metadata_formatter = super::TagMetadataFormatter::new(
+                                                tag_metadata_map.clone(),
+                                            );
+
+                                            // Reload clipboard history to get updated tags
+                                            let updated_items_res =
+                                                if let Some(ref tag_name) = cli.cclip_tag {
+                                                    super::scan::get_clipboard_history_by_tag(tag_name)
+                                                } else {
+                                                    super::scan::get_clipboard_history()
+                                                };
+
+                                            if let Ok(updated_items) = updated_items_res {
+                                                reload_and_restore(
+                                                    &mut ui,
+                                                    updated_items,
+                                                    &tag_metadata_formatter,
+                                                    show_line_numbers,
+                                                    show_tag_color_names,
+                                                    max_visible,
+                                                );
+                                            }
+                                        }
+                                    }
+
                                     ui.tag_mode = TagMode::Normal;
                                     continue;
                                 }
-
-                                // If no name, use emoji as the tag name
-                                let final_tag_name = if tag_name.is_empty() {
-                                    emoji.clone().unwrap_or_default()
-                                } else {
-                                    tag_name
-                                };
-
-                                // Load existing color if editing existing tag
-                                let existing_color = tag_metadata_map
-                                    .get(&final_tag_name)
-                                    .and_then(|m| m.color.clone())
-                                    .unwrap_or_default();
-
-                                ui.tag_mode = TagMode::PromptingTagColor {
-                                    tag_name: final_tag_name,
-                                    emoji,
-                                    input: existing_color,
+                                TagMode::RemovingTag {
+                                    input,
                                     selected_item,
-                                };
-                                continue;
-                            }
-                            TagMode::PromptingTagColor {
-                                tag_name,
-                                emoji,
-                                input,
-                                selected_item,
-                            } => {
-                                let color = if input.trim().is_empty() {
-                                    None
-                                } else {
-                                    Some(input.trim().to_string())
-                                };
-
-                                // Check if this is editing an existing tag (already on item)
-                                let is_editing = if let Some(ref item_line) = selected_item {
-                                    if let Ok(cclip_item) =
-                                        super::CclipItem::from_line(item_line.clone())
-                                    {
-                                        cclip_item.tags.contains(&tag_name)
-                                    } else {
-                                        false
-                                    }
-                                } else {
-                                    false
-                                };
-
-                                // Get rowid from selected_item
-                                if let Some(ref item_line) = selected_item {
-                                    let parts: Vec<&str> =
-                                        item_line.splitn(4, '\t').collect::<Vec<&str>>();
-                                    if !parts.is_empty() {
-                                        let rowid = parts[0];
-
-                                        // Only call tag_item if not editing (would fail if tag already exists)
-                                        if !is_editing {
-                                            if let Err(e) =
-                                                super::select::tag_item(rowid, &tag_name)
-                                            {
-                                                eprintln!("Failed to tag item: {}", e);
-                                                ui.tag_mode = TagMode::Normal;
-                                                continue;
-                                            }
-                                        }
-
-                                        // Save tag metadata (always update metadata even when editing)
-                                        tag_metadata_map.insert(
-                                            tag_name.clone(),
-                                            super::TagMetadata {
-                                                name: tag_name.clone(),
-                                                color,
-                                                emoji,
-                                            },
-                                        );
-                                        let _ = super::save_tag_metadata(&db, &tag_metadata_map);
-                                        tag_metadata_formatter = super::TagMetadataFormatter::new(
-                                            tag_metadata_map.clone(),
-                                        );
-
-                                        // Reload clipboard history to get updated tags
-                                        if let Ok(updated_items) =
-                                            super::scan::get_clipboard_history()
-                                        {
-                                            // Recreate items with updated formatter
-                                            let new_items: Vec<Item> = updated_items
-                                                .into_iter()
-                                                .enumerate()
-                                                .map(|(idx, cclip_item)| {
-                                                    let display_name = if show_line_numbers {
-                                                        cclip_item.get_display_name_with_number_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                    } else {
-                                                        cclip_item.get_display_name_with_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                    };
-
-                                                    let mut item = Item::new_simple(
-                                                        cclip_item.original_line.clone(),
-                                                        display_name,
-                                                        idx + 1
-                                                    );
-                                                    item.tags = Some(cclip_item.tags.clone());
-                                                    item
-                                                })
-                                                .collect();
-
-                                            // Preserve current selection by rowid (first field in original_line)
-                                            let selected_rowid = ui
-                                                .selected
-                                                .and_then(|idx| ui.shown.get(idx))
-                                                .and_then(|item| {
-                                                    item.original_line
-                                                        .split('\t')
-                                                        .next()
-                                                        .map(|s| s.to_string())
-                                                });
-
-                                            // Preserve scroll offset
-                                            let old_scroll_offset = ui.scroll_offset;
-
-                                            // Update UI with new items
-                                            ui.hidden = new_items;
-                                            ui.shown.clear();
-                                            ui.filter();
-
-                                            // Restore selection by finding the same rowid
-                                            if let Some(ref rowid) = selected_rowid {
-                                                if let Some(pos) =
-                                                    ui.shown.iter().position(|item| {
-                                                        item.original_line.split('\t').next()
-                                                            == Some(rowid.as_str())
-                                                    })
-                                                {
-                                                    ui.selected = Some(pos);
-                                                    // Restore scroll offset, ensuring selected item is visible
-                                                    ui.scroll_offset = old_scroll_offset.min(pos);
-                                                } else if !ui.shown.is_empty() {
-                                                    ui.selected = Some(0);
-                                                    ui.scroll_offset = 0;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                ui.tag_mode = TagMode::Normal;
-                                continue;
-                            }
-                            TagMode::RemovingTag {
-                                input,
-                                selected_item,
-                                ..
-                            } => {
-                                // Get rowid from selected_item
-                                if let Some(ref item_line) = selected_item {
-                                    let parts: Vec<&str> =
-                                        item_line.splitn(4, '\t').collect::<Vec<&str>>();
-                                    if !parts.is_empty() {
-                                        let rowid = parts[0];
-                                        let tag_to_remove = if input.trim().is_empty() {
-                                            None
-                                        } else {
-                                            Some(input.trim())
-                                        };
-
-                                        if let Err(e) =
-                                            super::select::untag_item(rowid, tag_to_remove)
-                                        {
-                                            eprintln!("Failed to remove tag: {}", e);
-                                        } else {
-                                            // Reload clipboard history to get updated tags
-                                            if let Ok(updated_items) =
-                                                super::scan::get_clipboard_history()
-                                            {
-                                                // Recreate items with current formatter
-                                                let new_items: Vec<Item> = updated_items
-                                                    .into_iter()
-                                                    .enumerate()
-                                                    .map(|(idx, cclip_item)| {
-                                                        let display_name = if show_line_numbers {
-                                                            cclip_item.get_display_name_with_number_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                        } else {
-                                                            cclip_item.get_display_name_with_formatter_options(Some(&tag_metadata_formatter), show_tag_color_names)
-                                                        };
-
-                                                        let mut item = Item::new_simple(
-                                                            cclip_item.original_line.clone(),
-                                                            display_name,
-                                                            idx + 1
-                                                        );
-                                                        item.tags = Some(cclip_item.tags.clone());
-                                                        item
-                                                    })
-                                                    .collect();
-
-                                                // Preserve current selection by rowid (first field in original_line)
-                                                let selected_rowid = ui
-                                                    .selected
-                                                    .and_then(|idx| ui.shown.get(idx))
-                                                    .and_then(|item| {
-                                                        item.original_line
-                                                            .split('\t')
-                                                            .next()
-                                                            .map(|s| s.to_string())
-                                                    });
-
-                                                // Preserve scroll offset
-                                                let old_scroll_offset = ui.scroll_offset;
-
-                                                // Update UI with new items
-                                                ui.hidden = new_items;
-                                                ui.shown.clear();
-                                                ui.filter();
-
-                                                // Restore selection by finding the same rowid
-                                                if let Some(ref rowid) = selected_rowid {
-                                                    if let Some(pos) =
-                                                        ui.shown.iter().position(|item| {
-                                                            item.original_line.split('\t').next()
-                                                                == Some(rowid.as_str())
-                                                        })
-                                                    {
-                                                        ui.selected = Some(pos);
-                                                        // Restore scroll offset, ensuring selected item is visible
-                                                        ui.scroll_offset =
-                                                            old_scroll_offset.min(pos);
-                                                    } else if !ui.shown.is_empty() {
-                                                        ui.selected = Some(0);
-                                                        ui.scroll_offset = 0;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                ui.tag_mode = TagMode::Normal;
-                                continue;
-                            }
-                            TagMode::Normal => {
-                                // Normal mode: copy to clipboard
-                                if let Some(selected) = ui.selected {
-                                    if selected < ui.shown.len() {
-                                        // parse the original cclip line to get rowid and mime_type
-                                        let original_line = &ui.shown[selected].original_line;
+                                    ..
+                                } => {
+                                    // Get rowid from selected_item
+                                    if let Some(ref item_line) = selected_item {
                                         let parts: Vec<&str> =
-                                            original_line.splitn(3, '\t').collect();
-                                        if parts.len() >= 2 {
+                                            item_line.splitn(4, '\t').collect::<Vec<&str>>();
+                                        if !parts.is_empty() {
                                             let rowid = parts[0];
-                                            let mime_type = parts[1];
-
-                                            // copy to clipboard using proper piping (no shell injection)
-                                            let copy_result = if std::env::var("WAYLAND_DISPLAY")
-                                                .is_ok()
-                                            {
-                                                // wayland
-                                                let cclip_child =
-                                                    std::process::Command::new("cclip")
-                                                        .args(["get", rowid])
-                                                        .stdout(std::process::Stdio::piped())
-                                                        .stderr(std::process::Stdio::null())
-                                                        .spawn();
-
-                                                if let Ok(mut cclip) = cclip_child {
-                                                    if let Some(cclip_stdout) = cclip.stdout.take()
-                                                    {
-                                                        let wl_copy =
-                                                            std::process::Command::new("wl-copy")
-                                                                .args(["-t", mime_type])
-                                                                .stdin(std::process::Stdio::piped())
-                                                                .stdout(std::process::Stdio::null())
-                                                                .stderr(std::process::Stdio::null())
-                                                                .spawn();
-
-                                                        if let Ok(mut wl) = wl_copy {
-                                                            if let Some(wl_stdin) = wl.stdin.take()
-                                                            {
-                                                                std::thread::spawn(move || {
-                                                                    let mut cclip_stdout =
-                                                                        cclip_stdout;
-                                                                    let mut wl_stdin = wl_stdin;
-                                                                    std::io::copy(
-                                                                        &mut cclip_stdout,
-                                                                        &mut wl_stdin,
-                                                                    )
-                                                                    .ok();
-                                                                });
-
-                                                                let _ = cclip.wait();
-                                                                wl.wait().ok()
-                                                            } else {
-                                                                None
-                                                            }
-                                                        } else {
-                                                            None
-                                                        }
-                                                    } else {
-                                                        None
-                                                    }
-                                                } else {
-                                                    None
-                                                }
+                                            let tag_to_remove = if input.trim().is_empty() {
+                                                None
                                             } else {
-                                                // X11 - try xclip first, then xsel
-                                                let x11_tools = [
-                                                    (
-                                                        "xclip",
-                                                        vec![
-                                                            "-selection",
-                                                            "clipboard",
-                                                            "-t",
-                                                            mime_type,
-                                                        ],
-                                                    ),
-                                                    ("xsel", vec!["--clipboard", "--input"]),
-                                                ];
-
-                                                let mut result = None;
-                                                for (tool, args) in &x11_tools {
-                                                    let cclip_child =
-                                                        std::process::Command::new("cclip")
-                                                            .args(["get", rowid])
-                                                            .stdout(std::process::Stdio::piped())
-                                                            .stderr(std::process::Stdio::null())
-                                                            .spawn();
-
-                                                    if let Ok(mut cclip) = cclip_child {
-                                                        if let Some(cclip_stdout) =
-                                                            cclip.stdout.take()
-                                                        {
-                                                            let x11_child =
-                                                                std::process::Command::new(tool)
-                                                                    .args(args)
-                                                                    .stdin(
-                                                                        std::process::Stdio::piped(
-                                                                        ),
-                                                                    )
-                                                                    .stdout(
-                                                                        std::process::Stdio::null(),
-                                                                    )
-                                                                    .stderr(
-                                                                        std::process::Stdio::null(),
-                                                                    )
-                                                                    .spawn();
-
-                                                            if let Ok(mut x11) = x11_child {
-                                                                if let Some(x11_stdin) =
-                                                                    x11.stdin.take()
-                                                                {
-                                                                    std::thread::spawn(move || {
-                                                                        let mut cclip_stdout =
-                                                                            cclip_stdout;
-                                                                        let mut x11_stdin =
-                                                                            x11_stdin;
-                                                                        std::io::copy(
-                                                                            &mut cclip_stdout,
-                                                                            &mut x11_stdin,
-                                                                        )
-                                                                        .ok();
-                                                                    });
-
-                                                                    let _ = cclip.wait();
-                                                                    if let Ok(status) = x11.wait() {
-                                                                        if status.success() {
-                                                                            result = Some(status);
-                                                                            break;
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                result
+                                                Some(input.trim())
                                             };
 
-                                            match copy_result {
-                                                Some(status) if status.success() => {
-                                                    // clean up terminal completely
+                                            if let Err(e) =
+                                                super::select::untag_item(rowid, tag_to_remove)
+                                            {
+                                                ui.set_temp_message(format!(
+                                                    "Failed to remove tag: {}",
+                                                    e
+                                                ));
+                                            } else {
+                                                // Reload clipboard history to get updated tags
+                                                let updated_items_res = if let Some(ref tag_name) =
+                                                    cli.cclip_tag
+                                                {
+                                                    super::scan::get_clipboard_history_by_tag(tag_name)
+                                                } else {
+                                                    super::scan::get_clipboard_history()
+                                                };
+
+                                                if let Ok(updated_items) = updated_items_res {
+                                                    reload_and_restore(
+                                                        &mut ui,
+                                                        updated_items,
+                                                        &tag_metadata_formatter,
+                                                        show_line_numbers,
+                                                        show_tag_color_names,
+                                                        max_visible,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    ui.tag_mode = TagMode::Normal;
+                                    continue;
+                                }
+                                TagMode::Normal => {
+                                    // Normal mode: copy to clipboard
+                                    if let Some(selected) = ui.selected {
+                                        if selected < ui.shown.len() {
+                                            let original_line = &ui.shown[selected].original_line;
+                                            match super::CclipItem::from_line(original_line.clone()) {
+                                                Ok(cclip_item) => {
+                                                    if let Err(e) = cclip_item.copy_to_clipboard() {
+                                                        ui.set_temp_message(format!(
+                                                            "Copy failed: {}",
+                                                            e
+                                                        ));
+                                                        continue;
+                                                    }
+
+                                                    // clean up terminal completely and exit
                                                     terminal
                                                         .show_cursor()
                                                         .wrap_err("Failed to show cursor")?;
                                                     drop(terminal);
-                                                    let _ =
-                                                        io::stderr().execute(DisableMouseCapture);
-                                                    let _ =
-                                                        io::stderr().execute(LeaveAlternateScreen);
+                                                    if !disable_mouse {
+                                                        let _ =
+                                                            io::stderr().execute(DisableMouseCapture);
+                                                    }
+                                                    let _ = io::stderr().execute(LeaveAlternateScreen);
                                                     let _ = disable_raw_mode();
                                                     return Ok(());
                                                 }
-                                                _ => {
-                                                    // Ignore clipboard copy errors for now
+                                                Err(e) => {
+                                                    ui.set_temp_message(format!("Parse failed: {}", e));
+                                                    continue;
                                                 }
                                             }
                                         }
@@ -1634,133 +1315,68 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 }
                             }
                         }
-                    }
 
-                    // Add character to query or tag input
-                    (KeyCode::Char(c), KeyModifiers::NONE)
-                    | (KeyCode::Char(c), KeyModifiers::SHIFT) => match &mut ui.tag_mode {
-                        TagMode::PromptingTagName { input, .. } => {
-                            input.push(c);
-                        }
-                        TagMode::PromptingTagColor { input, .. } => {
-                            input.push(c);
-                        }
-                        TagMode::PromptingTagEmoji { input, .. } => {
-                            input.push(c);
-                        }
-                        TagMode::RemovingTag { input, .. } => {
-                            input.push(c);
-                        }
-                        TagMode::Normal => {
-                            ui.query.push(c);
-                            ui.filter();
-                        }
-                    },
-                    // Remove character from query or tag input
-                    (KeyCode::Backspace, _) => match &mut ui.tag_mode {
-                        TagMode::PromptingTagName { input, .. } => {
-                            input.pop();
-                        }
-                        TagMode::PromptingTagColor { input, .. } => {
-                            input.pop();
-                        }
-                        TagMode::PromptingTagEmoji { input, .. } => {
-                            input.pop();
-                        }
-                        TagMode::RemovingTag { input, .. } => {
-                            input.pop();
-                        }
-                        TagMode::Normal => {
-                            ui.query.pop();
-                            ui.filter();
-                        }
-                    },
-                    // Navigation - Left: go to first item
-                    (KeyCode::Left, _) => {
-                        // Disable during tag creation
-                        if !matches!(ui.tag_mode, TagMode::Normal) {
-                            continue;
-                        }
-                        if !ui.shown.is_empty() {
-                            ui.selected = Some(0);
-                            ui.scroll_offset = 0;
-                        }
-                    }
-                    // Navigation - Right: go to last item
-                    (KeyCode::Right, _) => {
-                        // Disable during tag creation
-                        if !matches!(ui.tag_mode, TagMode::Normal) {
-                            continue;
-                        }
-                        if !ui.shown.is_empty() {
-                            let last_index = ui.shown.len() - 1;
-                            ui.selected = Some(last_index);
-
-                            // Scroll to show last item
-                            let total_height = terminal.size()?.height;
-                            let content_panel_height = get_cclip_u16(
-                                cli.cclip_title_panel_height_percent,
-                                cli.dmenu_title_panel_height_percent,
-                                cli.title_panel_height_percent,
-                            );
-                            let input_panel_height = get_cclip_u16(
-                                cli.cclip_input_panel_height,
-                                cli.dmenu_input_panel_height,
-                                cli.input_panel_height,
-                            );
-
-                            // Use same calculation as rendering code
-                            let content_height = (total_height as f32 * content_panel_height as f32
-                                / 100.0)
-                                .round() as u16;
-                            let content_height = content_height.max(3);
-                            let items_panel_height =
-                                total_height - content_height - input_panel_height;
-                            let max_visible = items_panel_height.saturating_sub(2) as usize;
-
-                            if max_visible > 0 && ui.shown.len() > max_visible {
-                                ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
-                            } else {
+                        // Add character to query or tag input
+                        (KeyCode::Char(c), KeyModifiers::NONE)
+                        | (KeyCode::Char(c), KeyModifiers::SHIFT) => match &mut ui.tag_mode {
+                            TagMode::PromptingTagName { input, .. } => {
+                                input.push(c);
+                            }
+                            TagMode::PromptingTagColor { input, .. } => {
+                                input.push(c);
+                            }
+                            TagMode::PromptingTagEmoji { input, .. } => {
+                                input.push(c);
+                            }
+                            TagMode::RemovingTag { input, .. } => {
+                                input.push(c);
+                            }
+                            TagMode::Normal => {
+                                ui.query.push(c);
+                                ui.filter();
+                            }
+                        },
+                        // Remove character from query or tag input
+                        (KeyCode::Backspace, _) => match &mut ui.tag_mode {
+                            TagMode::PromptingTagName { input, .. } => {
+                                input.pop();
+                            }
+                            TagMode::PromptingTagColor { input, .. } => {
+                                input.pop();
+                            }
+                            TagMode::PromptingTagEmoji { input, .. } => {
+                                input.pop();
+                            }
+                            TagMode::RemovingTag { input, .. } => {
+                                input.pop();
+                            }
+                            TagMode::Normal => {
+                                ui.query.pop();
+                                ui.filter();
+                            }
+                        },
+                        // Navigation - Left: go to first item
+                        (KeyCode::Left, _) => {
+                            // Disable during tag creation
+                            if !matches!(ui.tag_mode, TagMode::Normal) {
+                                continue;
+                            }
+                            if !ui.shown.is_empty() {
+                                ui.selected = Some(0);
                                 ui.scroll_offset = 0;
                             }
                         }
-                    }
-                    // Navigation - Down: next item with scrolling (or cycle tag selection)
-                    (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                        // Handle tag mode navigation
-                        match &ui.tag_mode {
-                            TagMode::PromptingTagName { .. } => {
-                                ui.cycle_tag_creation_selection(1);
+                        // Navigation - Right: go to last item
+                        (KeyCode::Right, _) => {
+                            // Disable during tag creation
+                            if !matches!(ui.tag_mode, TagMode::Normal) {
                                 continue;
                             }
-                            TagMode::RemovingTag { .. } => {
-                                ui.cycle_removal_selection(1);
-                                continue;
-                            }
-                            TagMode::PromptingTagEmoji { .. }
-                            | TagMode::PromptingTagColor { .. } => {
-                                // Disable navigation during emoji/color input
-                                continue;
-                            }
-                            _ => {}
-                        }
+                            if !ui.shown.is_empty() {
+                                let last_index = ui.shown.len() - 1;
+                                ui.selected = Some(last_index);
 
-                        if let Some(selected) = ui.selected {
-                            let hard_stop = get_cclip_bool(
-                                cli.cclip_hard_stop,
-                                cli.dmenu_hard_stop,
-                                cli.hard_stop,
-                            );
-                            ui.selected = if selected < ui.shown.len() - 1 {
-                                Some(selected + 1)
-                            } else if !hard_stop {
-                                Some(0)
-                            } else {
-                                Some(selected)
-                            };
-
-                            // Auto-scroll to keep selection visible
-                            if let Some(new_selected) = ui.selected {
+                                // Scroll to show last item
                                 let total_height = terminal.size()?.height;
                                 let content_panel_height = get_cclip_u16(
                                     cli.cclip_title_panel_height_percent,
@@ -1774,292 +1390,255 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 );
 
                                 // Use same calculation as rendering code
-                                let content_height =
-                                    (total_height as f32 * content_panel_height as f32 / 100.0)
-                                        .round() as u16;
+                                let content_height = (total_height as f32 * content_panel_height as f32
+                                    / 100.0)
+                                    .round() as u16;
                                 let content_height = content_height.max(3);
                                 let items_panel_height =
                                     total_height - content_height - input_panel_height;
-                                let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                let max_visible = items_panel_height.saturating_sub(2) as usize;
 
-                                // Scroll down if selection is below visible area
-                                if new_selected >= ui.scroll_offset + max_visible {
-                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-                                }
-                                // Scroll up if selection is above visible area (happens when wrapping to top)
-                                else if new_selected < ui.scroll_offset {
-                                    ui.scroll_offset = new_selected;
+                                if max_visible > 0 && ui.shown.len() > max_visible {
+                                    ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
+                                } else {
+                                    ui.scroll_offset = 0;
                                 }
                             }
                         }
-                    }
-                    // Navigation - Up: previous item with scrolling (or cycle tag selection)
-                    (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                        // Handle tag mode navigation
-                        match &ui.tag_mode {
-                            TagMode::PromptingTagName { .. } => {
-                                ui.cycle_tag_creation_selection(-1);
-                                continue;
+                        // Navigation - Down: next item with scrolling (or cycle tag selection)
+                        (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                            // Handle tag mode navigation
+                            match &ui.tag_mode {
+                                TagMode::PromptingTagName { .. } => {
+                                    ui.cycle_tag_creation_selection(1);
+                                    continue;
+                                }
+                                TagMode::RemovingTag { .. } => {
+                                    ui.cycle_removal_selection(1);
+                                    continue;
+                                }
+                                TagMode::PromptingTagEmoji { .. }
+                                | TagMode::PromptingTagColor { .. } => {
+                                    // Disable navigation during emoji/color input
+                                    continue;
+                                }
+                                _ => {}
                             }
-                            TagMode::RemovingTag { .. } => {
-                                ui.cycle_removal_selection(-1);
-                                continue;
-                            }
-                            TagMode::PromptingTagEmoji { .. }
-                            | TagMode::PromptingTagColor { .. } => {
-                                // Disable navigation during emoji/color input
-                                continue;
-                            }
-                            _ => {}
-                        }
 
-                        if let Some(selected) = ui.selected {
-                            let hard_stop = get_cclip_bool(
-                                cli.cclip_hard_stop,
-                                cli.dmenu_hard_stop,
-                                cli.hard_stop,
-                            );
-                            ui.selected = if selected > 0 {
-                                Some(selected - 1)
-                            } else if !hard_stop {
-                                Some(ui.shown.len() - 1)
-                            } else {
-                                Some(selected)
-                            };
-
-                            // Auto-scroll to keep selection visible
-                            if let Some(new_selected) = ui.selected {
-                                let total_height = terminal.size()?.height;
-                                let content_panel_height = get_cclip_u16(
-                                    cli.cclip_title_panel_height_percent,
-                                    cli.dmenu_title_panel_height_percent,
-                                    cli.title_panel_height_percent,
+                            if let Some(selected) = ui.selected {
+                                let hard_stop = get_cclip_bool(
+                                    cli.cclip_hard_stop,
+                                    cli.dmenu_hard_stop,
+                                    cli.hard_stop,
                                 );
-                                let input_panel_height = get_cclip_u16(
-                                    cli.cclip_input_panel_height,
-                                    cli.dmenu_input_panel_height,
-                                    cli.input_panel_height,
-                                );
+                                ui.selected = if ui.shown.is_empty() {
+                                    Some(selected)
+                                } else if selected + 1 < ui.shown.len() {
+                                    Some(selected + 1)
+                                } else if !hard_stop {
+                                    Some(0)
+                                } else {
+                                    Some(selected)
+                                };
 
-                                // Use same calculation as rendering code
-                                let content_height =
-                                    (total_height as f32 * content_panel_height as f32 / 100.0)
-                                        .round() as u16;
-                                let content_height = content_height.max(3);
-                                let items_panel_height =
-                                    total_height - content_height - input_panel_height;
-                                let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                // Auto-scroll to keep selection visible
+                                if let Some(new_selected) = ui.selected {
+                                    let total_height = terminal.size()?.height;
+                                    let content_panel_height = get_cclip_u16(
+                                        cli.cclip_title_panel_height_percent,
+                                        cli.dmenu_title_panel_height_percent,
+                                        cli.title_panel_height_percent,
+                                    );
+                                    let input_panel_height = get_cclip_u16(
+                                        cli.cclip_input_panel_height,
+                                        cli.dmenu_input_panel_height,
+                                        cli.input_panel_height,
+                                    );
 
-                                // Scroll up if selection is above visible area
-                                if new_selected < ui.scroll_offset {
-                                    ui.scroll_offset = new_selected;
-                                }
-                                // Scroll down if selection is below visible area (happens when wrapping to bottom)
-                                else if new_selected >= ui.scroll_offset + max_visible {
-                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                    // Use same calculation as rendering code
+                                    let content_height =
+                                        (total_height as f32 * content_panel_height as f32 / 100.0)
+                                            .round() as u16;
+                                    let content_height = content_height.max(3);
+                                    let items_panel_height =
+                                        total_height - content_height - input_panel_height;
+                                    let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+
+                                    // Scroll down if selection is below visible area
+                                    if new_selected >= ui.scroll_offset + max_visible {
+                                        ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                    }
+                                    // Scroll up if selection is above visible area (happens when wrapping to top)
+                                    else if new_selected < ui.scroll_offset {
+                                        ui.scroll_offset = new_selected;
+                                    }
                                 }
                             }
                         }
+                        // Navigation - Up: previous item with scrolling (or cycle tag selection)
+                        (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                            // Handle tag mode navigation
+                            match &ui.tag_mode {
+                                TagMode::PromptingTagName { .. } => {
+                                    ui.cycle_tag_creation_selection(-1);
+                                    continue;
+                                }
+                                TagMode::RemovingTag { .. } => {
+                                    ui.cycle_removal_selection(-1);
+                                    continue;
+                                }
+                                TagMode::PromptingTagEmoji { .. }
+                                | TagMode::PromptingTagColor { .. } => {
+                                    // Disable navigation during emoji/color input
+                                    continue;
+                                }
+                                _ => {}
+                            }
+
+                            if let Some(selected) = ui.selected {
+                                let hard_stop = get_cclip_bool(
+                                    cli.cclip_hard_stop,
+                                    cli.dmenu_hard_stop,
+                                    cli.hard_stop,
+                                );
+                                ui.selected = if selected > 0 {
+                                    Some(selected - 1)
+                                } else if !hard_stop && !ui.shown.is_empty() {
+                                    Some(ui.shown.len() - 1)
+                                } else {
+                                    Some(selected)
+                                };
+
+                                // Auto-scroll to keep selection visible
+                                if let Some(new_selected) = ui.selected {
+                                    let total_height = terminal.size()?.height;
+                                    let content_panel_height = get_cclip_u16(
+                                        cli.cclip_title_panel_height_percent,
+                                        cli.dmenu_title_panel_height_percent,
+                                        cli.title_panel_height_percent,
+                                    );
+                                    let input_panel_height = get_cclip_u16(
+                                        cli.cclip_input_panel_height,
+                                        cli.dmenu_input_panel_height,
+                                        cli.input_panel_height,
+                                    );
+
+                                    // Use same calculation as rendering code
+                                    let content_height =
+                                        (total_height as f32 * content_panel_height as f32 / 100.0)
+                                            .round() as u16;
+                                    let content_height = content_height.max(3);
+                                    let items_panel_height =
+                                        total_height - content_height - input_panel_height;
+                                    let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+
+                                    // Scroll up if selection is above visible area
+                                    if new_selected < ui.scroll_offset {
+                                        ui.scroll_offset = new_selected;
+                                    }
+                                    // Scroll down if selection is below visible area (happens when wrapping to bottom)
+                                    else if new_selected >= ui.scroll_offset + max_visible {
+                                        ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
-                // Content update now happens at the start of the loop before drawing
-            }
-            Event::Mouse(mouse_event) => {
-                // Mouse handling (similar to dmenu mode)
-                let mouse_row = mouse_event.row;
-                let total_height = terminal.size()?.height;
-                let content_panel_height = get_cclip_u16(
-                    cli.cclip_title_panel_height_percent,
-                    cli.dmenu_title_panel_height_percent,
-                    cli.title_panel_height_percent,
-                );
-                let input_panel_height = get_cclip_u16(
-                    cli.cclip_input_panel_height,
-                    cli.dmenu_input_panel_height,
-                    cli.input_panel_height,
-                );
+                Event::Mouse(mouse_event) => {
+                    // Mouse handling (similar to dmenu mode)
+                    let mouse_row = mouse_event.row;
+                    let total_height = terminal.size()?.height;
+                    let content_panel_height = get_cclip_u16(
+                        cli.cclip_title_panel_height_percent,
+                        cli.dmenu_title_panel_height_percent,
+                        cli.title_panel_height_percent,
+                    );
+                    let input_panel_height = get_cclip_u16(
+                        cli.cclip_input_panel_height,
+                        cli.dmenu_input_panel_height,
+                        cli.input_panel_height,
+                    );
 
-                // Use same calculation as rendering code
-                let content_height =
-                    (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
-                let content_height = content_height.max(3);
-                let items_panel_height = total_height - content_height - input_panel_height;
+                    // Use same calculation as rendering code
+                    let content_height =
+                        (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+                    let content_height = content_height.max(3);
+                    let items_panel_height = total_height - content_height - input_panel_height;
 
-                // Get content panel position to calculate items panel position
-                let content_panel_position = get_cclip_panel_position(
-                    cli.cclip_title_panel_position,
-                    cli.dmenu_title_panel_position,
-                    cli.title_panel_position
-                        .unwrap_or(crate::cli::PanelPosition::Top),
-                );
+                    // Get content panel position to calculate items panel position
+                    let content_panel_position = get_cclip_panel_position(
+                        cli.cclip_title_panel_position,
+                        cli.dmenu_title_panel_position,
+                        cli.title_panel_position
+                            .unwrap_or(crate::cli::PanelPosition::Top),
+                    );
 
-                // Calculate items panel coordinates based on layout
-                let (items_panel_start, items_panel_height) = match content_panel_position {
-                    crate::cli::PanelPosition::Top => {
-                        // Top: content, items, input - items start after content
-                        (content_height, items_panel_height)
-                    }
-                    crate::cli::PanelPosition::Middle => {
-                        // Middle: items, content, input - items start at top
-                        (0, items_panel_height)
-                    }
-                    crate::cli::PanelPosition::Bottom => {
-                        // Bottom: items, input, content - items start at top
-                        (0, items_panel_height)
-                    }
-                };
-
-                let items_content_start = items_panel_start + 1; // +1 for top border
-                let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
-                let items_content_end = items_content_start + max_visible_rows;
-
-                let update_selection_for_mouse_pos = |ui: &mut DmenuUI, mouse_row: u16| {
-                    if !ui.shown.is_empty()
-                        && mouse_row >= items_content_start
-                        && mouse_row < items_content_end
-                    {
-                        let row_in_content = mouse_row - items_content_start;
-                        let hovered_item_index = ui.scroll_offset + row_in_content as usize;
-                        if hovered_item_index < ui.shown.len() {
-                            ui.selected = Some(hovered_item_index);
-                            // Content update happens at start of loop
+                    // Calculate items panel coordinates based on layout
+                    let (items_panel_start, items_panel_height) = match content_panel_position {
+                        crate::cli::PanelPosition::Top => {
+                            // Top: content, items, input - items start after content
+                            (content_height, items_panel_height)
                         }
-                    }
-                };
+                        crate::cli::PanelPosition::Middle => {
+                            // Middle: items, content, input - items start at top
+                            (0, items_panel_height)
+                        }
+                        crate::cli::PanelPosition::Bottom => {
+                            // Bottom: items, input, content - items start at top
+                            (0, items_panel_height)
+                        }
+                    };
 
-                match mouse_event.kind {
-                    MouseEventKind::Moved => {
-                        // Disable mouse during tag creation
-                        if matches!(ui.tag_mode, TagMode::Normal) {
-                            update_selection_for_mouse_pos(&mut ui, mouse_row);
-                        }
-                    }
-                    MouseEventKind::Down(MouseButton::Left) => {
-                        // Disable mouse clicks during tag creation
-                        if !matches!(ui.tag_mode, TagMode::Normal) {
-                            continue;
-                        }
-                        if mouse_row >= items_content_start
+                    let items_content_start = items_panel_start + 1; // +1 for top border
+                    let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
+                    let items_content_end = items_content_start + max_visible_rows;
+
+                    let update_selection_for_mouse_pos = |ui: &mut DmenuUI, mouse_row: u16| {
+                        if !ui.shown.is_empty()
+                            && mouse_row >= items_content_start
                             && mouse_row < items_content_end
-                            && !ui.shown.is_empty()
                         {
                             let row_in_content = mouse_row - items_content_start;
-                            let clicked_item_index = ui.scroll_offset + row_in_content as usize;
+                            let hovered_item_index = ui.scroll_offset + row_in_content as usize;
+                            if hovered_item_index < ui.shown.len() {
+                                ui.selected = Some(hovered_item_index);
+                                // Content update happens at start of loop
+                            }
+                        }
+                    };
 
-                            if clicked_item_index < ui.shown.len() {
-                                // parse the original cclip line to get rowid and mime_type
-                                let original_line = &ui.shown[clicked_item_index].original_line;
-                                let parts: Vec<&str> = original_line.splitn(3, '\t').collect();
-                                if parts.len() >= 2 {
-                                    let rowid = parts[0];
-                                    let mime_type = parts[1];
+                    match mouse_event.kind {
+                        MouseEventKind::Moved => {
+                            // Disable mouse during tag creation
+                            if matches!(ui.tag_mode, TagMode::Normal) {
+                                update_selection_for_mouse_pos(&mut ui, mouse_row);
+                            }
+                        }
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            // Disable mouse clicks during tag creation
+                            if !matches!(ui.tag_mode, TagMode::Normal) {
+                                continue;
+                            }
+                            if mouse_row >= items_content_start
+                                && mouse_row < items_content_end
+                                && !ui.shown.is_empty()
+                            {
+                                let row_in_content = mouse_row - items_content_start;
+                                let clicked_item_index = ui.scroll_offset + row_in_content as usize;
 
-                                    // copy to clipboard using proper piping (no shell injection)
-                                    let copy_result = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-                                        // wayland
-                                        let cclip_child = std::process::Command::new("cclip")
-                                            .args(["get", rowid])
-                                            .stdout(std::process::Stdio::piped())
-                                            .stderr(std::process::Stdio::null())
-                                            .spawn();
-
-                                        if let Ok(mut cclip) = cclip_child {
-                                            if let Some(cclip_stdout) = cclip.stdout.take() {
-                                                let wl_copy = std::process::Command::new("wl-copy")
-                                                    .args(["-t", mime_type])
-                                                    .stdin(std::process::Stdio::piped())
-                                                    .stdout(std::process::Stdio::null())
-                                                    .stderr(std::process::Stdio::null())
-                                                    .spawn();
-
-                                                if let Ok(mut wl) = wl_copy {
-                                                    if let Some(wl_stdin) = wl.stdin.take() {
-                                                        std::thread::spawn(move || {
-                                                            let mut cclip_stdout = cclip_stdout;
-                                                            let mut wl_stdin = wl_stdin;
-                                                            std::io::copy(
-                                                                &mut cclip_stdout,
-                                                                &mut wl_stdin,
-                                                            )
-                                                            .ok();
-                                                        });
-
-                                                        let _ = cclip.wait();
-                                                        wl.wait().ok()
-                                                    } else {
-                                                        None
-                                                    }
-                                                } else {
-                                                    None
-                                                }
-                                            } else {
-                                                None
+                                if clicked_item_index < ui.shown.len() {
+                                    let original_line = &ui.shown[clicked_item_index].original_line;
+                                    match super::CclipItem::from_line(original_line.clone()) {
+                                        Ok(cclip_item) => {
+                                            if let Err(e) = cclip_item.copy_to_clipboard() {
+                                                ui.set_temp_message(format!("Copy failed: {}", e));
+                                                continue;
                                             }
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        // X11 - try xclip first, then xsel
-                                        let x11_tools = [
-                                            (
-                                                "xclip",
-                                                vec!["-selection", "clipboard", "-t", mime_type],
-                                            ),
-                                            ("xsel", vec!["--clipboard", "--input"]),
-                                        ];
 
-                                        let mut result = None;
-                                        for (tool, args) in &x11_tools {
-                                            let cclip_child = std::process::Command::new("cclip")
-                                                .args(["get", rowid])
-                                                .stdout(std::process::Stdio::piped())
-                                                .stderr(std::process::Stdio::null())
-                                                .spawn();
-
-                                            if let Ok(mut cclip) = cclip_child {
-                                                if let Some(cclip_stdout) = cclip.stdout.take() {
-                                                    let x11_child =
-                                                        std::process::Command::new(tool)
-                                                            .args(args)
-                                                            .stdin(std::process::Stdio::piped())
-                                                            .stdout(std::process::Stdio::null())
-                                                            .stderr(std::process::Stdio::null())
-                                                            .spawn();
-
-                                                    if let Ok(mut x11) = x11_child {
-                                                        if let Some(x11_stdin) = x11.stdin.take() {
-                                                            std::thread::spawn(move || {
-                                                                let mut cclip_stdout = cclip_stdout;
-                                                                let mut x11_stdin = x11_stdin;
-                                                                std::io::copy(
-                                                                    &mut cclip_stdout,
-                                                                    &mut x11_stdin,
-                                                                )
-                                                                .ok();
-                                                            });
-
-                                                            let _ = cclip.wait();
-                                                            if let Ok(status) = x11.wait() {
-                                                                if status.success() {
-                                                                    result = Some(status);
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        result
-                                    };
-
-                                    match copy_result {
-                                        Some(status) if status.success() => {
-                                            // clean up terminal completely
-                                            terminal
-                                                .show_cursor()
-                                                .wrap_err("Failed to show cursor")?;
+                                            // clean up terminal completely and exit
+                                            terminal.show_cursor().wrap_err("Failed to show cursor")?;
                                             drop(terminal);
                                             if !disable_mouse {
                                                 let _ = io::stderr().execute(DisableMouseCapture);
@@ -2068,42 +1647,120 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                             let _ = disable_raw_mode();
                                             return Ok(());
                                         }
-                                        _ => {
-                                            // ignore clipboard copy errors for now
+                                        Err(e) => {
+                                            ui.set_temp_message(format!("Parse failed: {}", e));
+                                            continue;
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                    MouseEventKind::ScrollUp => {
-                        // Disable scroll during tag creation
-                        if !matches!(ui.tag_mode, TagMode::Normal) {
-                            continue;
-                        }
-                        if !ui.shown.is_empty() && ui.scroll_offset > 0 {
-                            ui.scroll_offset -= 1;
-                            update_selection_for_mouse_pos(&mut ui, mouse_row);
-                        }
-                    }
-                    MouseEventKind::ScrollDown => {
-                        // Disable scroll during tag creation
-                        if !matches!(ui.tag_mode, TagMode::Normal) {
-                            continue;
-                        }
-                        if !ui.shown.is_empty() {
-                            let max_visible = max_visible_rows as usize;
-                            if ui.scroll_offset + max_visible < ui.shown.len() {
-                                ui.scroll_offset += 1;
+                        MouseEventKind::ScrollUp => {
+                            // Disable scroll during tag creation
+                            if !matches!(ui.tag_mode, TagMode::Normal) {
+                                continue;
+                            }
+                            if !ui.shown.is_empty() && ui.scroll_offset > 0 {
+                                ui.scroll_offset -= 1;
                                 update_selection_for_mouse_pos(&mut ui, mouse_row);
                             }
                         }
+                        MouseEventKind::ScrollDown => {
+                            // Disable scroll during tag creation
+                            if !matches!(ui.tag_mode, TagMode::Normal) {
+                                continue;
+                            }
+                            if !ui.shown.is_empty() {
+                                let max_visible = max_visible_rows as usize;
+                                if ui.scroll_offset + max_visible < ui.shown.len() {
+                                    ui.scroll_offset += 1;
+                                    update_selection_for_mouse_pos(&mut ui, mouse_row);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
+                Event::Tick => {}
+                Event::Render => {} // Handled by draw loop start
             }
-            Event::Tick => {}
-            Event::Render => {} // Handled by draw loop
         }
+
+        // Update state for next iteration
+        previous_was_image = current_is_image;
+    }
+}
+/// Helper to reload clipboard items and restore selection/scroll
+fn reload_and_restore(
+    ui: &mut DmenuUI,
+    updated_items: Vec<super::CclipItem>,
+    tag_metadata_formatter: &super::TagMetadataFormatter,
+    show_line_numbers: bool,
+    show_tag_color_names: bool,
+    visible_height: usize,
+) {
+    // Recreate items
+    let new_items: Vec<Item> = updated_items
+        .into_iter()
+        .enumerate()
+        .map(|(idx, cclip_item)| {
+            let display_name = if show_line_numbers {
+                cclip_item.get_display_name_with_number_formatter_options(
+                    Some(tag_metadata_formatter),
+                    show_tag_color_names,
+                )
+            } else {
+                cclip_item.get_display_name_with_formatter_options(
+                    Some(tag_metadata_formatter),
+                    show_tag_color_names,
+                )
+            };
+
+            let mut item =
+                Item::new_simple(cclip_item.original_line.clone(), display_name, idx + 1);
+            item.tags = Some(cclip_item.tags.clone());
+            item
+        })
+        .collect();
+
+    // Preserve current selection by rowid (first field in original_line)
+    let selected_rowid = ui
+        .selected
+        .and_then(|idx| ui.shown.get(idx))
+        .and_then(|item| item.original_line.split('\t').next().map(|s| s.to_string()));
+
+    // Update UI with new items
+    ui.hidden = new_items;
+    ui.shown.clear();
+    ui.filter();
+
+    // Restore selection by finding the same rowid
+    if let Some(ref rowid) = selected_rowid {
+        if let Some(pos) = ui
+            .shown
+            .iter()
+            .position(|item| item.original_line.split('\t').next() == Some(rowid.as_str()))
+        {
+            ui.selected = Some(pos);
+            // Adjust scroll to keep selection visible
+            if pos < ui.scroll_offset {
+                ui.scroll_offset = pos;
+            } else if pos >= ui.scroll_offset + visible_height {
+                ui.scroll_offset = pos + 1 - visible_height;
+            }
+        } else if !ui.shown.is_empty() {
+            ui.selected = Some(0);
+            ui.scroll_offset = 0;
+        }
+    } else if !ui.shown.is_empty() && ui.selected.is_none() {
+        // If nothing was selected before but we have items now, select first
+        ui.selected = Some(0);
+        ui.scroll_offset = 0;
+    }
+
+    // Final boundary check for scroll offset
+    let max_scroll = ui.shown.len().saturating_sub(visible_height);
+    if ui.scroll_offset > max_scroll {
+        ui.scroll_offset = max_scroll;
     }
 }

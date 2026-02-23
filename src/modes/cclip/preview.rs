@@ -34,14 +34,3 @@ impl CclipItem {
         Ok(output.stdout)
     }
 }
-
-/// Check if chafa is available for image previews
-pub fn check_chafa_available() -> bool {
-    Command::new("chafa")
-        .arg("--help")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
-}

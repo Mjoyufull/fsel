@@ -202,14 +202,11 @@ pub fn run(cli: &Opts) -> Result<()> {
                         // Top: content, items, input (original layout)
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Length(content_height.max(3)),
-                                    Constraint::Min(1),
-                                    Constraint::Length(input_panel_height),
-                                ]
-                                .as_ref(),
-                            )
+                            .constraints([
+                                Constraint::Length(content_height.max(3)),
+                                Constraint::Min(1),
+                                Constraint::Length(input_panel_height),
+                            ])
                             .split(f.area());
                         (layout, 0, 1, 2)
                     }
@@ -217,14 +214,11 @@ pub fn run(cli: &Opts) -> Result<()> {
                         // Middle: items, content, input
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),
-                                    Constraint::Length(content_height.max(3)),
-                                    Constraint::Length(input_panel_height),
-                                ]
-                                .as_ref(),
-                            )
+                            .constraints([
+                                Constraint::Min(1),
+                                Constraint::Length(content_height.max(3)),
+                                Constraint::Length(input_panel_height),
+                            ])
                             .split(f.area());
                         (layout, 1, 0, 2)
                     }
@@ -232,14 +226,11 @@ pub fn run(cli: &Opts) -> Result<()> {
                         // Bottom: items, input, content
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
-                            .constraints(
-                                [
-                                    Constraint::Min(1),                        // Items panel (remaining space)
-                                    Constraint::Length(input_panel_height),    // Input panel
-                                    Constraint::Length(content_height.max(3)), // Content panel at bottom
-                                ]
-                                .as_ref(),
-                            )
+                            .constraints([
+                                Constraint::Min(1),                        // Items panel (remaining space)
+                                Constraint::Length(input_panel_height),    // Input panel
+                                Constraint::Length(content_height.max(3)), // Content panel at bottom
+                            ])
                             .split(f.area());
                         (layout, 2, 0, 1)
                     }
@@ -361,7 +352,7 @@ pub fn run(cli: &Opts) -> Result<()> {
             // Clear all widget areas FIRST to remove any old content
             // ONLY for Kitty - Foot/Sixel terminals auto-refresh and clearing causes flashing
             use ratatui::widgets::Clear;
-            let graphics = crate::ui::GraphicsAdapter::detect();
+            let graphics = crate::ui::GraphicsAdapter::detect(None);
             if matches!(graphics, crate::ui::GraphicsAdapter::Kitty) {
                 f.render_widget(Clear, chunks[content_panel_index]);
                 f.render_widget(Clear, chunks[items_panel_index]);

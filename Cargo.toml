@@ -39,8 +39,9 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm_0
 which = "8.0"
 is-terminal = "0.4"
 strip-ansi-escapes = "0.2"
-base64 = "0.22"
 tokio = { version = "1.49", features = ["rt-multi-thread", "process", "sync", "time", "macros", "io-util"] }
+ratatui-image = { version = "10.0", default-features = false, features = ["crossterm", "tokio"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
 futures = "0.3"
 unicode-width = "0.2.2"
 

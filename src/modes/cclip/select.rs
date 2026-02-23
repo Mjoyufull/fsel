@@ -7,39 +7,10 @@ use std::process::{Command, Stdio};
 impl CclipItem {
     /// Copy this item back to the clipboard (Wayland)
     fn copy_to_clipboard_wayland(&self) -> Result<()> {
-        let mut cclip_child = Command::new("cclip")
-            .args(["get", &self.rowid])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()?;
+        let status = Command::new("cclip").args(["copy", &self.rowid]).status()?;
 
-        let mut wl_copy_child = Command::new("wl-copy")
-            .args(["-t", &self.mime_type])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-
-        // pipe cclip output to wl-copy
-        if let (Some(cclip_stdout), Some(wl_copy_stdin)) =
-            (cclip_child.stdout.take(), wl_copy_child.stdin.take())
-        {
-            std::thread::spawn(move || {
-                let mut cclip_stdout = cclip_stdout;
-                let mut wl_copy_stdin = wl_copy_stdin;
-                std::io::copy(&mut cclip_stdout, &mut wl_copy_stdin).ok();
-            });
-        }
-
-        let cclip_status = cclip_child.wait()?;
-        let wl_copy_status = wl_copy_child.wait()?;
-
-        if !cclip_status.success() {
-            return Err(eyre!("cclip get failed"));
-        }
-
-        if !wl_copy_status.success() {
-            return Err(eyre!("wl-copy failed"));
+        if !status.success() {
+            return Err(eyre!("cclip copy failed"));
         }
 
         Ok(())
