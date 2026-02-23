@@ -527,9 +527,9 @@ bindsym $mod+v exec 'alacritty --title clipboard -e fsel --cclip'
 ```sh
 # ~/.config/hypr/hyprland.conf
 bind = $mod, D, exec, alacritty --title launcher -e fsel
-windowrule = match:class ^launcher$, float 1
-windowrule = match:class ^launcher$, size 500 430
-windowrule = match:class ^launcher$, center 1
+windowrule = match:title ^launcher$, float 1
+windowrule = match:title ^launcher$, size 500 430
+windowrule = match:title ^launcher$, center 1
 ```
 
 **dwm/bspwm/any WM:**
