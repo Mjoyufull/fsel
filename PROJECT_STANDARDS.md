@@ -2,8 +2,8 @@
 
 > A Manual for Maintaining Sensible Git Discipline Without Sacrificing Productive Chaos
 
-**Document Version:** 1.2.0  
-**Last Updated:** 2025-10-27  
+**Document Version:** 1.3.0  
+**Last Updated:** 2026-02-18  
 **Audience:** Future me, contributors, and anyone brave enough to work on these projects
 
 ---
@@ -33,11 +33,12 @@
 
 1. **main is sacred.** Never push directly. It contains only tagged, production-ready releases.
 2. **dev is the integration branch.** All feature branches merge here first.
-3. **All code changes go through pull requests.** No exceptions. Even for solo work.
-4. **Releases are the changelog.** GitHub releases serve as the historical record. No separate CHANGELOG.md file is maintained.
-5. **Commit messages matter at release time.** During development, commit as suits your workflow. Before merging, clean them up.
-6. **Flow over formality.** Discipline exists to enable productivity, not strangle it.
-7. **Reviews are conversations, not commands.** The goal is to improve, not to dictate.
+3. **main and dev never merge directly.** Code reaches main only via release branches (or hotfix branches). Main is merged into dev only after a hotfix (to sync the fix) or after a docs-only change to main (to sync the docs).
+4. **All code changes go through pull requests.** No exceptions. Even for solo work.
+5. **Releases are the changelog.** GitHub releases serve as the historical record. No separate CHANGELOG.md file is maintained.
+6. **Commit messages matter at release time.** During development, commit as suits your workflow. Before merging, clean them up.
+7. **Flow over formality.** Discipline exists to enable productivity, not strangle it.
+8. **Reviews are conversations, not commands.** The goal is to improve, not to dictate.
 
 ### Design Intent
 
@@ -66,8 +67,8 @@ This document defines the technical Git workflow. See also:
 
 | Branch | Purpose | Push Policy |
 |--------|----------|-------------|
-| main | Stable, production-ready code. Every commit is a tagged release. | Never push directly. Merge only from release branches after testing and tagging. |
-| dev | Integration branch. All features merge here before release branches. | Never push directly. Only receives merges from feature branches via pull requests. |
+| main | Stable, production-ready code. Every commit is a tagged release. | Never push directly. Receives merges **only from release branches or hotfix branches** — never from dev. |
+| dev | Integration branch. All features merge here; release branches are created from dev. | Never push directly. Receives merges **from feature branches** (via PRs) and **from main only after a hotfix or after a docs-only change to main** (to sync back). Never from main otherwise. |
 
 ### Feature Branches
 
@@ -85,13 +86,15 @@ All work occurs in feature branches created from dev.
 
 | Type | Naming | Purpose |
 |------|---------|---------|
-| Release | release/version | Prepare releases with version bumps and final testing |
+| Release | release/version | Prepare releases with version bumps, docs updates, and final testing |
 
 Release branches are created from dev when a maintainer decides to release. They are used to:
 - Freeze a stable point in dev for release preparation
-- Update version numbers in all relevant files
+- Update version numbers and release-related docs (README, man pages, etc.) — **no source/code changes**
 - Perform final testing before release
-- Merge to main (which gets tagged) and then back to dev
+- Merge to main (which gets tagged); then merge the release branch back to dev (so dev has the version bump). main and dev do not merge into each other — the release branch is the path to main.
+
+**Release branches are not for code changes.** Only version bumps and docs changes belong on the release branch. If you find a bug during release prep: fix it in dev, then either (a) wait for dev to be up to date and merge dev into the release branch to bring in that fix, or (b) ship the release without the fix (the bug stays in that release). Do not make code changes on the release branch.
 
 **When to create a release branch:**
 - A maintainer decides it's time for a release
@@ -102,9 +105,15 @@ Release branches are created from dev when a maintainer decides to release. They
 
 | Type | Naming | Purpose |
 |------|---------|----------|
-| Hotfix | hotfix/version | Emergency patches for production issues |
+| Hotfix | hotfix/version | Emergency patches for production issues only |
 
-Hotfix branches are created from main, merged back into main after patching, then merged into dev.
+Hotfix branches are created from main, go through a PR to main, and are **exceptions, not the rule** — hotfixes are never meant to happen. Do not confuse hotfixes with normal bug fixes; normal fixes go through dev → release branch → main.
+
+**Process:** The contributor opens a hotfix PR with the code fix only. The **maintainer** adds a commit on the hotfix branch (or before merge) to bump the version in Cargo.toml, README, and other refs, then merges the PR to main. There is no release branch: the maintainer creates the tag and GitHub release for that hotfix. Then **main is merged into dev** so the fix (and version bump) is present in development. This is one of the two cases where main is merged into dev (the other is after a docs-only change to main).
+
+**Reverts** of a bad release are treated like hotfixes (branch from main, revert, version bump by maintainer, merge to main, tag and release, then merge main into dev).
+
+**When merging main into dev (after a hotfix or docs-only change):** If there are conflicts, prioritize the hotfix side for code (the hotfix knows what was changed). Docs conflicts matter less since release branches will result in doc review anyway. For code conflicts, the person merging main into dev resolves them; context-dependent.
 
 ### Documentation-Only Changes
 
@@ -124,7 +133,7 @@ git pull origin main
 # Make documentation changes
 git commit -m "docs: fix typo in README"
 git push origin main
-# Sync to dev
+# Sync to dev (exception: docs-only is one of the two cases where main is merged into dev; the other is after a hotfix)
 git checkout dev
 git merge main
 git push origin dev
@@ -136,10 +145,12 @@ git push origin dev
 
 ## Workflow Overview
 
+**Rule: main and dev never touch each other directly.** Code reaches main only via release branches (or hotfix branches). Main is merged into dev only after a hotfix (to sync the fix) or after a docs-only change to main (to sync the docs).
+
 ```
 main (production releases only)
   |
-  └── merge from release/v2.x.x (at release time) ← tag applied here
+  └── merge from release/v2.x.x (at release time) ← then tag (e.g. 2.5.0) and create GitHub release with body
        |
        release/v2.x.x (release preparation branch)
          |
@@ -349,7 +360,7 @@ They're conversations between equals, not bureaucratic rituals.
 4. **Discussion:** Feedback is addressed; code may be amended and re-pushed.
 5. **Approval:** One approval from a maintainer or designated collaborator required.
 6. **Merge:** Use *Squash and Merge* unless multiple commits are meaningful.
-7. **Tag Release (when merging to main):** Only maintainers tag versions.
+7. **Tag and release (when merging to main):** Only maintainers create the version tag (version number only) and the GitHub release (title [version-codename], body from template).
 
 ### Review Timeline
 
@@ -417,7 +428,9 @@ A maintainer creates a release branch when:
 - dev is in a stable state (no critical bugs, features are complete)
 - All planned features for the release are merged into dev
 
-**Important:** Release branches freeze a specific point in dev, allowing ongoing PRs to continue merging into dev without affecting the release preparation.
+**Important:** Release branches freeze a specific point in dev, allowing ongoing PRs to continue merging into dev without affecting the release preparation. Release branches are for version bumps and docs only — no code changes (see [Release Branches](#release-branches): if you find a bug, fix in dev and either merge dev into the release branch or ship without the fix).
+
+**Tags are created during the release stage:** When you are ready to release, you create the release branch, do version bumps and final testing, then merge the release branch to main. Only after that merge do you create the tag and publish the release. The release (GitHub release / changelog) is the canonical record of what shipped; the tag is a simple version-number pointer to that commit.
 
 ### Preparation
 
@@ -439,7 +452,7 @@ A maintainer creates a release branch when:
    ```bash
    git commit -am "chore: bump version to 3.0.0-kiwicrab"
    ```
-6. Prepare release notes following [Keep a Changelog](https://keepachangelog.com/) format.
+6. Prepare release notes using the [Release body template](#release-body-template) below.
 7. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
 8. Run final tests on the release branch:
    ```bash
@@ -455,8 +468,8 @@ git checkout main
 git pull origin main
 git merge release/v3.0.0-kiwicrab
 
-# 2. Tag the release
-git tag -a v3.0.0-kiwicrab -m "v3.0.0-kiwicrab: release notes here"
+# 2. Tag the release (tag = version number only, no codename)
+git tag -a 3.0.0 -m "3.0.0"
 git push origin main --tags
 
 # 3. Merge release branch back to dev (so dev has the version bump)
@@ -464,49 +477,95 @@ git checkout dev
 git merge release/v3.0.0-kiwicrab
 git push origin dev
 
-# 4. Delete the release branch
+# 4. Delete the release branch only after it is merged to both main and dev
 git branch -d release/v3.0.0-kiwicrab
 git push origin --delete release/v3.0.0-kiwicrab
 ```
 
+**Always merge the release branch to both main and dev before deleting it.** If you already deleted the release branch, merge main into dev once as a one-off recovery.
+
 **Why this workflow:**
+- main and dev stay independent; only release branches (and hotfixes) connect them
 - dev continues accepting PRs during release preparation
 - Release work is isolated on the release branch
 - No conflicts from ongoing development
 - Clear freeze point for the release
-- dev stays in sync with version numbers
+- dev gets version bumps by merging the release branch back, not by merging main
 
 ### GitHub Release
 
-Create a release using [Keep a Changelog](https://keepachangelog.com/) format.
+**Release title:** Use exactly `[version-codename]` in brackets, e.g. `[3.0.0-kiwicrab]`. No date or extra text in the title.
 
-**Release Notes Structure:**
-- Use Keep a Changelog categories: Added, Changed, Deprecated, Removed, Fixed, Security
-- Include technical details for developers
-- Include compatibility notes
-- Include installation instructions
-- Reference [Semantic Versioning](https://semver.org/) compliance
+**Git tag:** Use the version number only (no codename), e.g. `3.0.0`, `2.5.0`, `2.4.0`. Create the tag on main after the release branch is merged; then create the GitHub release from that tag and paste the release body (changelog) below.
 
-Example:
+### Release body template
+
+The release body is the changelog. Use this structure (omit sections that don’t apply). Prefer bullets under each heading; use sub-bullets for detail. Optionally cite PRs (e.g. “from pr #23”).
 
 ```markdown
-## [3.0.0-kiwicrab] - 2026-02-02
+[3.0.0-kiwicrab] Latest
 
-### Added
-- Tag color name display feature (--cclip-show-tag-color-names)
-- Tag management CLI flags (--tag clear, --tag list)
+Breaking changes
 
-### Changed
-- Major codebase refactor into modular structure
-- Improved Sixel image clearing logic
+- Database and cache format
+  - Serialization changed from X to Y. Existing data is not migrated. On first run after upgrading, do Z.
 
-### Fixed
-- Tag color names now display correctly in UI
-- Sixel clearing no longer wipes text
+Added
 
-### Notes
-MINOR version bump per Semantic Versioning 2.0.0 - backward compatible.
+- Feature name
+  - Bullet points describing what was added; optional "from pr #N".
+- Another feature
+  - Details.
+
+Changed
+
+- Area or component
+  - What changed and why it matters.
+- Dependencies / build
+  - List dependency or tooling changes.
+
+Fixed
+
+- Brief description of fix: what was wrong and what users get now.
+- Another fix.
+
+Technical details
+
+- Implementation notes for developers (optional): key algorithms, storage format, config keys, etc.
+
+Documentation
+
+- README: what was updated.
+- Man page / USAGE / CONTRIBUTING: what was updated.
+
+Notes
+
+- SemVer: this is a MAJOR/MINOR/PATCH release because …
+- Rationale: why this release matters in one or two sentences.
+
+Contributors
+
+- @handle1
+- @handle2
+- Co-authored-by: @bot (if applicable)
+
+Compatibility
+
+- Language/runtime: e.g. Rust 1.89+ (unchanged).
+- Platforms: e.g. GNU/Linux and *BSD (unchanged).
+- Config / database: compatible or breaking summary.
+- Breaking: if applicable, what users must do (back up, re-pin, etc.).
+
 ```
+
+**Section rules:**
+- **Breaking changes** — If present, call out at top and again in Notes/Compatibility. Be explicit about migration or “no migration.”
+- **Added / Changed / Fixed** — Use for user-visible and dependency/build changes. Link to PRs when helpful.
+- **Technical details** — Optional; use for implementation notes that help contributors or integrators.
+- **Documentation** — What doc files were updated and for what (version refs, new options, examples).
+- **Notes** — SemVer rationale and short rationale for the release.
+- **Contributors** — List everyone who contributed (and co-authors if you credit them).
+- **Compatibility** — Runtime, platforms, config/DB, and any breaking migration steps.
 
 ---
 
@@ -514,17 +573,11 @@ MINOR version bump per Semantic Versioning 2.0.0 - backward compatible.
 
 Semantic Versioning 2.0.0 + optional codename.
 
-Format:
+**Display version (codename):** `major.minor.patch-codename`, e.g. `3.0.0-kiwicrab`.
 
-```
-major.minor.patch-codename
-```
+**Git tag:** Version number only — `3.0.0`, `2.5.0`, `2.2.3`. No codename and no `v` prefix unless the project convention is to use `v` (e.g. `v3.0.0`).
 
-Example:
-
-```
-v3.0.0-kiwicrab
-```
+**Release title (GitHub / changelog):** `[version-codename]` in brackets, e.g. `[3.0.0-kiwicrab]`.
 
 ### Semantic Versioning Rules
 
@@ -557,6 +610,10 @@ For unstable or beta releases:
 
 These can be combined with codenames:
 - `v3.0.0-alpha-kiwicrab`
+
+### LTS and next / parallel release lines
+
+If you maintain permanent branches for LTS and "next" (or similar) cycles, treat them like separate mains: each has its own release flow, tags, and versioning. Mark everything relating to them with `lts`, `next`, or alike — branch names, versioning (e.g. 2.x LTS vs 3.x next), and docs. Same rules apply per line; they do not merge into each other except by explicit policy (e.g. cherry-picks, or not at all).
 
 ---
 
@@ -623,7 +680,7 @@ git push origin feat/detach-mode
 # 1. Create release branch from dev
 git checkout dev
 git pull origin dev
-git checkout -b release/v3.0.0-kiwicrab
+git checkout -b release/3.0.0-kiwicrab
 
 # 2. Update version numbers in Cargo.toml, flake.nix, etc.
 # ... edit files ...
@@ -633,35 +690,48 @@ git commit -am "chore: bump version to 3.0.0-kiwicrab"
 cargo build --release
 cargo test
 
-# 4. Merge to main and tag
+# 4. Merge to main, tag (version number only), then create GitHub release
 git checkout main
 git pull origin main
-git merge release/v3.0.0-kiwicrab
-git tag -a v3.0.0-kiwicrab -m "v3.0.0-kiwicrab: major release"
+git merge release/3.0.0-kiwicrab
+git tag -a 3.0.0 -m "3.0.0"
 git push origin main --tags
+# Create GitHub release: tag 3.0.0, title [3.0.0-kiwicrab], body = release notes from template
 
 # 5. Merge back to dev
 git checkout dev
-git merge release/v3.0.0-kiwicrab
+git merge release/3.0.0-kiwicrab
 git push origin dev
 
 # 6. Clean up
-git branch -d release/v3.0.0-kiwicrab
-git push origin --delete release/v3.0.0-kiwicrab
+git branch -d release/3.0.0-kiwicrab
+git push origin --delete release/3.0.0-kiwicrab
 ```
 
 ### Hotfix
 
+Hotfixes are exceptions: no release branch. Maintainer bumps version before merging.
+
 ```bash
+# Contributor: branch from main, fix only
 git checkout main
 git pull origin main
 git checkout -b hotfix/cache
-# fix issue
+# fix issue (no version bump in this commit)
 git commit -am "fix: prevent cache corruption"
 git push origin hotfix/cache
-# PR to main, approve, merge
-git tag -a v3.0.1-kiwicrab -m "v3.0.1-kiwicrab: hotfix"
+# Open PR to main
+
+# Maintainer: add version bump (Cargo.toml, README, etc.) on hotfix branch, then merge PR
+# ... bump to 3.0.1, commit, push ...
+# Merge PR to main
+
+# Maintainer: tag and release (no release branch)
+git tag -a 3.0.1 -m "3.0.1"
 git push origin main --tags
+# Create GitHub release: title [3.0.1-kiwicrab], body = release notes
+
+# Merge main into dev
 git checkout dev
 git merge main
 git push origin dev
