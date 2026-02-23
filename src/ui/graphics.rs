@@ -79,9 +79,8 @@ impl ImageManager {
 
     /// Update the global display state (sync version)
     fn update_display_state(&self, state: DisplayState) {
-        if let Ok(mut lock) = DISPLAY_STATE.lock() {
-            *lock = state;
-        }
+        let mut lock = DISPLAY_STATE.lock().unwrap_or_else(|e| e.into_inner());
+        *lock = state;
     }
 
     /// Load image data from cclip and prepare it for rendering
