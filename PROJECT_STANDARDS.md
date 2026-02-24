@@ -3,7 +3,7 @@
 > A Manual for Maintaining Sensible Git Discipline Without Sacrificing Productive Chaos
 
 **Document Version:** 1.4.0  
-**Last Updated:** 2026-02-18  
+**Last Updated:** 2026-02-23  
 **Audience:** Future me, contributors, and anyone brave enough to work on these projects
 
 ---
