@@ -2,7 +2,7 @@
 
 > A Manual for Maintaining Sensible Git Discipline Without Sacrificing Productive Chaos
 
-**Document Version:** 1.3.0  
+**Document Version:** 1.4.0  
 **Last Updated:** 2026-02-18  
 **Audience:** Future me, contributors, and anyone brave enough to work on these projects
 
@@ -31,11 +31,11 @@
 
 ### Core Tenets
 
-1. **main is sacred.** Never push directly. It contains only tagged, production-ready releases.
-2. **dev is the integration branch.** All feature branches merge here first.
-3. **main and dev never merge directly.** Code reaches main only via release branches (or hotfix branches). Main is merged into dev only after a hotfix (to sync the fix) or after a docs-only change to main (to sync the docs).
+1. **main is sacred: releases but living docs.** It holds tagged, production-ready releases and up-to-date documentation. Code reaches main only via release or hotfix branches; docs go to main (via PR from contributors or anyone), then main is merged into dev so dev stays in sync.
+2. **dev is the integration branch.** All code (feature) branches merge here first; release branches are created from dev.
+3. **main and dev do not merge directly for code.** Code reaches main only via release or hotfix branches. Main is merged into dev after a hotfix (to sync the fix) or after docs land on main (to sync the docs).
 4. **All code changes go through pull requests.** No exceptions. Even for solo work.
-5. **Releases are the changelog.** GitHub releases serve as the historical record. No separate CHANGELOG.md file is maintained.
+5. **Releases are the record; RELEASELOG.md is the in-repo log.** GitHub releases are the canonical record. We do not keep CHANGELOG.md; we keep RELEASELOG.md, updated on each release branch with the release title and body, with a `---` separator between each release.
 6. **Commit messages matter at release time.** During development, commit as suits your workflow. Before merging, clean them up.
 7. **Flow over formality.** Discipline exists to enable productivity, not strangle it.
 8. **Reviews are conversations, not commands.** The goal is to improve, not to dictate.
@@ -67,19 +67,19 @@ This document defines the technical Git workflow. See also:
 
 | Branch | Purpose | Push Policy |
 |--------|----------|-------------|
-| main | Stable, production-ready code. Every commit is a tagged release. | Never push directly. Receives merges **only from release branches or hotfix branches** — never from dev. |
-| dev | Integration branch. All features merge here; release branches are created from dev. | Never push directly. Receives merges **from feature branches** (via PRs) and **from main only after a hotfix or after a docs-only change to main** (to sync back). Never from main otherwise. |
+| main | Releases and living docs. Every code commit on main is a tagged release; docs are updated on main. | Code reaches main only via release or hotfix branches (not from dev). Docs reach main via PRs (target main) from contributors or maintainers; maintainers may push trivial docs directly. |
+| dev | Integration branch. All code (feature) work merges here; release branches are created from dev. | Receives merges **from feature branches** (via PRs) and **from main** after a hotfix or after docs land on main (to sync back). |
 
 ### Feature Branches
 
-All work occurs in feature branches created from dev.
+Code work occurs in feature branches created from dev. **Documentation-only changes** use a branch from main and a PR targeting main (see [Documentation-Only Changes](#documentation-only-changes)).
 
 | Type | Naming | Purpose |
 |------|---------|----------|
 | Feature | feat/name | New features or functionality |
 | Fix | fix/name | Bug fixes |
 | Refactor | refactor/name | Code restructuring without changing behavior |
-| Docs | docs/name | Documentation changes |
+| Docs | docs/name | Documentation (branch from **main**, PR to **main**) |
 | Chore | chore/name | Tooling, dependencies, build updates |
 
 ### Release Branches
@@ -94,7 +94,7 @@ Release branches are created from dev when a maintainer decides to release. They
 - Perform final testing before release
 - Merge to main (which gets tagged); then merge the release branch back to dev (so dev has the version bump). main and dev do not merge into each other — the release branch is the path to main.
 
-**Release branches are not for code changes.** Only version bumps and docs changes belong on the release branch. If you find a bug during release prep: fix it in dev, then either (a) wait for dev to be up to date and merge dev into the release branch to bring in that fix, or (b) ship the release without the fix (the bug stays in that release). Do not make code changes on the release branch.
+**Release branches are not for code changes.** Only version bumps and release-related doc updates (version refs in README, man page, etc.) belong on the release branch. If you find a bug during release prep: fix it in dev, then either (a) wait for dev to be up to date and merge dev into the release branch to bring in that fix, or (b) ship the release without the fix (the bug stays in that release). Keep the release branch free of new code changes.
 
 **When to create a release branch:**
 - A maintainer decides it's time for a release
@@ -107,7 +107,7 @@ Release branches are created from dev when a maintainer decides to release. They
 |------|---------|----------|
 | Hotfix | hotfix/version | Emergency patches for production issues only |
 
-Hotfix branches are created from main, go through a PR to main, and are **exceptions, not the rule** — hotfixes are never meant to happen. Do not confuse hotfixes with normal bug fixes; normal fixes go through dev → release branch → main.
+Hotfix branches are created from main, go through a PR to main, and are **exceptions, not the rule** — hotfixes are rare. Do not confuse hotfixes with normal bug fixes; normal fixes go through dev → release branch → main.
 
 **Process:** The contributor opens a hotfix PR with the code fix only. The **maintainer** adds a commit on the hotfix branch (or before merge) to bump the version in Cargo.toml, README, and other refs, then merges the PR to main. There is no release branch: the maintainer creates the tag and GitHub release for that hotfix. Then **main is merged into dev** so the fix (and version bump) is present in development. This is one of the two cases where main is merged into dev (the other is after a docs-only change to main).
 
@@ -117,42 +117,42 @@ Hotfix branches are created from main, go through a PR to main, and are **except
 
 ### Documentation-Only Changes
 
-**Exception to PR workflow:** Documentation-only changes (typo fixes, clarifications, formatting) that don't affect code can be pushed directly to main without going through dev.
+**Docs go through main.** Documentation-only changes (typo fixes, clarifications, formatting, correctness updates like fixing example syntax) are made against **main**, not dev. Contributors and anyone else open a PR **targeting main** for docs; after merge, main is merged into dev so dev has the latest docs. Everything that gets merged into dev from main is either docs (from docs PRs) or hotfix code — release branches only bring version bumps and release-related doc updates when they merge back to dev, so keeping docs on main keeps "living docs" in one place.
 
-**Criteria for direct-to-main docs:**
-- Changes only to `.md` files (README, USAGE, CONTRIBUTING, etc.)
-- No code changes whatsoever
-- No config file changes
-- Typo fixes, grammar corrections, formatting improvements
-- Clarifications that don't change meaning
+**Criteria for docs-only:**
+- Changes only to `.md` files (README, USAGE, CONTRIBUTING, etc.) or other doc assets
+- No source code or config file changes that affect behavior
+- Typo fixes, grammar, formatting, clarifications, fixing outdated examples (e.g. updated Hyprland syntax)
 
-**Process:**
+**Process (contributor or maintainer):**
 ```bash
 git checkout main
 git pull origin main
+git checkout -b docs/fix-usage-hyprland   # or docs/typo-readme, etc.
 # Make documentation changes
-git commit -m "docs: fix typo in README"
-git push origin main
-# Sync to dev (exception: docs-only is one of the two cases where main is merged into dev; the other is after a hotfix)
+git add -A && git commit -m "docs: fix Hyprland windowrule syntax in README"
+git push origin docs/fix-usage-hyprland
+# Open PR targeting main (not dev)
+# After PR is merged to main:
 git checkout dev
 git merge main
 git push origin dev
 ```
 
-**Note:** For substantial documentation rewrites or new documentation, still use the PR process for review.
+Maintainers may push trivial docs fixes directly to main and then merge main into dev; for anything that deserves review, use a PR to main.
 
 ---
 
 ## Workflow Overview
 
-**Rule: main and dev never touch each other directly.** Code reaches main only via release branches (or hotfix branches). Main is merged into dev only after a hotfix (to sync the fix) or after a docs-only change to main (to sync the docs).
+**Rule: main and dev do not exchange code directly.** Code reaches main only via release or hotfix branches. Main is merged into dev after a hotfix (to sync the fix) or after docs land on main (to sync the docs).
 
 ```
 main (production releases only)
   |
-  └── merge from release/2.x.x (at release time) ← then tag (e.g. 2.5.0) and create GitHub release with body
+  └── merge from release/v2.x.x (at release time) ← then tag (e.g. 2.5.0) and create GitHub release with body
        |
-       release/2.x.x (release preparation branch)
+       release/v2.x.x (release preparation branch)
          |
          └── created from dev (freeze point)
               |
@@ -273,7 +273,7 @@ chore: update flake.nix to use naersk
 
 ## Pull Request Process
 
-All changes enter the project via pull requests — no direct pushes to main or dev.
+Code changes enter via pull requests to dev; documentation changes enter via pull requests to main (or maintainer push to main for trivial docs). No direct code pushes to main or dev.
 
 ### Opening a Pull Request
 
@@ -283,9 +283,8 @@ All changes enter the project via pull requests — no direct pushes to main or 
    ```
 
 2. Open PR on GitHub:
-   - Base: dev
-   - Compare: feat/detach-mode
-   - Use the PR template below
+   - **Code:** Base dev, compare your feature branch. Use the PR template below.
+   - **Docs:** Base main, compare your docs branch (see [Documentation-Only Changes](#documentation-only-changes)).
 
 ### PR Template
 
@@ -413,9 +412,9 @@ Integrate automated checks:
 - `cargo fmt`, `cargo clippy`
 - Commit message linter (optional)
 - GitHub branch protection:
-  - Require 1 review before merge
+  - Require 1 review before merge (for code PRs; docs PRs to main may be configured per preference)
   - Require passing checks
-  - Disallow direct pushes to main/dev
+  - Restrict direct pushes to main/dev (exceptions for maintainer docs to main if desired)
 
 ---
 
@@ -430,31 +429,32 @@ A maintainer creates a release branch when:
 
 **Important:** Release branches freeze a specific point in dev, allowing ongoing PRs to continue merging into dev without affecting the release preparation. Release branches are for version bumps and docs only — no code changes (see [Release Branches](#release-branches): if you find a bug, fix in dev and either merge dev into the release branch or ship without the fix).
 
-**Tags are created during the release stage:** When you are ready to release, you create the release branch, do version bumps and final testing, then merge the release branch to main. Only after that merge do you create the tag and publish the release. The release (GitHub release / changelog) is the canonical record of what shipped; the tag is a simple version-number pointer to that commit.
+**Tags are created during the release stage:** When you are ready to release, you create the release branch, do version bumps and final testing, then merge the release branch to main. Only after that merge do you create the tag and publish the release. The release (GitHub release) is the canonical record of what shipped; RELEASELOG.md in the repo is updated on each release branch with the title and body (see [Documentation Standards](#documentation-standards)). The tag is a simple version-number pointer to that commit.
 
 ### Preparation
 
-1. Ensure all feature PRs for the release are merged into dev.
-2. Confirm all tests pass on dev.
-3. Create a release branch from dev (this freezes the release point):
+1. **Merge main into dev** so dev has the latest docs (docs live on main and are synced to dev via main → dev).
+2. Ensure all feature PRs for the release are merged into dev.
+3. Confirm all tests pass on dev.
+4. Create a release branch from dev (this freezes the release point):
    ```bash
    git checkout dev
    git pull origin dev
-   git checkout -b release/3.0.0-kiwicrab  # Replace with actual version
+   git checkout -b release/v3.0.0-kiwicrab  # Replace with actual version
    ```
-4. Update version references on the release branch:
+5. Update version references on the release branch:
    - `Cargo.toml` (root directory)
    - `flake.nix` (root directory)
    - `README.md` (installation instructions, if needed)
    - Man pages (`fsel.1` or similar)
    - Example configs if they contain version info
-5. Commit version bump:
+6. Commit version bump:
    ```bash
    git commit -am "chore: bump version to 3.0.0-kiwicrab"
    ```
-6. Prepare release notes using the [Release body template](#release-body-template) below.
-7. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
-8. Run final tests on the release branch:
+7. Prepare release notes using the [Release body template](#release-body-template) below; update **RELEASELOG.md** on the release branch with the release title and body, adding a `---` separator above the previous release(s).
+8. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
+9. Run final tests on the release branch:
    ```bash
    cargo test
    cargo build --release
@@ -466,7 +466,7 @@ A maintainer creates a release branch when:
 # 1. Merge release branch to main
 git checkout main
 git pull origin main
-git merge release/3.0.0-kiwicrab
+git merge release/v3.0.0-kiwicrab
 
 # 2. Tag the release (tag = version number only, no codename)
 git tag -a 3.0.0 -m "3.0.0"
@@ -474,12 +474,12 @@ git push origin main --tags
 
 # 3. Merge release branch back to dev (so dev has the version bump)
 git checkout dev
-git merge release/3.0.0-kiwicrab
+git merge release/v3.0.0-kiwicrab
 git push origin dev
 
 # 4. Delete the release branch only after it is merged to both main and dev
-git branch -d release/3.0.0-kiwicrab
-git push origin --delete release/3.0.0-kiwicrab
+git branch -d release/v3.0.0-kiwicrab
+git push origin --delete release/v3.0.0-kiwicrab
 ```
 
 **Always merge the release branch to both main and dev before deleting it.** If you already deleted the release branch, merge main into dev once as a one-off recovery.
@@ -496,11 +496,11 @@ git push origin --delete release/3.0.0-kiwicrab
 
 **Release title:** Use exactly `[version-codename]` in brackets, e.g. `[3.0.0-kiwicrab]`. No date or extra text in the title.
 
-**Git tag:** Use the version number only (no codename), e.g. `3.0.0`, `2.5.0`, `2.4.0`. Create the tag on main after the release branch is merged; then create the GitHub release from that tag and paste the release body (changelog) below.
+**Git tag:** Use the version number only (no codename), e.g. `3.0.0`, `2.5.0`, `2.4.0`. Create the tag on main after the release branch is merged; then create the GitHub release from that tag and paste the release body below (same content as in RELEASELOG.md for this release).
 
 ### Release body template
 
-The release body is the changelog. Use this structure (omit sections that don’t apply). Prefer bullets under each heading; use sub-bullets for detail. Optionally cite PRs (e.g. “from pr #23”).
+The release body (and the block you add to RELEASELOG.md) uses this structure (omit sections that don’t apply). Prefer bullets under each heading; use sub-bullets for detail. Optionally cite PRs (e.g. “from pr #23”).
 
 ```markdown
 [3.0.0-kiwicrab] Latest
@@ -577,7 +577,7 @@ Semantic Versioning 2.0.0 + optional codename.
 
 **Git tag:** Version number only — `3.0.0`, `2.5.0`, `2.2.3`. No codename and no `v` prefix unless the project convention is to use `v` (e.g. `v3.0.0`).
 
-**Release title (GitHub / changelog):** `[version-codename]` in brackets, e.g. `[3.0.0-kiwicrab]`.
+**Release title (GitHub / RELEASELOG.md):** `[version-codename]` in brackets, e.g. `[3.0.0-kiwicrab]`.
 
 ### Semantic Versioning Rules
 
@@ -624,6 +624,7 @@ If you maintain permanent branches for LTS and "next" (or similar) cycles, treat
 1. `README.md` — overview, install, usage
 2. `USAGE.md` — detailed guide (if needed)
 3. `LICENSE` — BSD-2-Clause or similar
+4. **RELEASELOG.md** — in-repo release log. We do not keep CHANGELOG.md. On each release branch, prepend the release title and body to RELEASELOG.md, with a `---` separator between each release (newest at top).
 
 ### Code Docs
 
@@ -646,10 +647,10 @@ Generate from Markdown if possible using tools like `ronn` or `pandoc`.
 
 **Absolutely Forbidden**
 
-- Push directly to main or dev
-- Merge without PR
+- Push code directly to main or dev (docs go to main via PR, or maintainer push for trivial docs)
+- Merge code without a PR
 - Release without testing
-- Dump raw git logs as changelog
+- Dump raw git logs as the release body
 - Ignore version updates in all relevant files
 
 **Strongly Discouraged**
@@ -737,19 +738,24 @@ git merge main
 git push origin dev
 ```
 
-### Documentation-Only Fix
+### Documentation-Only Change (PR to main)
 
 ```bash
+# Branch from main, PR targets main (contributor or maintainer)
 git checkout main
 git pull origin main
-# Fix typo in README
-git commit -am "docs: fix typo in installation section"
-git push origin main
-# Sync to dev
+git checkout -b docs/fix-hyprland-syntax
+# Edit USAGE.md or README, etc.
+git add -A && git commit -m "docs: fix Hyprland windowrule syntax in README"
+git push origin docs/fix-hyprland-syntax
+# Open PR targeting main (not dev)
+# After PR is merged to main:
 git checkout dev
 git merge main
 git push origin dev
 ```
+
+For trivial typo fixes, maintainers may push directly to main and then merge main into dev the same way.
 
 ---
 
@@ -808,11 +814,11 @@ jobs:
 
 This workflow forces sanity:
 
-- All work through branches & PRs
-- dev is your proving ground
-- main is immutable history
+- All work through branches & PRs (code to dev, docs to main)
+- dev is your proving ground for code
+- main is sacred: releases and living docs
 - Reviews are collaborative, not confrontational
-- Tags *are* the changelog
+- RELEASELOG.md and GitHub releases are the record; tags point at releases
 
 Future you: if it's 2am and you're wondering how to do this properly — do it this way. You'll thank yourself later.
 
