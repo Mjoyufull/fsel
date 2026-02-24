@@ -96,13 +96,18 @@ For full functionality during development:
    # Fetch latest changes from the main repository
    git fetch upstream
    
-   # Update your fork's dev branch
+   # For code work: update your fork's dev branch
    git checkout dev
    git merge upstream/dev
    git push origin dev
+   
+   # For docs work: update your fork's main branch
+   git checkout main
+   git merge upstream/main
+   git push origin main
    ```
    
-   **When to sync**: Before starting a new feature branch, or if you notice the main repository has new commits you want to include.
+   **When to sync**: Before starting a new feature branch (use dev for code, main for docs), or if you notice the main repository has new commits you want to include.
 
 **For maintainers with write access:**
 
@@ -222,52 +227,52 @@ There are many ways to contribute to fsel:
 
 ### Documentation Changes
 
-**Simple documentation fixes** (typos, grammar, formatting) can be pushed directly to `main` without going through the PR process:
+**Docs go to main.** Documentation-only changes (typos, grammar, formatting, correctness updates like fixing example syntax) use a branch from **main** and a PR **targeting main** — not dev. After your PR is merged to main, a maintainer merges main into dev so dev stays in sync.
 
-**Criteria for direct push:**
-- Changes only to `.md` files (README, USAGE, CONTRIBUTING, etc.)
-- No code changes whatsoever
-- Typo fixes, grammar corrections, formatting improvements
+**Criteria for docs-only:**
+- Changes only to `.md` files (README, USAGE, CONTRIBUTING, etc.) or other doc assets
+- No source code or config file changes that affect behavior
+- Typo fixes, grammar, formatting, clarifications, fixing outdated examples (e.g. updated Hyprland syntax)
 
-**Process:**
+**Process (contributor):**
 ```bash
+# Branch from main (sync main first)
+git fetch upstream
 git checkout main
-git pull origin main
+git merge upstream/main
+git checkout -b docs/fix-typo-readme   # or docs/fix-hyprland-syntax, etc.
 # Make documentation changes
-git commit -m "docs: fix typo in README"
-git push origin main
-# Sync to dev
-git checkout dev
-git merge main
-git push origin dev
+git add -A && git commit -m "docs: fix typo in README"
+git push origin docs/fix-typo-readme
+# Open PR targeting main (not dev)
 ```
 
-**For substantial documentation changes** (rewrites, new sections, structural changes), please use the normal PR process for review.
+Maintainers may push trivial docs fixes directly to main and then merge main into dev; for anything that deserves review, use a PR to main. See [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) for full details.
 
 ---
 
 ## Branching Strategy
 
-**IMPORTANT**: Never push directly to `main` or `dev`. All changes go through pull requests.
+**IMPORTANT**: Never push code directly to `main` or `dev`. Code goes through PRs to dev; docs go through PRs to main (or maintainer push to main for trivial docs).
 
 ### Primary Branches
 
 | Branch | Purpose | Push Policy |
 |--------|---------|-------------|
-| **main** | Stable, production-ready code. Every commit is a tagged release. | Never push directly. Merge only from release branches after testing and tagging. |
-| **dev** | Integration branch. All features merge here before release branches. | Never push directly. Only receives merges from feature branches via pull requests. |
+| **main** | Releases and living docs. Every code commit on main is a tagged release; docs are updated on main. | Code reaches main only via release or hotfix branches. Docs reach main via PRs targeting main (or maintainer push for trivial docs). |
+| **dev** | Integration branch. All code work merges here; release branches are created from dev. | Receives merges from feature branches (via PRs) and from main after a hotfix or after docs land on main (to sync). |
 
 ### Feature Branches
 
-All work occurs in feature branches created from `dev`:
+**Code work** uses feature branches created from `dev`. **Documentation-only changes** use a branch from **main** and a PR targeting **main** (see [Documentation Changes](#documentation-changes)).
 
 | Type | Naming | Purpose |
 |------|--------|---------|
-| Feature | `feat/name` | New features or functionality |
-| Fix | `fix/name` | Bug fixes |
-| Refactor | `refactor/name` | Code restructuring without changing behavior |
-| Docs | `docs/name` | Documentation changes |
-| Chore | `chore/name` | Tooling, dependencies, build updates |
+| Feature | `feat/name` | New features or functionality (branch from dev, PR to dev) |
+| Fix | `fix/name` | Bug fixes (branch from dev, PR to dev) |
+| Refactor | `refactor/name` | Code restructuring (branch from dev, PR to dev) |
+| Docs | `docs/name` | Documentation (branch from **main**, PR to **main**) |
+| Chore | `chore/name` | Tooling, dependencies, build updates (branch from dev, PR to dev) |
 
 ### Release Branches
 
@@ -277,11 +282,11 @@ All work occurs in feature branches created from `dev`:
 
 Release branches are created from `dev` when a maintainer decides to release. They freeze a stable point in `dev` for release preparation, allowing ongoing PRs to continue merging into `dev` without affecting the release. See the [Release Process](#release-process) section for details.
 
-**Note:** Releases do not go directly from `dev` to `main` (except for documentation-only changes as specified in PROJECT_STANDARDS.md).
+**Note:** Code reaches `main` only via release or hotfix branches. Docs are updated on `main` via PRs (or maintainer push). See [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) for the full workflow.
 
 ### Standard Workflow
 
-**For external contributors (using forks):**
+**For external contributors — code (using forks):**
 
 ```sh
 # 1. Update your fork's dev branch
@@ -298,44 +303,41 @@ git checkout -b feat/your-feature-name
 git commit -am "wip: working on feature"
 
 # 4. Prepare for PR (sync with latest dev and clean up commits)
-# First, get the latest changes from the main repository
 git fetch upstream
-
-# Rebase your feature branch on top of the latest dev
-# This doesn't lose your changes - it just moves your commits to be based on the latest code
 git rebase upstream/dev
-
-# Interactive rebase to clean up commit history (optional but recommended)
-# This lets you squash, reword, or reorder commits before the PR
-git rebase -i upstream/dev
+git rebase -i upstream/dev  # Optional: clean up commit history
 
 # 5. Push feature branch to your fork
 git push origin feat/your-feature-name
 
-# 6. Open pull request on GitHub targeting Mjoyufull/fsel:dev
+# 6. Open pull request targeting Mjoyufull/fsel:dev
 # IMPORTANT: Enable "Allow edits by maintainers" checkbox
+```
+
+**For external contributors — documentation:**
+
+```sh
+# 1. Update your fork's main branch
+git fetch upstream
+git checkout main
+git merge upstream/main
+git push origin main
+
+# 2. Create docs branch from main
+git checkout -b docs/your-doc-fix
+
+# 3. Edit docs, commit, push
+git add -A && git commit -m "docs: describe your change"
+git push origin docs/your-doc-fix
+
+# 4. Open pull request targeting Mjoyufull/fsel:main (not dev)
 ```
 
 **For maintainers (direct access):**
 
 ```sh
-# 1. Create feature branch from dev
-git checkout dev
-git pull origin dev
-git checkout -b feat/your-feature-name
-
-# 2. Develop locally (commit freely)
-git commit -am "wip: working on feature"
-
-# 3. Prepare for PR (clean up commits)
-git fetch origin
-git rebase origin/dev
-git rebase -i origin/dev  # Interactive rebase to clean history
-
-# 4. Push feature branch
-git push origin feat/your-feature-name
-
-# 5. Open pull request targeting dev
+# Code: branch from dev, PR to dev (same as above but use origin instead of upstream)
+# Docs: branch from main, PR to main; or push trivial docs directly to main then merge main into dev
 ```
 
 ---
@@ -388,6 +390,8 @@ chore: update flake.nix to use naersk
 
 ### Before Submitting
 
+**For code PRs (targeting dev):**
+
 1. **Rebase on latest dev**:
    ```sh
    # For external contributors using forks:
@@ -399,10 +403,7 @@ chore: update flake.nix to use naersk
    git rebase origin/dev
    ```
    
-   **Note**: Rebase doesn't delete your changes! It:
-   - Takes your commits and replays them on top of the latest `dev` branch
-   - Ensures your PR is based on the most recent code
-   - Helps avoid merge conflicts when your PR is reviewed
+   **Note**: Rebase doesn't delete your changes! It replays your commits on top of the latest branch and helps avoid merge conflicts.
 
 2. **Run all checks**:
    ```sh
@@ -412,26 +413,19 @@ chore: update flake.nix to use naersk
    cargo build --release
    ```
 
-3. **Clean commit history**:
-   ```sh
-   git rebase -i origin/dev
-   ```
+3. **Clean commit history** (optional): `git rebase -i origin/dev`
 
-4. **Push branch**:
-   ```sh
-   git push origin feat/your-feature-name
-   ```
+4. **Push branch**: `git push origin feat/your-feature-name`
+
+**For documentation PRs (targeting main):** Rebase on latest main (`git fetch upstream && git rebase upstream/main` or `origin/main`), then push your docs branch. No need to run cargo checks for docs-only changes.
 
 ### Opening a PR
 
-1. **For external contributors**: Go to your fork on GitHub and click "New Pull Request"
-   - **Base repository**: `Mjoyufull/fsel`
-   - **Base**: `dev` (NOT `main`)
-   - **Compare**: `YOUR_USERNAME/fsel:feat/your-feature-name`
+1. **Code changes**: Open a PR **targeting dev**
+   - **Base repository**: `Mjoyufull/fsel`, **Base**: `dev`, **Compare**: your feature branch (e.g. `feat/your-feature-name`)
    
-   **For maintainers**: Go to the main repository and click "New Pull Request"
-   - **Base**: `dev` (NOT `main`)
-   - **Compare**: your feature branch
+   **Documentation changes**: Open a PR **targeting main**
+   - **Base repository**: `Mjoyufull/fsel`, **Base**: `main`, **Compare**: your docs branch (e.g. `docs/fix-typo`)
 
 2. **IMPORTANT**: Enable the **"Allow edits by maintainers"** checkbox
    - This allows maintainers to make small fixes, rebase, or help resolve conflicts
@@ -485,13 +479,13 @@ GitHub allows you to open PRs as "drafts" - these are PRs that aren't ready for 
 3. The PR will be marked as draft and reviewers won't be notified
 4. When ready, click "Ready for review" to convert it to a normal PR
 
-**Note:** Draft PRs still target the `dev` branch and follow all other PR guidelines.
+**Note:** Draft PRs for code still target `dev`; draft PRs for docs target `main`. Follow the same branch-target rules as above.
 
 ### PR Guidelines
 
-- Target the `dev` branch, not `main`
+- **Code PRs**: Target the `dev` branch. **Docs PRs**: Target the `main` branch.
 - Use a clear, descriptive title following conventional commits format
-- Keep PRs focused on a single feature or fix
+- Keep PRs focused on a single feature, fix, or doc change
 - Break large changes into smaller, reviewable PRs
 - Respond to review feedback promptly
 - Be open to suggestions and constructive criticism
@@ -748,34 +742,35 @@ A maintainer creates a release branch when:
 - `dev` is in a stable state (no critical bugs, features are complete)
 - All planned features for the release are merged into `dev`
 
-**Important:** Release branches freeze a specific point in `dev`, allowing ongoing PRs to continue merging into `dev` without affecting the release preparation. Releases do not go directly from `dev` to `main` (except for documentation-only changes as specified in PROJECT_STANDARDS.md).
+**Important:** Release branches freeze a specific point in `dev`, allowing ongoing PRs to continue merging into `dev` without affecting the release preparation. Code reaches `main` only via release or hotfix branches; see [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) for the full workflow.
 
 ### Preparation (Maintainers Only)
 
-1. Ensure all feature PRs for the release are merged into `dev`
-2. Confirm all tests pass on `dev`:
+1. **Merge main into dev** so dev has the latest docs (docs live on main and are synced to dev via main → dev).
+2. Ensure all feature PRs for the release are merged into `dev`.
+3. Confirm all tests pass on `dev`:
    ```sh
    cargo test
    cargo build --release
    ```
-3. Create a release branch from `dev` (this freezes the release point):
+4. Create a release branch from `dev` (this freezes the release point):
    ```sh
    git checkout dev
    git pull origin dev
    git checkout -b release/3.1.0-kiwicrab  # Replace with actual version
    ```
-4. Update version references on the release branch:
+5. Update version references on the release branch:
    - `Cargo.toml` (root directory)
    - `flake.nix` (root directory)
    - `README.md` (installation instructions, if needed)
    - Man pages (`fsel.1` or similar)
-5. Commit version bump:
+6. Commit version bump:
    ```sh
    git commit -am "chore: bump version to 3.1.0-kiwicrab"
    ```
-6. Prepare release notes following [Keep a Changelog](https://keepachangelog.com/)
-7. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance
-8. Run final tests on the release branch:
+7. Prepare release notes using the template in [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md); update **RELEASELOG.md** on the release branch with the release title and body, adding a `---` separator above the previous release(s).
+8. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
+9. Run final tests on the release branch:
    ```sh
    cargo test
    cargo build --release
@@ -822,7 +817,7 @@ git push origin --delete release/3.1.0-kiwicrab
 
 ### GitHub Release
 
-Create a release using [Keep a Changelog](https://keepachangelog.com/) format:
+Create a release using the release body template in [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) (same structure as the block added to RELEASELOG.md). Example format:
 
 ```markdown
 ## [3.1.0-kiwicrab] - YYYY-MM-DD
@@ -850,11 +845,11 @@ MINOR version bump per Semantic Versioning 2.0.0 - backward compatible.
 
 ### Absolutely Forbidden
 
-- Push directly to `main` or `dev`
-- Merge without PR
+- Push code directly to `main` or `dev` (docs go to main via PR, or maintainer push for trivial docs)
+- Merge code without a PR
 - Release without testing
 - Ignore version updates in relevant files
-- Skip running `cargo fmt` and `cargo clippy` before pushing
+- Skip running `cargo fmt` and `cargo clippy` before pushing code PRs
 
 ### Strongly Discouraged
 
@@ -888,7 +883,7 @@ Please open a [discussion](https://github.com/Mjoyufull/fsel/discussions) or com
 ### Common Questions
 
 **Q: I found a typo in the documentation. Do I still need to open a PR?**  
-A: Yes, but it's a very quick process. Create a `docs/fix-typo` branch, make the change, push, and open a PR. Documentation improvements are always welcome.
+A: Yes. Branch from **main** (e.g. `docs/fix-typo`), make the change, push, and open a PR **targeting main** (not dev). Documentation improvements are always welcome.
 
 **Q: My PR hasn't been reviewed yet. Should I ping someone?**  
 A: Wait 2-4 days for initial response. If no response after 5 days, feel free to leave a polite comment on the PR.
@@ -955,7 +950,7 @@ See the [LICENSE](./LICENSE) file for full details.
 
 ### Project-Specific Documentation
 
-- [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) - Git workflow and standards
+- [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) - Git workflow, release process, and RELEASELOG.md
 - [USAGE.md](./USAGE.md) - User documentation
 - [README.md](./README.md) - Project overview
 
