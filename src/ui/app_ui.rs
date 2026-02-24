@@ -1,6 +1,7 @@
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::symbols::merge::MergeStrategy;
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
 use ratatui::Frame;
 
@@ -18,6 +19,11 @@ impl UI {
         let size = f.area();
 
         let should_render_border = cli.title_panel_height_percent > 0;
+        let merge_strategy = if cli.unify_borders {
+            MergeStrategy::Fuzzy
+        } else {
+            MergeStrategy::Replace
+        };
 
         // Layout calculations
         let chunks = if should_render_border {
@@ -59,11 +65,26 @@ impl UI {
                 .split(size)
         };
 
-        let (title_area, input_area, apps_area) = match cli.title_panel_position {
-            Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
-            Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
-            // Default: Title (0), Apps (1), Input (2)
-            _ => (chunks[0], chunks[2], chunks[1]),
+        let (title_area, input_area, apps_area) = if cli.unify_borders {
+            // Overlap adjacent rects by 1 row so merge_borders can collapse shared walls.
+            // chunks[0], chunks[1], chunks[2] are top-to-bottom; grow the top two
+            // chunks downward by 1 so their bottom border overlaps the next chunk's top.
+            let c0 = Rect::new(chunks[0].x, chunks[0].y, chunks[0].width,
+                (chunks[0].height + 1).min(size.height.saturating_sub(chunks[0].y)));
+            let c1 = Rect::new(chunks[1].x, chunks[1].y, chunks[1].width,
+                (chunks[1].height + 1).min(size.height.saturating_sub(chunks[1].y)));
+            let c2 = chunks[2];
+            match cli.title_panel_position {
+                Some(crate::ui::PanelPosition::Bottom) => (c2, c1, c0),
+                Some(crate::ui::PanelPosition::Middle) => (c1, c2, c0),
+                _ => (c0, c2, c1),
+            }
+        } else {
+            match cli.title_panel_position {
+                Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
+                Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
+                _ => (chunks[0], chunks[2], chunks[1]),
+            }
         };
 
         // Render Title/Info Panel
@@ -85,6 +106,7 @@ impl UI {
 
             let info_block = Block::default()
                 .borders(Borders::ALL)
+
                 .border_style(Style::default().fg(cli.main_border_color))
                 .title(Span::styled(
                     format!(" {} ", title),
@@ -94,7 +116,8 @@ impl UI {
                     BorderType::Rounded
                 } else {
                     BorderType::Plain
-                });
+                })
+                .merge_borders(merge_strategy);
 
             // Text rendering from state.text which should be populated by state.update_info
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
@@ -107,6 +130,7 @@ impl UI {
         // Render Input
         let input_block = Block::default()
             .borders(Borders::ALL)
+
             .border_style(Style::default().fg(cli.input_border_color))
             .title(Span::styled(
                 " Input ",
@@ -116,7 +140,8 @@ impl UI {
                 BorderType::Rounded
             } else {
                 BorderType::Plain
-            });
+            })
+            .merge_borders(merge_strategy);
 
         // Legacy Formatting: (Selected/Total) >> Query
         // Colors:
@@ -166,6 +191,7 @@ impl UI {
         // Apps block with border
         let apps_block = Block::default()
             .borders(Borders::ALL)
+
             .border_style(Style::default().fg(cli.apps_border_color))
             .title(Span::styled(
                 " Apps ",
@@ -175,7 +201,8 @@ impl UI {
                 BorderType::Rounded
             } else {
                 BorderType::Plain
-            });
+            })
+            .merge_borders(merge_strategy);
 
         // only render whats on screen, not the whole dang list
         let items: Vec<ListItem> = state

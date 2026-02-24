@@ -104,6 +104,8 @@ pub struct UiConfig {
     #[serde(default = "default_true")]
     pub rounded_borders: bool,
     #[serde(default)]
+    pub unify_borders: bool,
+    #[serde(default)]
     pub disable_mouse: bool,
     #[serde(default = "default_white")]
     pub main_border_color: String,
@@ -149,6 +151,7 @@ pub struct DmenuConfig {
     pub disable_mouse: Option<bool>,
     pub hard_stop: Option<bool>,
     pub rounded_borders: Option<bool>,
+    pub unify_borders: Option<bool>,
     pub cursor: Option<String>,
     pub highlight_color: Option<String>,
     pub main_border_color: Option<String>,
@@ -173,6 +176,7 @@ pub struct CclipConfig {
     pub disable_mouse: Option<bool>,
     pub hard_stop: Option<bool>,
     pub rounded_borders: Option<bool>,
+    pub unify_borders: Option<bool>,
     pub cursor: Option<String>,
     pub highlight_color: Option<String>,
     pub main_border_color: Option<String>,
@@ -247,6 +251,7 @@ impl Default for FselConfig {
                 cursor: default_cursor(),
                 hard_stop: false,
                 rounded_borders: true,
+                unify_borders: false,
                 disable_mouse: false,
                 main_border_color: default_white(),
                 apps_border_color: default_white(),
@@ -360,6 +365,10 @@ impl FselConfig {
         if let Ok(val) = env::var("FSEL_ROUNDED_BORDERS") {
             cfg.ui.rounded_borders = val.parse().unwrap_or(cfg.ui.rounded_borders);
         }
+        if let Ok(val) = env::var("FSEL_UNIFY_BORDERS") {
+            cfg.ui.unify_borders =
+                val.parse().unwrap_or(cfg.ui.unify_borders);
+        }
         if let Ok(val) = env::var("FSEL_DISABLE_MOUSE") {
             cfg.ui.disable_mouse = val.parse().unwrap_or(cfg.ui.disable_mouse);
         }
@@ -414,6 +423,12 @@ impl FselConfig {
             cfg.dmenu.rounded_borders = Some(
                 val.parse()
                     .unwrap_or(cfg.dmenu.rounded_borders.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_DMENU_UNIFY_BORDERS") {
+            cfg.dmenu.unify_borders = Some(
+                val.parse()
+                    .unwrap_or(cfg.dmenu.unify_borders.unwrap_or(false)),
             );
         }
         if let Ok(val) = env::var("FSEL_DMENU_CURSOR") {
@@ -509,6 +524,12 @@ impl FselConfig {
             cfg.cclip.rounded_borders = Some(
                 val.parse()
                     .unwrap_or(cfg.cclip.rounded_borders.unwrap_or(false)),
+            );
+        }
+        if let Ok(val) = env::var("FSEL_CCLIP_UNIFY_BORDERS") {
+            cfg.cclip.unify_borders = Some(
+                val.parse()
+                    .unwrap_or(cfg.cclip.unify_borders.unwrap_or(false)),
             );
         }
         if let Ok(val) = env::var("FSEL_CCLIP_CURSOR") {

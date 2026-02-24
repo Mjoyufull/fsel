@@ -158,6 +158,8 @@ pub struct Opts {
     pub main_border_color: ratatui::style::Color,
     pub apps_border_color: ratatui::style::Color,
     pub input_border_color: ratatui::style::Color,
+    /// Merge adjacent borders
+    pub unify_borders: bool,
     /// Text colors for different panels
     pub main_text_color: ratatui::style::Color,
     pub apps_text_color: ratatui::style::Color,
@@ -221,6 +223,7 @@ pub struct Opts {
     pub dmenu_cursor: Option<String>,
     pub dmenu_hard_stop: Option<bool>,
     pub dmenu_rounded_borders: Option<bool>,
+    pub dmenu_unify_borders: Option<bool>,
     pub dmenu_main_border_color: Option<ratatui::style::Color>,
     pub dmenu_items_border_color: Option<ratatui::style::Color>,
     pub dmenu_input_border_color: Option<ratatui::style::Color>,
@@ -236,6 +239,7 @@ pub struct Opts {
     pub cclip_cursor: Option<String>,
     pub cclip_hard_stop: Option<bool>,
     pub cclip_rounded_borders: Option<bool>,
+    pub cclip_unify_borders: Option<bool>,
     pub cclip_main_border_color: Option<ratatui::style::Color>,
     pub cclip_items_border_color: Option<ratatui::style::Color>,
     pub cclip_input_border_color: Option<ratatui::style::Color>,
@@ -282,6 +286,7 @@ impl Default for Opts {
             uwsm: false,
             detach: false,
             rounded_borders: true,
+            unify_borders: false,
             main_border_color: ratatui::style::Color::White,
             apps_border_color: ratatui::style::Color::White,
             input_border_color: ratatui::style::Color::White,
@@ -334,6 +339,7 @@ impl Default for Opts {
             dmenu_cursor: None,
             dmenu_hard_stop: None,
             dmenu_rounded_borders: None,
+            dmenu_unify_borders: None,
             dmenu_main_border_color: None,
             dmenu_items_border_color: None,
             dmenu_input_border_color: None,
@@ -349,6 +355,7 @@ impl Default for Opts {
             cclip_cursor: None,
             cclip_hard_stop: None,
             cclip_rounded_borders: None,
+            cclip_unify_borders: None,
             cclip_main_border_color: None,
             cclip_items_border_color: None,
             cclip_input_border_color: None,
@@ -452,6 +459,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     default.cursor = fsel_config.ui.cursor;
     default.hard_stop = fsel_config.ui.hard_stop;
     default.rounded_borders = fsel_config.ui.rounded_borders;
+    default.unify_borders = fsel_config.ui.unify_borders;
     default.disable_mouse = fsel_config.ui.disable_mouse;
     if let Ok(c) = string_to_color(&fsel_config.ui.main_border_color) {
         default.main_border_color = c;
@@ -520,6 +528,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
     if let Some(rounded_borders) = fsel_config.dmenu.rounded_borders {
         default.dmenu_rounded_borders = Some(rounded_borders);
+    }
+    if let Some(unify_borders) = fsel_config.dmenu.unify_borders {
+        default.dmenu_unify_borders = Some(unify_borders);
     }
     if let Some(cursor) = fsel_config.dmenu.cursor {
         default.dmenu_cursor = Some(cursor);
@@ -601,6 +612,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
     if let Some(rounded_borders) = fsel_config.cclip.rounded_borders {
         default.cclip_rounded_borders = Some(rounded_borders);
+    }
+    if let Some(unify_borders) = fsel_config.cclip.unify_borders {
+        default.cclip_unify_borders = Some(unify_borders);
     }
     if let Some(cursor) = fsel_config.cclip.cursor {
         default.cclip_cursor = Some(cursor);
