@@ -30,7 +30,7 @@
 ## Requirements
 
 **Build Requirements:**
-- Rust 1.89+ **stable** (NOT nightly)
+- Rust 1.90+ **stable** (NOT nightly)
   - Install: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
   - Verify: `rustc --version` (should show stable, not nightly)
   - If using nightly: `rustup default stable`

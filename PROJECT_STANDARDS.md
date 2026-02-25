@@ -551,7 +551,7 @@ Contributors
 
 Compatibility
 
-- Language/runtime: e.g. Rust 1.89+ (unchanged).
+- Language/runtime: e.g. Rust 1.90+ (unchanged).
 - Platforms: e.g. GNU/Linux and *BSD (unchanged).
 - Config / database: compatible or breaking summary.
 - Breaking: if applicable, what users must do (back up, re-pin, etc.).
