@@ -49,7 +49,7 @@ Before contributing, please:
 
 fsel is written in Rust. You will need:
 
-- **Rust 1.89+ stable** (NOT nightly)
+- **Rust 1.90+ stable** (NOT nightly)
   ```sh
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   rustc --version  # Verify stable, not nightly
