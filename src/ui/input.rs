@@ -17,6 +17,7 @@ use tokio::time::interval;
 pub struct Config {
     pub exit_key: KeyCode,
     pub tick_rate: Duration,
+    pub render_rate: Option<Duration>,
     pub disable_mouse: bool,
 }
 
@@ -25,6 +26,7 @@ impl Default for Config {
         Self {
             exit_key: KeyCode::Esc,
             tick_rate: Duration::from_millis(250),
+            render_rate: Some(Duration::from_millis(16)),
             disable_mouse: false,
         }
     }
@@ -65,58 +67,109 @@ impl AsyncInput {
         let _task = tokio::spawn(async move {
             let mut reader = EventStream::new();
             let mut tick_interval = interval(config.tick_rate);
-            let mut render_interval = interval(Duration::from_millis(16)); // ~60 FPS
+            if let Some(render_rate) = config.render_rate {
+                let mut render_interval = interval(render_rate);
 
-            loop {
-                tokio::select! {
-                    // Handle terminal events
-                    maybe_event = reader.next() => {
-                        match maybe_event {
-                            Some(Ok(event)) => {
-                                match event {
-                                    CrosstermEvent::Key(key) => {
-                                        // Filter for KeyPress only (avoid duplicate events on some platforms)
-                                        if key.kind == crossterm::event::KeyEventKind::Press {
-                                            if tx.send(Event::Input(key)).is_err() {
-                                                return;
+                loop {
+                    tokio::select! {
+                        // Handle terminal events
+                        maybe_event = reader.next() => {
+                            match maybe_event {
+                                Some(Ok(event)) => {
+                                    match event {
+                                        CrosstermEvent::Key(key) => {
+                                            // Filter for KeyPress only (avoid duplicate events on some platforms)
+                                            if key.kind == crossterm::event::KeyEventKind::Press {
+                                                if tx.send(Event::Input(key)).is_err() {
+                                                    return;
+                                                }
+                                                if key.code == config.exit_key {
+                                                    return;
+                                                }
                                             }
-                                            if key.code == config.exit_key {
+                                        }
+                                        CrosstermEvent::Mouse(mouse) => {
+                                            if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
                                                 return;
                                             }
                                         }
-                                    }
-                                    CrosstermEvent::Mouse(mouse) => {
-                                        if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
-                                            return;
+                                        CrosstermEvent::Resize(_, _) => {
+                                            // Trigger a render on resize
+                                            let _ = tx.send(Event::Render);
                                         }
+                                        _ => {}
                                     }
-                                    CrosstermEvent::Resize(_, _) => {
-                                        // Trigger a render on resize
-                                        let _ = tx.send(Event::Render);
-                                    }
-                                    _ => {}
+                                }
+                                Some(Err(_)) => {
+                                    // Event read error, exit
+                                    return;
+                                }
+                                None => {
+                                    // Stream ended
+                                    return;
                                 }
                             }
-                            Some(Err(_)) => {
-                                // Event read error, exit
+                        }
+                        // Tick events for periodic updates
+                        _ = tick_interval.tick() => {
+                            if tx.send(Event::Tick).is_err() {
                                 return;
                             }
-                            None => {
-                                // Stream ended
+                        }
+                        // Render events for frame rate control
+                        _ = render_interval.tick() => {
+                            if tx.send(Event::Render).is_err() {
                                 return;
                             }
                         }
                     }
-                    // Tick events for periodic updates
-                    _ = tick_interval.tick() => {
-                        if tx.send(Event::Tick).is_err() {
-                            return;
+                }
+            } else {
+                loop {
+                    tokio::select! {
+                        // Handle terminal events
+                        maybe_event = reader.next() => {
+                            match maybe_event {
+                                Some(Ok(event)) => {
+                                    match event {
+                                        CrosstermEvent::Key(key) => {
+                                            // Filter for KeyPress only (avoid duplicate events on some platforms)
+                                            if key.kind == crossterm::event::KeyEventKind::Press {
+                                                if tx.send(Event::Input(key)).is_err() {
+                                                    return;
+                                                }
+                                                if key.code == config.exit_key {
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        CrosstermEvent::Mouse(mouse) => {
+                                            if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
+                                                return;
+                                            }
+                                        }
+                                        CrosstermEvent::Resize(_, _) => {
+                                            // Trigger a render on resize
+                                            let _ = tx.send(Event::Render);
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                Some(Err(_)) => {
+                                    // Event read error, exit
+                                    return;
+                                }
+                                None => {
+                                    // Stream ended
+                                    return;
+                                }
+                            }
                         }
-                    }
-                    // Render events for frame rate control
-                    _ = render_interval.tick() => {
-                        if tx.send(Event::Render).is_err() {
-                            return;
+                        // Tick events for periodic updates
+                        _ = tick_interval.tick() => {
+                            if tx.send(Event::Tick).is_err() {
+                                return;
+                            }
                         }
                     }
                 }
