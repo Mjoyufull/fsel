@@ -61,115 +61,85 @@ pub struct AsyncInput {
 }
 
 impl AsyncInput {
+    fn handle_terminal_event(
+        event: CrosstermEvent,
+        tx: &mpsc::UnboundedSender<Event<KeyEvent>>,
+        config: Config,
+    ) -> bool {
+        match event {
+            CrosstermEvent::Key(key) => {
+                // Filter for KeyPress only (avoid duplicate events on some platforms)
+                if key.kind == crossterm::event::KeyEventKind::Press {
+                    if tx.send(Event::Input(key)).is_err() {
+                        return true;
+                    }
+                    if key.code == config.exit_key {
+                        return true;
+                    }
+                }
+            }
+            CrosstermEvent::Mouse(mouse) => {
+                if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
+                    return true;
+                }
+            }
+            CrosstermEvent::Resize(_, _) => {
+                // Trigger a render on resize
+                if tx.send(Event::Render).is_err() {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
     pub fn with_config(config: Config) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
         let _task = tokio::spawn(async move {
             let mut reader = EventStream::new();
             let mut tick_interval = interval(config.tick_rate);
-            if let Some(render_rate) = config.render_rate {
-                let mut render_interval = interval(render_rate);
+            let mut render_interval = config.render_rate.map(interval);
 
-                loop {
-                    tokio::select! {
-                        // Handle terminal events
-                        maybe_event = reader.next() => {
-                            match maybe_event {
-                                Some(Ok(event)) => {
-                                    match event {
-                                        CrosstermEvent::Key(key) => {
-                                            // Filter for KeyPress only (avoid duplicate events on some platforms)
-                                            if key.kind == crossterm::event::KeyEventKind::Press {
-                                                if tx.send(Event::Input(key)).is_err() {
-                                                    return;
-                                                }
-                                                if key.code == config.exit_key {
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                        CrosstermEvent::Mouse(mouse) => {
-                                            if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
-                                                return;
-                                            }
-                                        }
-                                        CrosstermEvent::Resize(_, _) => {
-                                            // Trigger a render on resize
-                                            let _ = tx.send(Event::Render);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                Some(Err(_)) => {
-                                    // Event read error, exit
-                                    return;
-                                }
-                                None => {
-                                    // Stream ended
+            loop {
+                tokio::select! {
+                    // Handle terminal events
+                    maybe_event = reader.next() => {
+                        match maybe_event {
+                            Some(Ok(event)) => {
+                                if Self::handle_terminal_event(event, &tx, config) {
                                     return;
                                 }
                             }
-                        }
-                        // Tick events for periodic updates
-                        _ = tick_interval.tick() => {
-                            if tx.send(Event::Tick).is_err() {
+                            Some(Err(_)) => {
+                                // Event read error, exit
                                 return;
                             }
-                        }
-                        // Render events for frame rate control
-                        _ = render_interval.tick() => {
-                            if tx.send(Event::Render).is_err() {
+                            None => {
+                                // Stream ended
                                 return;
                             }
                         }
                     }
-                }
-            } else {
-                loop {
-                    tokio::select! {
-                        // Handle terminal events
-                        maybe_event = reader.next() => {
-                            match maybe_event {
-                                Some(Ok(event)) => {
-                                    match event {
-                                        CrosstermEvent::Key(key) => {
-                                            // Filter for KeyPress only (avoid duplicate events on some platforms)
-                                            if key.kind == crossterm::event::KeyEventKind::Press {
-                                                if tx.send(Event::Input(key)).is_err() {
-                                                    return;
-                                                }
-                                                if key.code == config.exit_key {
-                                                    return;
-                                                }
-                                            }
-                                        }
-                                        CrosstermEvent::Mouse(mouse) => {
-                                            if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
-                                                return;
-                                            }
-                                        }
-                                        CrosstermEvent::Resize(_, _) => {
-                                            // Trigger a render on resize
-                                            let _ = tx.send(Event::Render);
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                Some(Err(_)) => {
-                                    // Event read error, exit
-                                    return;
-                                }
-                                None => {
-                                    // Stream ended
-                                    return;
-                                }
-                            }
+                    // Tick events for periodic updates
+                    _ = tick_interval.tick() => {
+                        if tx.send(Event::Tick).is_err() {
+                            return;
                         }
-                        // Tick events for periodic updates
-                        _ = tick_interval.tick() => {
-                            if tx.send(Event::Tick).is_err() {
-                                return;
+                    }
+                    // Render events for frame rate control (optional)
+                    _ = async {
+                        match render_interval.as_mut() {
+                            Some(interval) => {
+                                interval.tick().await;
                             }
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => {
+                        if tx.send(Event::Render).is_err() {
+                            return;
                         }
                     }
                 }
