@@ -12,6 +12,44 @@ pub enum MatchMode {
     Fuzzy,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RankingMode {
+    #[default]
+    Frecency,
+    Recency,
+    Frequency,
+}
+
+impl RankingMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RankingMode::Frecency => "frecency",
+            RankingMode::Recency => "recency",
+            RankingMode::Frequency => "frequency",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PinnedOrderMode {
+    #[default]
+    Ranking,
+    Alphabetical,
+    OldestPinned,
+    NewestPinned,
+}
+
+impl PinnedOrderMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PinnedOrderMode::Ranking => "ranking",
+            PinnedOrderMode::Alphabetical => "alphabetical",
+            PinnedOrderMode::OldestPinned => "oldest_pinned",
+            PinnedOrderMode::NewestPinned => "newest_pinned",
+        }
+    }
+}
+
 fn usage() -> ! {
     let cmd = env::args().next().unwrap_or_else(|| "fsel".to_string());
 
@@ -216,6 +254,8 @@ pub struct Opts {
     pub list_executables_in_path: bool,
     pub hide_before_typing: bool,
     pub match_mode: MatchMode,
+    pub ranking_mode: RankingMode,
+    pub pinned_order_mode: PinnedOrderMode,
     /// Dmenu-specific colors and layout (override regular mode when in dmenu)
     pub dmenu_highlight_color: Option<ratatui::style::Color>,
     pub dmenu_cursor: Option<String>,
@@ -329,6 +369,8 @@ impl Default for Opts {
             list_executables_in_path: false,
             hide_before_typing: false,
             match_mode: MatchMode::Fuzzy,
+            ranking_mode: RankingMode::Frecency,
+            pinned_order_mode: PinnedOrderMode::Ranking,
             // Dmenu-specific styling (None means use regular mode values)
             dmenu_highlight_color: None,
             dmenu_cursor: None,
@@ -414,6 +456,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         "exact" => MatchMode::Exact,
         _ => MatchMode::Fuzzy,
     };
+    default.ranking_mode =
+        parse_ranking_mode(&fsel_config.general.ranking_mode).unwrap_or(RankingMode::Frecency);
+    default.pinned_order_mode = parse_pinned_order_mode(&fsel_config.general.pinned_order)
+        .unwrap_or(PinnedOrderMode::Ranking);
     default.sway = fsel_config.general.sway;
     default.systemd_run = fsel_config.general.systemd_run;
     default.uwsm = fsel_config.general.uwsm;
@@ -443,6 +489,13 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
     if let Some(depth) = fsel_config.app_launcher.prefix_depth {
         default.prefix_depth = depth;
+    }
+    if let Some(ref ranking_mode) = fsel_config.app_launcher.ranking_mode {
+        default.ranking_mode = parse_ranking_mode(ranking_mode).unwrap_or(default.ranking_mode);
+    }
+    if let Some(ref pinned_order_mode) = fsel_config.app_launcher.pinned_order {
+        default.pinned_order_mode =
+            parse_pinned_order_mode(pinned_order_mode).unwrap_or(default.pinned_order_mode);
     }
 
     // Map UI Config
@@ -1165,4 +1218,23 @@ fn parse_rgb_values(values: &str) -> Option<ratatui::style::Color> {
         }
     }
     None
+}
+
+fn parse_ranking_mode(value: &str) -> Option<RankingMode> {
+    match value.trim().to_lowercase().as_str() {
+        "frecency" => Some(RankingMode::Frecency),
+        "recency" => Some(RankingMode::Recency),
+        "frequency" => Some(RankingMode::Frequency),
+        _ => None,
+    }
+}
+
+fn parse_pinned_order_mode(value: &str) -> Option<PinnedOrderMode> {
+    match value.trim().to_lowercase().as_str() {
+        "ranking" => Some(PinnedOrderMode::Ranking),
+        "alphabetical" => Some(PinnedOrderMode::Alphabetical),
+        "oldest_pinned" | "oldest" => Some(PinnedOrderMode::OldestPinned),
+        "newest_pinned" | "newest" | "last_pinned" => Some(PinnedOrderMode::NewestPinned),
+        _ => None,
+    }
 }

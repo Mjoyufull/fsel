@@ -61,6 +61,8 @@ pub struct AppLauncherConfig {
     pub list_executables_in_path: Option<bool>,
     pub hide_before_typing: Option<bool>,
     pub match_mode: Option<String>,
+    pub ranking_mode: Option<String>,
+    pub pinned_order: Option<String>,
     pub confirm_first_launch: Option<bool>,
     pub prefix_depth: Option<usize>,
 }
@@ -77,6 +79,10 @@ pub struct GeneralConfig {
     pub hide_before_typing: bool,
     #[serde(default = "default_match_mode")]
     pub match_mode: String,
+    #[serde(default = "default_ranking_mode")]
+    pub ranking_mode: String,
+    #[serde(default = "default_pinned_order")]
+    pub pinned_order: String,
     #[serde(default)]
     pub sway: bool,
     #[serde(default)]
@@ -197,6 +203,12 @@ fn default_true() -> bool {
 fn default_match_mode() -> String {
     "fuzzy".to_string()
 }
+fn default_ranking_mode() -> String {
+    "frecency".to_string()
+}
+fn default_pinned_order() -> String {
+    "ranking".to_string()
+}
 fn default_highlight_color() -> String {
     "LightBlue".to_string()
 }
@@ -234,6 +246,8 @@ impl Default for FselConfig {
                 list_executables_in_path: false,
                 hide_before_typing: false,
                 match_mode: default_match_mode(),
+                ranking_mode: default_ranking_mode(),
+                pinned_order: default_pinned_order(),
                 sway: env::var("SWAYSOCK").is_ok(),
                 systemd_run: false,
                 uwsm: false,
@@ -324,6 +338,12 @@ impl FselConfig {
         }
         if let Ok(val) = env::var("FSEL_MATCH_MODE") {
             cfg.general.match_mode = val;
+        }
+        if let Ok(val) = env::var("FSEL_RANKING_MODE") {
+            cfg.general.ranking_mode = val;
+        }
+        if let Ok(val) = env::var("FSEL_PINNED_ORDER") {
+            cfg.general.pinned_order = val;
         }
         if let Ok(val) = env::var("FSEL_SWAY") {
             cfg.general.sway = val.parse().unwrap_or(cfg.general.sway);
@@ -575,6 +595,12 @@ impl FselConfig {
         }
         if let Ok(val) = env::var("FSEL_APP_LAUNCHER_MATCH_MODE") {
             cfg.app_launcher.match_mode = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_RANKING_MODE") {
+            cfg.app_launcher.ranking_mode = Some(val);
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_PINNED_ORDER") {
+            cfg.app_launcher.pinned_order = Some(val);
         }
         if let Ok(val) = env::var("FSEL_APP_LAUNCHER_CONFIRM_FIRST_LAUNCH") {
             cfg.app_launcher.confirm_first_launch =

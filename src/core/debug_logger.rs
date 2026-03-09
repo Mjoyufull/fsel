@@ -77,6 +77,8 @@ pub fn log_startup_info(cli: &crate::cli::Opts, app_count: usize, frecency_count
             let _ = writeln!(file, "[STARTUP] Configuration:");
             let _ = writeln!(file, "  Prefix depth: {}", cli.prefix_depth);
             let _ = writeln!(file, "  Match mode: {:?}", cli.match_mode);
+            let _ = writeln!(file, "  Ranking mode: {}", cli.ranking_mode.as_str());
+            let _ = writeln!(file, "  Pinned order: {}", cli.pinned_order_mode.as_str());
             let _ = writeln!(file, "  Filter desktop: {}", cli.filter_desktop);
             let _ = writeln!(
                 file,
@@ -183,7 +185,8 @@ pub fn log_search_snapshot(query: &str, matches: &[App], prefix_depth: usize, fi
                     );
                     let _ = writeln!(
                         file,
-                        "       ├── Frecency: {:.3} (raw: {:.3}, boost: +{})",
+                        "       ├── {}: {:.3} (raw: {:.3}, boost: +{})",
+                        b.ranking_mode,
                         b.raw_frecency_milli as f64 / 1000.0,
                         b.raw_frecency_milli as f64 / 1000.0,
                         b.frecency_boost
