@@ -535,6 +535,18 @@ windowrule {
 }
 ```
 
+**Niri:**
+```sh
+# ~/.config/niri/config.kdl
+window-rule {
+    match title="launcher"
+    open-floating true
+}
+
+# Add inside binds { ... }
+Mod+D { spawn "alacritty" "--title" "launcher" "-e" "fsel"; }
+```
+
 **dwm/bspwm/any WM:**
 ```sh
 # Use dmenu mode
