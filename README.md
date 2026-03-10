@@ -539,7 +539,7 @@ windowrule {
 ```sh
 # ~/.config/niri/config.kdl
 window-rule {
-    match app-id="launcher"
+    match title="launcher"
     open-floating true
 }
 
