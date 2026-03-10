@@ -63,53 +63,92 @@ fn save_pinned_state(
     Ok(())
 }
 
-pub fn load_pinned_apps(db: &std::sync::Arc<redb::Database>) -> HashSet<String> {
+fn load_pinned_apps_internal(db: &std::sync::Arc<redb::Database>) -> (HashSet<String>, bool) {
     let mut pinned = HashSet::new();
+    let mut loaded_ok = true;
 
     match db.begin_read() {
-        Ok(read_txn) => {
-            match read_txn.open_table(crate::core::cache::PINNED_TABLE) {
-                Ok(table) => {
-                    match table.get(PINNED_APPS_KEY) {
-                        Ok(Some(data)) => match postcard::from_bytes::<Vec<String>>(data.value()) {
-                            Ok(apps) => pinned.extend(apps),
-                            Err(e) => {
-                                eprintln!("Warning: Failed to deserialize pinned apps: {}", e)
-                            }
-                        },
-                        Ok(None) => {} // No pinned apps yet
-                        Err(e) => eprintln!("Warning: Failed to read pinned apps: {}", e),
+        Ok(read_txn) => match read_txn.open_table(crate::core::cache::PINNED_TABLE) {
+            Ok(table) => match table.get(PINNED_APPS_KEY) {
+                Ok(Some(data)) => match postcard::from_bytes::<Vec<String>>(data.value()) {
+                    Ok(apps) => pinned.extend(apps),
+                    Err(e) => {
+                        eprintln!("Warning: Failed to deserialize pinned apps: {}", e);
+                        loaded_ok = false;
                     }
+                },
+                Ok(None) => {} // No pinned apps yet
+                Err(e) => {
+                    eprintln!("Warning: Failed to read pinned apps: {}", e);
+                    loaded_ok = false;
                 }
-                Err(e) => eprintln!("Warning: Failed to open pinned table: {}", e),
+            },
+            Err(e) => {
+                eprintln!("Warning: Failed to open pinned table: {}", e);
+                loaded_ok = false;
             }
+        },
+        Err(e) => {
+            eprintln!("Warning: Failed to begin read transaction: {}", e);
+            loaded_ok = false;
         }
-        Err(e) => eprintln!("Warning: Failed to begin read transaction: {}", e),
     }
 
+    (pinned, loaded_ok)
+}
+
+pub fn load_pinned_apps(db: &std::sync::Arc<redb::Database>) -> HashSet<String> {
+    let (pinned, _loaded_ok) = load_pinned_apps_internal(db);
     pinned
 }
 
 /// load pin timestamps from database
 /// returns app_name -> first pinned unix timestamp
 pub fn load_pin_timestamps(db: &std::sync::Arc<redb::Database>) -> HashMap<String, u64> {
-    let pinned = load_pinned_apps(db);
+    let (pinned, pinned_loaded_ok) = load_pinned_apps_internal(db);
     let mut pin_timestamps = HashMap::new();
+    let mut timestamps_loaded_ok = true;
 
     match db.begin_read() {
         Ok(read_txn) => {
-            if let Ok(table) = read_txn.open_table(crate::core::cache::PINNED_TABLE) {
-                if let Ok(Some(data)) = table.get(PINNED_TIMESTAMPS_KEY) {
-                    if let Ok(map) = postcard::from_bytes::<HashMap<String, u64>>(data.value()) {
-                        pin_timestamps = map;
+            match read_txn.open_table(crate::core::cache::PINNED_TABLE) {
+                Ok(table) => match table.get(PINNED_TIMESTAMPS_KEY) {
+                    Ok(Some(data)) => {
+                        if let Ok(map) = postcard::from_bytes::<HashMap<String, u64>>(data.value())
+                        {
+                            pin_timestamps = map;
+                        } else {
+                            eprintln!("Warning: Failed to deserialize pin timestamps");
+                            timestamps_loaded_ok = false;
+                        }
                     }
+                    Ok(None) => {} // No timestamps yet
+                    Err(e) => {
+                        eprintln!("Warning: Failed to read pin timestamps: {}", e);
+                        timestamps_loaded_ok = false;
+                    }
+                },
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Failed to open pinned table for pin timestamps: {}",
+                        e
+                    );
+                    timestamps_loaded_ok = false;
                 }
             }
         }
-        Err(e) => eprintln!(
-            "Warning: Failed to begin read transaction for pin timestamps: {}",
-            e
-        ),
+        Err(e) => {
+            eprintln!(
+                "Warning: Failed to begin read transaction for pin timestamps: {}",
+                e
+            );
+            timestamps_loaded_ok = false;
+        }
+    }
+
+    // Avoid writing any reconciled state when reads were not reliable.
+    if !(pinned_loaded_ok && timestamps_loaded_ok) {
+        return pin_timestamps;
     }
 
     let mut changed = false;

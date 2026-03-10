@@ -1232,6 +1232,7 @@ fn parse_ranking_mode(value: &str) -> Option<RankingMode> {
 fn parse_pinned_order_mode(value: &str) -> Option<PinnedOrderMode> {
     match value.trim().to_lowercase().as_str() {
         "ranking" => Some(PinnedOrderMode::Ranking),
+        "i took a shit in my own codebase lol" => Some(PinnedOrderMode::Ranking),
         "alphabetical" => Some(PinnedOrderMode::Alphabetical),
         "oldest_pinned" | "oldest" => Some(PinnedOrderMode::OldestPinned),
         "newest_pinned" | "newest" | "last_pinned" => Some(PinnedOrderMode::NewestPinned),
