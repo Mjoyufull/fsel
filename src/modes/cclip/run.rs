@@ -24,7 +24,7 @@ use std::collections::HashSet;
 use std::io;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 /// Run cclip mode - async TUI event loop for clipboard history
 pub async fn run(cli: &Opts) -> Result<()> {
@@ -224,11 +224,12 @@ pub async fn run(cli: &Opts) -> Result<()> {
         picker.clone().unwrap_or_else(picker_fallback),
     ))));
 
-    // Initialize Async Input with 16ms tick rate for responsive image loading
+    // Cclip does not need a synthetic render stream. Redraw on real input, resize, and
+    // image-loader completions so large image previews do not flood the event queue.
     let mut input = InputConfig {
         exit_key: KeyCode::Null,
         disable_mouse,
-        tick_rate: std::time::Duration::from_millis(16),
+        render_rate: None,
         ..InputConfig::default()
     }
     .init_async();
@@ -247,6 +248,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     // Wrap failed_rowids for thread-safe background loading
     let failed_rowids = Arc::new(Mutex::new(HashSet::<String>::new()));
+    let (image_redraw_tx, mut image_redraw_rx) = mpsc::unbounded_channel::<()>();
 
     // Ensure we have a valid selection if there are items
     if !ui.shown.is_empty() && ui.selected.is_none() {
@@ -318,519 +320,312 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     // Track visible height for scroll management
     let mut max_visible = 0;
+    let mut needs_redraw = true;
+    let mut current_is_image = false;
+    let mut current_rowid_opt = None;
 
     // Main TUI loop
     loop {
-        // Clear expired temporary messages
-        ui.clear_expired_message();
+        if needs_redraw {
+            // Clear expired temporary messages before drawing.
+            ui.clear_expired_message();
 
-        // Note: Layout and UI content calculation moved INSIDE the draw loop
-        // This ensures wrapping calculations use the SAME dimensions as rendering
+            // Note: Layout and UI content calculation moved INSIDE the draw loop
+            // This ensures wrapping calculations use the SAME dimensions as rendering
 
-        // Check if current item is an image (only when not in tag mode)
-        let mut current_is_image = false;
-        let mut current_rowid_opt = None;
-        if image_preview_enabled && matches!(ui.tag_mode, TagMode::Normal) {
-            if let Some(selected) = ui.selected {
-                if selected < ui.shown.len() {
-                    let item = &ui.shown[selected];
-                    if ui.is_cclip_image_item(item) {
-                        current_is_image = true;
-                        current_rowid_opt = ui.get_cclip_rowid(item);
+            // Check if current item is an image (only when not in tag mode)
+            current_is_image = false;
+            current_rowid_opt = None;
+            if image_preview_enabled && matches!(ui.tag_mode, TagMode::Normal) {
+                if let Some(selected) = ui.selected {
+                    if selected < ui.shown.len() {
+                        let item = &ui.shown[selected];
+                        if ui.is_cclip_image_item(item) {
+                            current_is_image = true;
+                            current_rowid_opt = ui.get_cclip_rowid(item);
+                        }
                     }
                 }
             }
-        }
 
-        // Handle image loading if it changed
-        if image_preview_enabled {
-            if current_is_image {
-                if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
-                    let mut already_loaded = false;
-                    let mut is_loading = false;
+            // Handle image loading if it changed
+            if image_preview_enabled {
+                if current_is_image {
+                    if let (Some(rowid), Some(manager)) = (&current_rowid_opt, &mut image_manager) {
+                        let mut already_loaded = false;
+                        let mut is_loading = false;
 
-                    if let Ok(mut manager_lock) = manager.try_lock() {
-                        if manager_lock.is_cached(rowid) {
-                            manager_lock.set_image(rowid);
-                            already_loaded = true;
+                        if let Ok(mut manager_lock) = manager.try_lock() {
+                            if manager_lock.is_cached(rowid) {
+                                manager_lock.set_image(rowid);
+                                already_loaded = true;
+                            }
                         }
-                    }
 
-                    if !already_loaded {
-                        let state = crate::ui::DISPLAY_STATE
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        match &*state {
-                            crate::ui::DisplayState::Image(id) if id == rowid => {
-                                already_loaded = true
-                            }
-                            crate::ui::DisplayState::Loading(id) if id == rowid => {
-                                is_loading = true
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    if !already_loaded && !is_loading {
-                        let failed_lock = failed_rowids.clone();
-                        let is_failed = failed_lock.lock().await.contains(rowid);
-
-                        if !is_failed {
-                            // Set state to loading
-                            {
-                                let mut state = crate::ui::DISPLAY_STATE
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner());
-                                *state = crate::ui::DisplayState::Loading(rowid.clone());
-                            }
-
-                            // Spawn background loading task
-                            let manager_clone = manager.clone();
-                            let rowid_clone = rowid.clone();
-                            tokio::spawn(async move {
-                                let result = AssertUnwindSafe(async {
-                                    let mut manager_lock = manager_clone.lock().await;
-                                    manager_lock.load_cclip_image(&rowid_clone).await
-                                })
-                                .catch_unwind()
-                                .await;
-
-                                match result {
-                                    Ok(Ok(_)) => {
-                                        failed_lock.lock().await.remove(&rowid_clone);
-                                        let mut state = crate::ui::DISPLAY_STATE
-                                            .lock()
-                                            .unwrap_or_else(|e| e.into_inner());
-                                        *state =
-                                            crate::ui::DisplayState::Image(rowid_clone.clone());
-                                    }
-                                    Ok(Err(e)) => {
-                                        failed_lock.lock().await.insert(rowid_clone.clone());
-                                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
-                                            manager_lock.clear();
-                                        }
-                                        let mut state = crate::ui::DISPLAY_STATE
-                                            .lock()
-                                            .unwrap_or_else(|e| e.into_inner());
-                                        *state = crate::ui::DisplayState::Failed(e.to_string());
-                                    }
-                                    Err(_) => {
-                                        failed_lock.lock().await.insert(rowid_clone.clone());
-                                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
-                                            manager_lock.clear();
-                                        }
-                                        let mut state = crate::ui::DISPLAY_STATE
-                                            .lock()
-                                            .unwrap_or_else(|e| e.into_inner());
-                                        *state = crate::ui::DisplayState::Failed(
-                                            "Task panicked during image load".to_string(),
-                                        );
-                                    }
+                        if !already_loaded {
+                            let state = crate::ui::DISPLAY_STATE
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner());
+                            match &*state {
+                                crate::ui::DisplayState::Image(id) if id == rowid => {
+                                    already_loaded = true
                                 }
-                            });
+                                crate::ui::DisplayState::Loading(id) if id == rowid => {
+                                    is_loading = true
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        if !already_loaded && !is_loading {
+                            let failed_lock = failed_rowids.clone();
+                            let is_failed = failed_lock.lock().await.contains(rowid);
+
+                            if !is_failed {
+                                // Set state to loading
+                                {
+                                    let mut state = crate::ui::DISPLAY_STATE
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner());
+                                    *state = crate::ui::DisplayState::Loading(rowid.clone());
+                                }
+
+                                // Spawn background loading task
+                                let manager_clone = manager.clone();
+                                let rowid_clone = rowid.clone();
+                                let redraw_tx = image_redraw_tx.clone();
+                                tokio::spawn(async move {
+                                    let result = AssertUnwindSafe(async {
+                                        let mut manager_lock = manager_clone.lock().await;
+                                        manager_lock.load_cclip_image(&rowid_clone).await
+                                    })
+                                    .catch_unwind()
+                                    .await;
+
+                                    match result {
+                                        Ok(Ok(_)) => {
+                                            failed_lock.lock().await.remove(&rowid_clone);
+                                            let mut state = crate::ui::DISPLAY_STATE
+                                                .lock()
+                                                .unwrap_or_else(|e| e.into_inner());
+                                            *state =
+                                                crate::ui::DisplayState::Image(rowid_clone.clone());
+                                        }
+                                        Ok(Err(e)) => {
+                                            failed_lock.lock().await.insert(rowid_clone.clone());
+                                            if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                                manager_lock.clear();
+                                            }
+                                            let mut state = crate::ui::DISPLAY_STATE
+                                                .lock()
+                                                .unwrap_or_else(|e| e.into_inner());
+                                            *state = crate::ui::DisplayState::Failed(e.to_string());
+                                        }
+                                        Err(_) => {
+                                            failed_lock.lock().await.insert(rowid_clone.clone());
+                                            if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                                manager_lock.clear();
+                                            }
+                                            let mut state = crate::ui::DISPLAY_STATE
+                                                .lock()
+                                                .unwrap_or_else(|e| e.into_inner());
+                                            *state = crate::ui::DisplayState::Failed(
+                                                "Task panicked during image load".to_string(),
+                                            );
+                                        }
+                                    }
+                                    let _ = redraw_tx.send(());
+                                });
+                            }
                         }
                     }
-                }
-            } else if previous_was_image {
-                // Clear the image manager if we transitioned away from an image
-                if let Some(manager) = &mut image_manager {
-                    if let Ok(mut manager_lock) = manager.try_lock() {
-                        manager_lock.clear();
-                    }
-                }
-                if let Ok(mut failed) = failed_rowids.try_lock() {
-                    failed.clear();
-                }
-            }
-        }
-
-        // For Sixel/Foot: Clear when state changes (only if still using legacy clearing for some reason)
-        let mut needs_sixel_clear = false;
-        if image_preview_enabled {
-            let is_sixel = cached_is_sixel;
-            if is_sixel && (previous_was_image != current_is_image) {
-                let _ = terminal.clear();
-                needs_sixel_clear = true;
-            }
-        }
-        if term_is_foot {
-            let mut stderr = std::io::stderr();
-            let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026h");
-            let _ = std::io::Write::flush(&mut stderr);
-        }
-
-        let mut render_error = Ok(());
-        terminal.draw(|f| {
-            // Get effective colors and settings for cclip mode with inheritance
-            let highlight_color = get_cclip_color(
-                cli.cclip_highlight_color,
-                cli.dmenu_highlight_color,
-                cli.highlight_color,
-            );
-            let main_border_color = get_cclip_color(
-                cli.cclip_main_border_color,
-                cli.dmenu_main_border_color,
-                cli.main_border_color,
-            );
-            let items_border_color = get_cclip_color(
-                cli.cclip_items_border_color,
-                cli.dmenu_items_border_color,
-                cli.apps_border_color,
-            );
-            let input_border_color = get_cclip_color(
-                cli.cclip_input_border_color,
-                cli.dmenu_input_border_color,
-                cli.input_border_color,
-            );
-            let main_text_color = get_cclip_color(
-                cli.cclip_main_text_color,
-                cli.dmenu_main_text_color,
-                cli.main_text_color,
-            );
-            let items_text_color = get_cclip_color(
-                cli.cclip_items_text_color,
-                cli.dmenu_items_text_color,
-                cli.apps_text_color,
-            );
-            let input_text_color = get_cclip_color(
-                cli.cclip_input_text_color,
-                cli.dmenu_input_text_color,
-                cli.input_text_color,
-            );
-            let header_title_color = get_cclip_color(
-                cli.cclip_header_title_color,
-                cli.dmenu_header_title_color,
-                cli.header_title_color,
-            );
-            let rounded_borders = get_cclip_bool(
-                cli.cclip_rounded_borders,
-                cli.dmenu_rounded_borders,
-                cli.rounded_borders,
-            );
-            let content_panel_height = get_cclip_u16(
-                cli.cclip_title_panel_height_percent,
-                cli.dmenu_title_panel_height_percent,
-                cli.title_panel_height_percent,
-            );
-            let input_panel_height = get_cclip_u16(
-                cli.cclip_input_panel_height,
-                cli.dmenu_input_panel_height,
-                cli.input_panel_height,
-            );
-
-            // Use pre-detected graphics adapter
-            let graphics = graphics_adapter;
-
-            // Layout calculation
-            let total_height = f.area().height;
-            let content_height =
-                (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
-
-            // Get content panel position (defaults to Top if not set, with cclip -> dmenu -> regular inheritance)
-            let content_panel_position = get_cclip_panel_position(
-                cli.cclip_title_panel_position,
-                cli.dmenu_title_panel_position,
-                cli.title_panel_position
-                    .unwrap_or(crate::cli::PanelPosition::Top),
-            );
-
-            // Split the window into three parts based on content panel position
-            let (chunks, content_panel_index, items_panel_index, input_panel_index) =
-                match content_panel_position {
-                    crate::cli::PanelPosition::Top => {
-                        // Top: content, items, input (original layout)
-                        let layout = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints([
-                                Constraint::Length(content_height.max(3)),
-                                Constraint::Min(1),
-                                Constraint::Length(input_panel_height),
-                            ])
-                            .split(f.area());
-                        (layout, 0, 1, 2)
-                    }
-                    crate::cli::PanelPosition::Middle => {
-                        // Middle: items, content, input
-                        let layout = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints([
-                                Constraint::Min(1),
-                                Constraint::Length(content_height.max(3)),
-                                Constraint::Length(input_panel_height),
-                            ])
-                            .split(f.area());
-                        (layout, 1, 0, 2)
-                    }
-                    crate::cli::PanelPosition::Bottom => {
-                        // Bottom: items, input, content
-                        let layout = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints([
-                                Constraint::Min(1),                        // Items panel (remaining space)
-                                Constraint::Length(input_panel_height),    // Input panel
-                                Constraint::Length(content_height.max(3)), // Content panel at bottom
-                            ])
-                            .split(f.area());
-                        (layout, 2, 0, 1)
-                    }
-                };
-
-            // NOW calculate UI content using the ACTUAL chunks that will be used for rendering
-            // This ensures wrapping calculations match the actual render area
-            let content_panel_width = chunks[content_panel_index].width;
-            let content_panel_height = chunks[content_panel_index].height.saturating_sub(2);
-
-            match &ui.tag_mode {
-                TagMode::Normal => {
-                    ui.info_with_image_support(
-                        get_cclip_color(
-                            cli.cclip_highlight_color,
-                            cli.dmenu_highlight_color,
-                            cli.highlight_color,
-                        ),
-                        image_preview_enabled,
-                        hide_image_message,
-                        content_panel_width,
-                        content_panel_height,
-                    );
-                }
-                _ => {
-                    // While in tag modes, suspend inline image preview completely
-                    ui.info_with_image_support(
-                        get_cclip_color(
-                            cli.cclip_highlight_color,
-                            cli.dmenu_highlight_color,
-                            cli.highlight_color,
-                        ),
-                        false,
-                        hide_image_message,
-                        content_panel_width,
-                        content_panel_height,
-                    );
-                }
-            }
-
-            // Border type
-            let border_type = if rounded_borders {
-                BorderType::Rounded
-            } else {
-                BorderType::Plain
-            };
-
-            // Content panel (shows selected item's content with potential image preview)
-            let content_block = Block::default()
-                .borders(Borders::ALL)
-                .title(Span::styled(
-                    " Clipboard Preview ",
-                    Style::default()
-                        .add_modifier(Modifier::BOLD)
-                        .fg(header_title_color),
-                ))
-                .border_type(border_type)
-                .border_style(Style::default().fg(main_border_color));
-
-            // Create paragraph WITH wrapping as safety net
-            // Text is pre-wrapped manually, but Paragraph wrap prevents ANY overflow
-            let content_paragraph = Paragraph::new(ui.text.clone())
-                .block(content_block)
-                .style(Style::default().fg(main_text_color))
-                .alignment(Alignment::Left)
-                .wrap(Wrap { trim: false })
-                .scroll((0, 0));
-
-            // Items panel
-            let items_panel_height = chunks[items_panel_index].height;
-            max_visible = items_panel_height.saturating_sub(2) as usize;
-
-            let visible_items = ui
-                .shown
-                .iter()
-                .skip(ui.scroll_offset)
-                .take(max_visible)
-                .map(|item| item.to_list_item(Some(&tag_metadata_formatter)))
-                .collect::<Vec<ListItem>>();
-
-            let items_list = List::new(visible_items)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(Span::styled(
-                            " Clipboard History ",
-                            Style::default()
-                                .add_modifier(Modifier::BOLD)
-                                .fg(header_title_color),
-                        ))
-                        .border_type(border_type)
-                        .border_style(Style::default().fg(items_border_color)),
-                )
-                .style(Style::default().fg(items_text_color))
-                .highlight_style({
-                    // Use first tag's color for highlight if available
-                    let tag_color = if let Some(selected) = ui.selected {
-                        if selected < ui.shown.len() {
-                            ui.shown[selected]
-                                .tags
-                                .as_ref()
-                                .and_then(|tags| tags.first())
-                                .and_then(|tag| tag_metadata_formatter.get_color(tag))
-                        } else {
-                            None
+                } else if previous_was_image {
+                    // Clear the image manager if we transitioned away from an image
+                    if let Some(manager) = &mut image_manager {
+                        if let Ok(mut manager_lock) = manager.try_lock() {
+                            manager_lock.clear();
                         }
-                    } else {
-                        None
+                    }
+                    if let Ok(mut failed) = failed_rowids.try_lock() {
+                        failed.clear();
+                    }
+                }
+            }
+
+            // For Sixel/Foot: Clear when state changes (only if still using legacy clearing for some reason)
+            let mut needs_sixel_clear = false;
+            if image_preview_enabled {
+                let is_sixel = cached_is_sixel;
+                if is_sixel && (previous_was_image != current_is_image) {
+                    let _ = terminal.clear();
+                    needs_sixel_clear = true;
+                }
+            }
+            if term_is_foot {
+                let mut stderr = std::io::stderr();
+                let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026h");
+                let _ = std::io::Write::flush(&mut stderr);
+            }
+
+            let mut render_error = Ok(());
+            terminal.draw(|f| {
+                // Get effective colors and settings for cclip mode with inheritance
+                let highlight_color = get_cclip_color(
+                    cli.cclip_highlight_color,
+                    cli.dmenu_highlight_color,
+                    cli.highlight_color,
+                );
+                let main_border_color = get_cclip_color(
+                    cli.cclip_main_border_color,
+                    cli.dmenu_main_border_color,
+                    cli.main_border_color,
+                );
+                let items_border_color = get_cclip_color(
+                    cli.cclip_items_border_color,
+                    cli.dmenu_items_border_color,
+                    cli.apps_border_color,
+                );
+                let input_border_color = get_cclip_color(
+                    cli.cclip_input_border_color,
+                    cli.dmenu_input_border_color,
+                    cli.input_border_color,
+                );
+                let main_text_color = get_cclip_color(
+                    cli.cclip_main_text_color,
+                    cli.dmenu_main_text_color,
+                    cli.main_text_color,
+                );
+                let items_text_color = get_cclip_color(
+                    cli.cclip_items_text_color,
+                    cli.dmenu_items_text_color,
+                    cli.apps_text_color,
+                );
+                let input_text_color = get_cclip_color(
+                    cli.cclip_input_text_color,
+                    cli.dmenu_input_text_color,
+                    cli.input_text_color,
+                );
+                let header_title_color = get_cclip_color(
+                    cli.cclip_header_title_color,
+                    cli.dmenu_header_title_color,
+                    cli.header_title_color,
+                );
+                let rounded_borders = get_cclip_bool(
+                    cli.cclip_rounded_borders,
+                    cli.dmenu_rounded_borders,
+                    cli.rounded_borders,
+                );
+                let content_panel_height = get_cclip_u16(
+                    cli.cclip_title_panel_height_percent,
+                    cli.dmenu_title_panel_height_percent,
+                    cli.title_panel_height_percent,
+                );
+                let input_panel_height = get_cclip_u16(
+                    cli.cclip_input_panel_height,
+                    cli.dmenu_input_panel_height,
+                    cli.input_panel_height,
+                );
+
+                // Use pre-detected graphics adapter
+                let graphics = graphics_adapter;
+
+                // Layout calculation
+                let total_height = f.area().height;
+                let content_height =
+                    (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+
+                // Get content panel position (defaults to Top if not set, with cclip -> dmenu -> regular inheritance)
+                let content_panel_position = get_cclip_panel_position(
+                    cli.cclip_title_panel_position,
+                    cli.dmenu_title_panel_position,
+                    cli.title_panel_position
+                        .unwrap_or(crate::cli::PanelPosition::Top),
+                );
+
+                // Split the window into three parts based on content panel position
+                let (chunks, content_panel_index, items_panel_index, input_panel_index) =
+                    match content_panel_position {
+                        crate::cli::PanelPosition::Top => {
+                            // Top: content, items, input (original layout)
+                            let layout = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Length(content_height.max(3)),
+                                    Constraint::Min(1),
+                                    Constraint::Length(input_panel_height),
+                                ])
+                                .split(f.area());
+                            (layout, 0, 1, 2)
+                        }
+                        crate::cli::PanelPosition::Middle => {
+                            // Middle: items, content, input
+                            let layout = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Min(1),
+                                    Constraint::Length(content_height.max(3)),
+                                    Constraint::Length(input_panel_height),
+                                ])
+                                .split(f.area());
+                            (layout, 1, 0, 2)
+                        }
+                        crate::cli::PanelPosition::Bottom => {
+                            // Bottom: items, input, content
+                            let layout = Layout::default()
+                                .direction(Direction::Vertical)
+                                .constraints([
+                                    Constraint::Min(1),                        // Items panel (remaining space)
+                                    Constraint::Length(input_panel_height),    // Input panel
+                                    Constraint::Length(content_height.max(3)), // Content panel at bottom
+                                ])
+                                .split(f.area());
+                            (layout, 2, 0, 1)
+                        }
                     };
 
-                    Style::default()
-                        .fg(tag_color.unwrap_or(highlight_color))
-                        .add_modifier(Modifier::BOLD)
-                })
-                .highlight_symbol("> ");
+                // NOW calculate UI content using the ACTUAL chunks that will be used for rendering
+                // This ensures wrapping calculations match the actual render area
+                let content_panel_width = chunks[content_panel_index].width;
+                let content_panel_height = chunks[content_panel_index].height.saturating_sub(2);
 
-            // Update list state selection
-            let visible_selection = ui.selected.and_then(|sel| {
-                if sel >= ui.scroll_offset && sel < ui.scroll_offset + max_visible {
-                    Some(sel - ui.scroll_offset)
-                } else {
-                    None
-                }
-            });
-            list_state.select(visible_selection);
-
-            // Input panel - changes based on tag mode
-            let (input_line, input_title) = match &ui.tag_mode {
-                TagMode::PromptingTagName { input, .. } => (
-                    Line::from(vec![
-                        Span::styled("Tag: ", Style::default().fg(highlight_color)),
-                        Span::styled(input, Style::default().fg(input_text_color)),
-                        Span::styled(cursor, Style::default().fg(highlight_color)),
-                    ]),
-                    " Tag Name ",
-                ),
-                TagMode::PromptingTagEmoji { input, .. } => (
-                    Line::from(vec![
-                        Span::styled("Emoji: ", Style::default().fg(highlight_color)),
-                        Span::styled(input, Style::default().fg(input_text_color)),
-                        Span::styled(cursor, Style::default().fg(highlight_color)),
-                        Span::styled(
-                            " (or blank)",
-                            Style::default()
-                                .fg(input_text_color)
-                                .add_modifier(Modifier::DIM),
-                        ),
-                    ]),
-                    " Tag Emoji ",
-                ),
-                TagMode::PromptingTagColor { input, .. } => (
-                    Line::from(vec![
-                        Span::styled("Color: ", Style::default().fg(highlight_color)),
-                        Span::styled(input, Style::default().fg(input_text_color)),
-                        Span::styled(cursor, Style::default().fg(highlight_color)),
-                        Span::styled(
-                            " (hex/name or blank)",
-                            Style::default()
-                                .fg(input_text_color)
-                                .add_modifier(Modifier::DIM),
-                        ),
-                    ]),
-                    " Tag Color ",
-                ),
-                TagMode::RemovingTag { input, .. } => (
-                    Line::from(vec![
-                        Span::styled("Remove: ", Style::default().fg(highlight_color)),
-                        Span::styled(input, Style::default().fg(input_text_color)),
-                        Span::styled(cursor, Style::default().fg(highlight_color)),
-                        Span::styled(
-                            " (blank = all)",
-                            Style::default()
-                                .fg(input_text_color)
-                                .add_modifier(Modifier::DIM),
-                        ),
-                    ]),
-                    " Remove Tag ",
-                ),
-                TagMode::Normal => (
-                    Line::from(vec![
-                        Span::styled("(", Style::default().fg(input_text_color)),
-                        Span::styled(
-                            (ui.selected.map_or(0, |v| v + 1)).to_string(),
-                            Style::default().fg(highlight_color),
-                        ),
-                        Span::styled("/", Style::default().fg(input_text_color)),
-                        Span::styled(
-                            ui.shown.len().to_string(),
-                            Style::default().fg(input_text_color),
-                        ),
-                        Span::styled(") ", Style::default().fg(input_text_color)),
-                        Span::styled(">", Style::default().fg(highlight_color)),
-                        Span::styled("> ", Style::default().fg(input_text_color)),
-                        Span::styled(&ui.query, Style::default().fg(input_text_color)),
-                        Span::styled(cursor, Style::default().fg(highlight_color)),
-                    ]),
-                    " Filter ",
-                ),
-            };
-
-            let input_paragraph = Paragraph::new(input_line)
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(Span::styled(
-                            input_title,
-                            Style::default()
-                                .add_modifier(Modifier::BOLD)
-                                .fg(header_title_color),
-                        ))
-                        .border_type(border_type)
-                        .border_style(Style::default().fg(input_border_color)),
-                )
-                .style(Style::default().fg(input_text_color))
-                .alignment(Alignment::Left)
-                .wrap(Wrap { trim: false });
-
-            // Clear widget areas
-            // - Kitty: always clear all panels (Kitty needs explicit clearing)
-            // - Sixel: clear ALL panels when we did terminal.clear() to sync Ratatui's buffer
-            //   This prevents disappearing text because Ratatui knows all panels were cleared
-            use ratatui::widgets::Clear;
-            let is_kitty = matches!(graphics, crate::ui::GraphicsAdapter::Kitty);
-
-            if is_kitty {
-                // Kitty: Use Clear widget for all panels (Kitty requires explicit clearing)
-                f.render_widget(Clear, chunks[content_panel_index]);
-                f.render_widget(Clear, chunks[items_panel_index]);
-                f.render_widget(Clear, chunks[input_panel_index]);
-            } else if needs_sixel_clear || force_sixel_sync {
-                // Sixel: Clear ALL panels to sync Ratatui's buffer with terminal state
-                f.render_widget(Clear, chunks[content_panel_index]);
-                f.render_widget(Clear, chunks[items_panel_index]);
-                f.render_widget(Clear, chunks[input_panel_index]);
-                // Reset flag after using it
-                force_sixel_sync = false;
-            }
-
-            let mut image_rendered = false;
-            if image_preview_enabled && current_is_image {
-                if let Some(manager) = &mut image_manager {
-                    if let Ok(mut manager_lock) = manager.try_lock() {
-                        // Calculate image area INSIDE the content panel borders
-                        let content_chunk = chunks[content_panel_index];
-                        let image_area = ratatui::layout::Rect {
-                            x: content_chunk.x + 1,
-                            y: content_chunk.y + 1,
-                            width: content_chunk.width.saturating_sub(2),
-                            height: content_chunk.height.saturating_sub(2),
-                        };
-                        if let Err(e) = manager_lock.render(f, image_area) {
-                            render_error = Err(e);
-                        }
-                        image_rendered = true;
+                match &ui.tag_mode {
+                    TagMode::Normal => {
+                        ui.info_with_image_support(
+                            get_cclip_color(
+                                cli.cclip_highlight_color,
+                                cli.dmenu_highlight_color,
+                                cli.highlight_color,
+                            ),
+                            image_preview_enabled,
+                            hide_image_message,
+                            content_panel_width,
+                            content_panel_height,
+                        );
+                    }
+                    _ => {
+                        // While in tag modes, suspend inline image preview completely
+                        ui.info_with_image_support(
+                            get_cclip_color(
+                                cli.cclip_highlight_color,
+                                cli.dmenu_highlight_color,
+                                cli.highlight_color,
+                            ),
+                            false,
+                            hide_image_message,
+                            content_panel_width,
+                            content_panel_height,
+                        );
                     }
                 }
-            }
 
-            // Render all components in their dynamic positions
-            // If image was rendered, we use a simpler block for the content panel to avoid drawing text over/under image
-            if image_rendered {
+                // Border type
+                let border_type = if rounded_borders {
+                    BorderType::Rounded
+                } else {
+                    BorderType::Plain
+                };
+
+                // Content panel (shows selected item's content with potential image preview)
                 let content_block = Block::default()
                     .borders(Borders::ALL)
                     .title(Span::styled(
@@ -841,20 +636,237 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     ))
                     .border_type(border_type)
                     .border_style(Style::default().fg(main_border_color));
-                f.render_widget(content_block, chunks[content_panel_index]);
-            } else {
-                f.render_widget(content_paragraph, chunks[content_panel_index]);
+
+                // Create paragraph WITH wrapping as safety net
+                // Text is pre-wrapped manually, but Paragraph wrap prevents ANY overflow
+                let content_paragraph = Paragraph::new(ui.text.clone())
+                    .block(content_block)
+                    .style(Style::default().fg(main_text_color))
+                    .alignment(Alignment::Left)
+                    .wrap(Wrap { trim: false })
+                    .scroll((0, 0));
+
+                // Items panel
+                let items_panel_height = chunks[items_panel_index].height;
+                max_visible = items_panel_height.saturating_sub(2) as usize;
+
+                let visible_items = ui
+                    .shown
+                    .iter()
+                    .skip(ui.scroll_offset)
+                    .take(max_visible)
+                    .map(|item| item.to_list_item(Some(&tag_metadata_formatter)))
+                    .collect::<Vec<ListItem>>();
+
+                let items_list = List::new(visible_items)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(Span::styled(
+                                " Clipboard History ",
+                                Style::default()
+                                    .add_modifier(Modifier::BOLD)
+                                    .fg(header_title_color),
+                            ))
+                            .border_type(border_type)
+                            .border_style(Style::default().fg(items_border_color)),
+                    )
+                    .style(Style::default().fg(items_text_color))
+                    .highlight_style({
+                        // Use first tag's color for highlight if available
+                        let tag_color = if let Some(selected) = ui.selected {
+                            if selected < ui.shown.len() {
+                                ui.shown[selected]
+                                    .tags
+                                    .as_ref()
+                                    .and_then(|tags| tags.first())
+                                    .and_then(|tag| tag_metadata_formatter.get_color(tag))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        Style::default()
+                            .fg(tag_color.unwrap_or(highlight_color))
+                            .add_modifier(Modifier::BOLD)
+                    })
+                    .highlight_symbol("> ");
+
+                // Update list state selection
+                let visible_selection = ui.selected.and_then(|sel| {
+                    if sel >= ui.scroll_offset && sel < ui.scroll_offset + max_visible {
+                        Some(sel - ui.scroll_offset)
+                    } else {
+                        None
+                    }
+                });
+                list_state.select(visible_selection);
+
+                // Input panel - changes based on tag mode
+                let (input_line, input_title) = match &ui.tag_mode {
+                    TagMode::PromptingTagName { input, .. } => (
+                        Line::from(vec![
+                            Span::styled("Tag: ", Style::default().fg(highlight_color)),
+                            Span::styled(input, Style::default().fg(input_text_color)),
+                            Span::styled(cursor, Style::default().fg(highlight_color)),
+                        ]),
+                        " Tag Name ",
+                    ),
+                    TagMode::PromptingTagEmoji { input, .. } => (
+                        Line::from(vec![
+                            Span::styled("Emoji: ", Style::default().fg(highlight_color)),
+                            Span::styled(input, Style::default().fg(input_text_color)),
+                            Span::styled(cursor, Style::default().fg(highlight_color)),
+                            Span::styled(
+                                " (or blank)",
+                                Style::default()
+                                    .fg(input_text_color)
+                                    .add_modifier(Modifier::DIM),
+                            ),
+                        ]),
+                        " Tag Emoji ",
+                    ),
+                    TagMode::PromptingTagColor { input, .. } => (
+                        Line::from(vec![
+                            Span::styled("Color: ", Style::default().fg(highlight_color)),
+                            Span::styled(input, Style::default().fg(input_text_color)),
+                            Span::styled(cursor, Style::default().fg(highlight_color)),
+                            Span::styled(
+                                " (hex/name or blank)",
+                                Style::default()
+                                    .fg(input_text_color)
+                                    .add_modifier(Modifier::DIM),
+                            ),
+                        ]),
+                        " Tag Color ",
+                    ),
+                    TagMode::RemovingTag { input, .. } => (
+                        Line::from(vec![
+                            Span::styled("Remove: ", Style::default().fg(highlight_color)),
+                            Span::styled(input, Style::default().fg(input_text_color)),
+                            Span::styled(cursor, Style::default().fg(highlight_color)),
+                            Span::styled(
+                                " (blank = all)",
+                                Style::default()
+                                    .fg(input_text_color)
+                                    .add_modifier(Modifier::DIM),
+                            ),
+                        ]),
+                        " Remove Tag ",
+                    ),
+                    TagMode::Normal => (
+                        Line::from(vec![
+                            Span::styled("(", Style::default().fg(input_text_color)),
+                            Span::styled(
+                                (ui.selected.map_or(0, |v| v + 1)).to_string(),
+                                Style::default().fg(highlight_color),
+                            ),
+                            Span::styled("/", Style::default().fg(input_text_color)),
+                            Span::styled(
+                                ui.shown.len().to_string(),
+                                Style::default().fg(input_text_color),
+                            ),
+                            Span::styled(") ", Style::default().fg(input_text_color)),
+                            Span::styled(">", Style::default().fg(highlight_color)),
+                            Span::styled("> ", Style::default().fg(input_text_color)),
+                            Span::styled(&ui.query, Style::default().fg(input_text_color)),
+                            Span::styled(cursor, Style::default().fg(highlight_color)),
+                        ]),
+                        " Filter ",
+                    ),
+                };
+
+                let input_paragraph = Paragraph::new(input_line)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(Span::styled(
+                                input_title,
+                                Style::default()
+                                    .add_modifier(Modifier::BOLD)
+                                    .fg(header_title_color),
+                            ))
+                            .border_type(border_type)
+                            .border_style(Style::default().fg(input_border_color)),
+                    )
+                    .style(Style::default().fg(input_text_color))
+                    .alignment(Alignment::Left)
+                    .wrap(Wrap { trim: false });
+
+                // Clear widget areas
+                // - Kitty: always clear all panels (Kitty needs explicit clearing)
+                // - Sixel: clear ALL panels when we did terminal.clear() to sync Ratatui's buffer
+                //   This prevents disappearing text because Ratatui knows all panels were cleared
+                use ratatui::widgets::Clear;
+                let is_kitty = matches!(graphics, crate::ui::GraphicsAdapter::Kitty);
+
+                if is_kitty {
+                    // Kitty: Use Clear widget for all panels (Kitty requires explicit clearing)
+                    f.render_widget(Clear, chunks[content_panel_index]);
+                    f.render_widget(Clear, chunks[items_panel_index]);
+                    f.render_widget(Clear, chunks[input_panel_index]);
+                } else if needs_sixel_clear || force_sixel_sync {
+                    // Sixel: Clear ALL panels to sync Ratatui's buffer with terminal state
+                    f.render_widget(Clear, chunks[content_panel_index]);
+                    f.render_widget(Clear, chunks[items_panel_index]);
+                    f.render_widget(Clear, chunks[input_panel_index]);
+                    // Reset flag after using it
+                    force_sixel_sync = false;
+                }
+
+                let mut image_rendered = false;
+                if image_preview_enabled && current_is_image {
+                    if let Some(manager) = &mut image_manager {
+                        if let Ok(mut manager_lock) = manager.try_lock() {
+                            // Calculate image area INSIDE the content panel borders
+                            let content_chunk = chunks[content_panel_index];
+                            let image_area = ratatui::layout::Rect {
+                                x: content_chunk.x + 1,
+                                y: content_chunk.y + 1,
+                                width: content_chunk.width.saturating_sub(2),
+                                height: content_chunk.height.saturating_sub(2),
+                            };
+                            if let Err(e) = manager_lock.render(f, image_area) {
+                                render_error = Err(e);
+                            }
+                            image_rendered = true;
+                        }
+                    }
+                }
+
+                // Render all components in their dynamic positions
+                // If image was rendered, we use a simpler block for the content panel to avoid drawing text over/under image
+                if image_rendered {
+                    let content_block = Block::default()
+                        .borders(Borders::ALL)
+                        .title(Span::styled(
+                            " Clipboard Preview ",
+                            Style::default()
+                                .add_modifier(Modifier::BOLD)
+                                .fg(header_title_color),
+                        ))
+                        .border_type(border_type)
+                        .border_style(Style::default().fg(main_border_color));
+                    f.render_widget(content_block, chunks[content_panel_index]);
+                } else {
+                    f.render_widget(content_paragraph, chunks[content_panel_index]);
+                }
+
+                f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
+                f.render_widget(input_paragraph, chunks[input_panel_index]);
+            })?;
+            render_error?;
+
+            if term_is_foot {
+                let mut stderr = std::io::stderr();
+                let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026l");
+                let _ = std::io::Write::flush(&mut stderr);
             }
 
-            f.render_stateful_widget(items_list, chunks[items_panel_index], &mut list_state);
-            f.render_widget(input_paragraph, chunks[input_panel_index]);
-        })?;
-        render_error?;
-
-        if term_is_foot {
-            let mut stderr = std::io::stderr();
-            let _ = std::io::Write::write_all(&mut stderr, b"\x1b[?2026l");
-            let _ = std::io::Write::flush(&mut stderr);
+            // Update state for next iteration only after a draw completed.
+            previous_was_image = current_is_image;
         }
 
         // Note: Post-draw clearing removed - using Clear widget inside draw loop instead
@@ -862,8 +874,12 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
         // Handle input events with full navigation and clipboard copying
         tokio::select! {
+            Some(_) = image_redraw_rx.recv() => {
+                needs_redraw = true;
+            }
             Some(event) = input.next() => match event {
                 Event::Input(key) => {
+                    needs_redraw = true;
                     match (key.code, key.modifiers) {
                         // Fullscreen image preview keybind
                         (code, mods) if cli.keybinds.matches_image_preview(code, mods) => {
@@ -1547,6 +1563,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     }
                 }
                 Event::Mouse(mouse_event) => {
+                    needs_redraw = true;
                     // Mouse handling (similar to dmenu mode)
                     let mouse_row = mouse_event.row;
                     let total_height = terminal.size()?.height;
@@ -1681,13 +1698,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         _ => {}
                     }
                 }
-                Event::Tick => {}
-                Event::Render => {} // Handled by draw loop start
+                Event::Tick => {
+                    needs_redraw = ui.temp_message.is_some();
+                }
+                Event::Render => {
+                    needs_redraw = true;
+                }
             }
         }
-
-        // Update state for next iteration
-        previous_was_image = current_is_image;
     }
 }
 /// Helper to reload clipboard items and restore selection/scroll

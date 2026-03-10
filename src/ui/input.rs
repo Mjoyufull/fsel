@@ -17,6 +17,7 @@ use tokio::time::interval;
 pub struct Config {
     pub exit_key: KeyCode,
     pub tick_rate: Duration,
+    pub render_rate: Option<Duration>,
     pub disable_mouse: bool,
 }
 
@@ -25,6 +26,7 @@ impl Default for Config {
         Self {
             exit_key: KeyCode::Esc,
             tick_rate: Duration::from_millis(250),
+            render_rate: Some(Duration::from_millis(16)),
             disable_mouse: false,
         }
     }
@@ -59,13 +61,47 @@ pub struct AsyncInput {
 }
 
 impl AsyncInput {
+    fn handle_terminal_event(
+        event: CrosstermEvent,
+        tx: &mpsc::UnboundedSender<Event<KeyEvent>>,
+        config: Config,
+    ) -> bool {
+        match event {
+            CrosstermEvent::Key(key) => {
+                // Filter for KeyPress only (avoid duplicate events on some platforms)
+                if key.kind == crossterm::event::KeyEventKind::Press {
+                    if tx.send(Event::Input(key)).is_err() {
+                        return true;
+                    }
+                    if key.code == config.exit_key {
+                        return true;
+                    }
+                }
+            }
+            CrosstermEvent::Mouse(mouse) => {
+                if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
+                    return true;
+                }
+            }
+            CrosstermEvent::Resize(_, _) => {
+                // Trigger a render on resize
+                if tx.send(Event::Render).is_err() {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
     pub fn with_config(config: Config) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
 
         let _task = tokio::spawn(async move {
             let mut reader = EventStream::new();
             let mut tick_interval = interval(config.tick_rate);
-            let mut render_interval = interval(Duration::from_millis(16)); // ~60 FPS
+            let mut render_interval = config.render_rate.map(interval);
 
             loop {
                 tokio::select! {
@@ -73,28 +109,8 @@ impl AsyncInput {
                     maybe_event = reader.next() => {
                         match maybe_event {
                             Some(Ok(event)) => {
-                                match event {
-                                    CrosstermEvent::Key(key) => {
-                                        // Filter for KeyPress only (avoid duplicate events on some platforms)
-                                        if key.kind == crossterm::event::KeyEventKind::Press {
-                                            if tx.send(Event::Input(key)).is_err() {
-                                                return;
-                                            }
-                                            if key.code == config.exit_key {
-                                                return;
-                                            }
-                                        }
-                                    }
-                                    CrosstermEvent::Mouse(mouse) => {
-                                        if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
-                                            return;
-                                        }
-                                    }
-                                    CrosstermEvent::Resize(_, _) => {
-                                        // Trigger a render on resize
-                                        let _ = tx.send(Event::Render);
-                                    }
-                                    _ => {}
+                                if Self::handle_terminal_event(event, &tx, config) {
+                                    return;
                                 }
                             }
                             Some(Err(_)) => {
@@ -113,8 +129,15 @@ impl AsyncInput {
                             return;
                         }
                     }
-                    // Render events for frame rate control
-                    _ = render_interval.tick() => {
+                    // Render events for frame rate control (optional)
+                    _ = async {
+                        match render_interval.as_mut() {
+                            Some(interval) => {
+                                interval.tick().await;
+                            }
+                            None => std::future::pending::<()>().await,
+                        }
+                    } => {
                         if tx.send(Event::Render).is_err() {
                             return;
                         }
