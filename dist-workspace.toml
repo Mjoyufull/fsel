@@ -1,0 +1,15 @@
+[workspace]
+members = ["cargo:."]
+
+# Config for 'dist'
+[dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.31.0"
+# CI backends to support
+ci = "github"
+# The installers to generate for each app
+installers = []
+# Target platforms to build apps for (Rust target-triple syntax).
+# fsel is Linux and *BSD only; we only list Linux here because GitHub Actions
+# has no FreeBSD runners. BSD users can build from source or use ports.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]

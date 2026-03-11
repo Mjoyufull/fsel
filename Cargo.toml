@@ -21,6 +21,11 @@ codegen-units = 1
 opt-level = 3
 panic = "abort"
 
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
 [dependencies]
 postcard = { version = "1.1", default-features = false, features = ["alloc"] }
 eyre = "0.6"
