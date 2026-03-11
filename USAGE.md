@@ -12,7 +12,9 @@ fsel
 # Pin your favorite apps (Ctrl+Space in TUI)
 # Pinned apps always appear first with 📌 icon
 
-# Frequently used apps automatically rise to the top (Frecency ranking)
+# Configure app ranking in [app_launcher] with:
+# ranking_mode = "frecency" | "recency" | "frequency"
+# pinned_order = "ranking" | "alphabetical" | "oldest_pinned" | "newest_pinned"
 
 # Pre-fill search (works with app launcher, dmenu, and cclip modes)
 # Note: -ss must be the LAST option
@@ -327,12 +329,13 @@ fsel -T
 ```
 
 **What gets logged:**
-- Startup configuration (prefix_depth, match_mode, etc.)
+- Startup configuration (prefix_depth, match_mode, ranking_mode, pinned_order, etc.)
 - Total apps loaded and frecency entries
 - Query changes (each character typed, backspace)
 - Search snapshots with full scoring breakdown:
   - Tier classification (Pinned App Name Exact, Normal Fuzzy Match, etc.)
-  - Bucket score, matcher score, frecency boost
+  - Bucket score, matcher score, ranking boost
+  - Note: the user-facing `ranking boost` appears in logs as the active ranking label, e.g. `frecency: 0.500`.
   - Top 50 matches with complete breakdown
   - Filter timing
 - Selection changes (which app is selected, scroll position)
@@ -367,7 +370,7 @@ Log file: /home/user/.config/fsel/logs/fsel-debug-20260202-143045-pid12345.log
        ├── Tier: Normal App Name Exact
        ├── Bucket Score: 90000000
        ├── Matcher Score: 50 (base: 0, 100x multiplier)
-       └── Frecency: 0.500 (raw: 0.500, boost: +5)
+       └── frecency: 0.500 (raw: 0.500, boost: +5)
 ...
 ```
 
@@ -427,6 +430,8 @@ terminal_launcher = "kitty -e"  # or "tty" for TTY mode (-t/--tty)
 [app_launcher]
 filter_desktop = true
 list_executables_in_path = false
+ranking_mode = "frecency"
+pinned_order = "ranking"
 
 # Dmenu mode overrides
 [dmenu]
@@ -467,7 +472,7 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `confirm_first_launch`, `prefix_depth`
+- `filter_desktop`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`

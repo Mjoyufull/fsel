@@ -8,7 +8,7 @@ fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .B fsel
 is a terminal-based application launcher with advanced fuzzy search, dmenu compatibility, and clipboard history integration. It scans XDG desktop entries and optionally PATH executables, providing a fast interface for launching applications.
 .PP
-Features a sophisticated 12-tier search ranking system with frecency-based prioritization (zoxide-style) that automatically surfaces frequently and recently used apps. The ranking system prioritizes pinned apps, exact matches, prefix matches, and word-start matches, with configurable prefix depth for fine-tuning search behavior. Pin your favorites with Ctrl-Space for instant access.
+Features a sophisticated 12-tier search ranking system with configurable prioritization (\fIfrecency\fR, \fIrecency\fR, or \fIfrequency\fR). The ranking system prioritizes pinned apps, exact matches, prefix matches, and word-start matches, with configurable prefix depth for fine-tuning search behavior. Pin your favorites with Ctrl-Space for instant access.
 .SH OPTIONS
 .SS "App Launcher Options"
 .TP
@@ -186,6 +186,8 @@ filter_desktop = true
 list_executables_in_path = false
 hide_before_typing = false
 match_mode = "fuzzy"
+ranking_mode = "frecency"
+pinned_order = "ranking"
 confirm_first_launch = false
 prefix_depth = 3
 

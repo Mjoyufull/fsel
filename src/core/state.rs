@@ -6,6 +6,7 @@
 use crate::desktop::App;
 use ratatui::style::Color;
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::time::SystemTime;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -15,6 +16,12 @@ pub struct ScoreBreakdown {
     pub matcher_score: i64,
     pub frecency_boost: i64,
     pub raw_frecency_milli: i64,
+    #[serde(default = "default_ranking_mode_label")]
+    pub ranking_mode: String,
+}
+
+fn default_ranking_mode_label() -> String {
+    "frecency".to_string()
 }
 
 #[derive(Debug)]
@@ -39,6 +46,12 @@ pub struct State {
     pub frecency_data: std::collections::HashMap<String, FrecencyEntry>,
     /// Character depth for prioritized prefix matching
     pub prefix_depth: usize,
+    /// Ranking mode used for ordering and score boosts
+    pub ranking_mode: crate::cli::RankingMode,
+    /// Strategy for ordering pinned apps
+    pub pinned_order_mode: crate::cli::PinnedOrderMode,
+    /// First pinned timestamp by app name
+    pub pin_timestamps: std::collections::HashMap<String, u64>,
 }
 
 impl State {
@@ -47,6 +60,9 @@ impl State {
         _match_mode: crate::cli::MatchMode,
         frecency_data: std::collections::HashMap<String, FrecencyEntry>,
         prefix_depth: usize,
+        ranking_mode: crate::cli::RankingMode,
+        pinned_order_mode: crate::cli::PinnedOrderMode,
+        pin_timestamps: std::collections::HashMap<String, u64>,
     ) -> Self {
         let mut state = Self {
             apps,
@@ -59,6 +75,9 @@ impl State {
             should_launch: false,
             frecency_data,
             prefix_depth,
+            ranking_mode,
+            pinned_order_mode,
+            pin_timestamps,
         };
         state.filter();
         state
@@ -77,6 +96,10 @@ impl State {
             let filter_start = Instant::now();
             let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
             let pattern = Pattern::parse(&self.query, CaseMatching::Ignore, Normalization::Smart);
+            let now_secs = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
 
             let mut scored: Vec<(i64, App)> = self
                 .apps
@@ -193,15 +216,12 @@ impl State {
                         return None;
                     };
 
-                    // 3. Frecency boost (additive)
-                    let frec_score = self
-                        .frecency_data
-                        .get(&app.name)
-                        .map(|e| e.frecency())
-                        .unwrap_or(0.0);
-                    let frec_boost = (frec_score * 10.0) as i64;
+                    // 3. Ranking boost (additive)
+                    let entry = self.frecency_data.get(&app.name);
+                    let rank_score = ranking_score(entry, self.ranking_mode, now_secs);
+                    let rank_boost = ranking_boost(rank_score, self.ranking_mode);
                     let matcher_boost = base_fuzzy_score * 100;
-                    let final_score = bucket_score + matcher_boost + frec_boost;
+                    let final_score = bucket_score + matcher_boost + rank_boost;
 
                     let tier_name = match bucket_score {
                         120_000_000 => "Pinned App Name Exact",
@@ -228,8 +248,9 @@ impl State {
                         tier: tier_name,
                         bucket_score,
                         matcher_score: matcher_boost,
-                        frecency_boost: frec_boost,
-                        raw_frecency_milli: (frec_score * 1000.0) as i64,
+                        frecency_boost: rank_boost,
+                        raw_frecency_milli: (rank_score * 1000.0) as i64,
+                        ranking_mode: self.ranking_mode.as_str().to_string(),
                     };
 
                     let mut app_clone = app.clone();
@@ -239,8 +260,19 @@ impl State {
                 })
                 .collect();
 
-            // Sort by score descending, then by name
-            scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+            // Sort by score descending, then deterministic pinned ordering (for ties), then name
+            scored.sort_by(|a, b| {
+                b.0.cmp(&a.0)
+                    .then_with(|| {
+                        compare_pinned_order(
+                            &a.1,
+                            &b.1,
+                            self.pinned_order_mode,
+                            &self.pin_timestamps,
+                        )
+                    })
+                    .then_with(|| compare_names(&a.1.name, &b.1.name))
+            });
             self.shown = scored.into_iter().map(|(_, app)| app).collect();
 
             let filter_time = filter_start.elapsed().as_millis() as u64;
@@ -357,7 +389,7 @@ pub enum Message {
     MoveDown,
     /// Move to first item
     MoveFirst,
-    /// Move to last item  
+    /// Move to last item
     MoveLast,
     /// Select/launch current item
     Select,
@@ -475,6 +507,80 @@ pub fn update(state: &mut State, msg: Message, hard_stop: bool, max_visible: usi
     }
 }
 
+fn compare_names(a: &str, b: &str) -> Ordering {
+    a.to_lowercase().cmp(&b.to_lowercase()).then(a.cmp(b))
+}
+
+fn compare_pinned_order(
+    a: &App,
+    b: &App,
+    pinned_order_mode: crate::cli::PinnedOrderMode,
+    pin_timestamps: &std::collections::HashMap<String, u64>,
+) -> Ordering {
+    if !(a.pinned && b.pinned) {
+        return Ordering::Equal;
+    }
+
+    match pinned_order_mode {
+        crate::cli::PinnedOrderMode::Ranking => Ordering::Equal,
+        crate::cli::PinnedOrderMode::Alphabetical => compare_names(&a.name, &b.name),
+        crate::cli::PinnedOrderMode::OldestPinned => {
+            let by_time = match (
+                pin_timestamps.get(&a.name).copied(),
+                pin_timestamps.get(&b.name).copied(),
+            ) {
+                (Some(a_ts), Some(b_ts)) => a_ts.cmp(&b_ts),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            };
+            by_time.then_with(|| compare_names(&a.name, &b.name))
+        }
+        crate::cli::PinnedOrderMode::NewestPinned => {
+            let by_time = match (
+                pin_timestamps.get(&a.name).copied(),
+                pin_timestamps.get(&b.name).copied(),
+            ) {
+                (Some(a_ts), Some(b_ts)) => b_ts.cmp(&a_ts),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => Ordering::Equal,
+            };
+            by_time.then_with(|| compare_names(&a.name, &b.name))
+        }
+    }
+}
+
+fn recency_score(last_access: u64, now_secs: u64) -> f64 {
+    let age_secs = now_secs.saturating_sub(last_access);
+    let age_hours = age_secs as f64 / 3600.0;
+    1.0 / (age_hours + 1.0)
+}
+
+fn ranking_score(
+    entry: Option<&FrecencyEntry>,
+    ranking_mode: crate::cli::RankingMode,
+    now_secs: u64,
+) -> f64 {
+    let Some(entry) = entry else {
+        return 0.0;
+    };
+
+    match ranking_mode {
+        crate::cli::RankingMode::Frecency => entry.frecency(),
+        crate::cli::RankingMode::Frequency => entry.score as f64,
+        crate::cli::RankingMode::Recency => recency_score(entry.last_access, now_secs),
+    }
+}
+
+fn ranking_boost(score: f64, ranking_mode: crate::cli::RankingMode) -> i64 {
+    match ranking_mode {
+        crate::cli::RankingMode::Frecency => (score * 10.0) as i64,
+        crate::cli::RankingMode::Frequency => (score * 10.0) as i64,
+        crate::cli::RankingMode::Recency => (score * 10_000.0) as i64,
+    }
+}
+
 // =============================================================================
 // FRECENCY ALGORITHM (zoxide-style)
 // =============================================================================
@@ -546,11 +652,19 @@ impl FrecencyEntry {
     }
 }
 
-/// Sort apps by frecency (highest first)
-pub fn sort_by_frecency(
+/// Sort apps by configured ranking mode (highest first)
+pub fn sort_by_ranking(
     apps: &mut [App],
     frecency_data: &std::collections::HashMap<String, FrecencyEntry>,
+    ranking_mode: crate::cli::RankingMode,
+    pinned_order_mode: crate::cli::PinnedOrderMode,
+    pin_timestamps: &std::collections::HashMap<String, u64>,
 ) {
+    let now_secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
     // First populate last_access metadata
     for app in apps.iter_mut() {
         if let Some(entry) = frecency_data.get(&app.name) {
@@ -566,20 +680,35 @@ pub fn sort_by_frecency(
             _ => {}
         }
 
-        // Then by frecency (higher first)
-        let a_frecency = frecency_data
-            .get(&a.name)
-            .map(|e| e.frecency())
-            .unwrap_or(0.0);
-        let b_frecency = frecency_data
-            .get(&b.name)
-            .map(|e| e.frecency())
-            .unwrap_or(0.0);
+        // Optional deterministic pinned ordering for pinned pairs.
+        let pinned_order = compare_pinned_order(a, b, pinned_order_mode, pin_timestamps);
+        if pinned_order != Ordering::Equal {
+            return pinned_order;
+        }
 
-        b_frecency
-            .partial_cmp(&a_frecency)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        // Then by selected ranking mode (higher first)
+        let a_entry = frecency_data.get(&a.name);
+        let b_entry = frecency_data.get(&b.name);
+
+        let ranking_cmp = match ranking_mode {
+            crate::cli::RankingMode::Frecency => {
+                let a_score = ranking_score(a_entry, ranking_mode, now_secs);
+                let b_score = ranking_score(b_entry, ranking_mode, now_secs);
+                b_score.partial_cmp(&a_score).unwrap_or(Ordering::Equal)
+            }
+            crate::cli::RankingMode::Frequency => {
+                let a_score = a_entry.map(|e| e.score).unwrap_or(0);
+                let b_score = b_entry.map(|e| e.score).unwrap_or(0);
+                b_score.cmp(&a_score)
+            }
+            crate::cli::RankingMode::Recency => {
+                let a_score = a_entry.map(|e| e.last_access).unwrap_or(0);
+                let b_score = b_entry.map(|e| e.last_access).unwrap_or(0);
+                b_score.cmp(&a_score)
+            }
+        };
+
+        ranking_cmp.then_with(|| compare_names(&a.name, &b.name))
     });
 }
 

@@ -5,7 +5,7 @@ use eyre::{eyre, Result, WrapErr};
 
 use crate::ui::{InputConfig, InputEvent as Event, UI};
 
-use crate::core::state::{sort_by_frecency, Message, State};
+use crate::core::state::{sort_by_ranking, Message, State};
 use directories::ProjectDirs;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
@@ -356,9 +356,16 @@ pub async fn run(cli: Opts) -> Result<()> {
         all_apps.push(app);
     }
 
-    // Sort by frecency ONCE
+    // Sort by configured ranking mode ONCE
     let frecency_data = crate::core::database::load_frecency(&db);
-    sort_by_frecency(&mut all_apps, &frecency_data);
+    let mut pin_timestamps = crate::core::database::load_pin_timestamps(&db);
+    sort_by_ranking(
+        &mut all_apps,
+        &frecency_data,
+        cli.ranking_mode,
+        cli.pinned_order_mode,
+        &pin_timestamps,
+    );
 
     // Log startup info if in test mode
     if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -372,7 +379,15 @@ pub async fn run(cli: Opts) -> Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     // Initialize State with ALL apps loaded
-    let mut state = State::new(all_apps, cli.match_mode, frecency_data, cli.prefix_depth);
+    let mut state = State::new(
+        all_apps,
+        cli.match_mode,
+        frecency_data,
+        cli.prefix_depth,
+        cli.ranking_mode,
+        cli.pinned_order_mode,
+        std::mem::take(&mut pin_timestamps),
+    );
 
     // Pre-fill search
     if let Some(ref s) = cli.search_string {
@@ -448,9 +463,16 @@ pub async fn run(cli: Opts) -> Result<()> {
                                                 a.pinned = is_pinned;
                                             }
                                         }
-                                        // Re-sort so pinned apps move to top
+                                        // Re-sort so pinned apps move to top with configured ordering
                                         let frecency_data = crate::core::database::load_frecency(&db);
-                                        crate::core::state::sort_by_frecency(&mut state.apps, &frecency_data);
+                                        state.pin_timestamps = crate::core::database::load_pin_timestamps(&db);
+                                        crate::core::state::sort_by_ranking(
+                                            &mut state.apps,
+                                            &frecency_data,
+                                            state.ranking_mode,
+                                            state.pinned_order_mode,
+                                            &state.pin_timestamps,
+                                        );
                                         state.filter();
                                      }
                                  }

@@ -160,9 +160,9 @@ Run `fsel` from a terminal to open the interactive TUI launcher.
 
 #### Features
 
-- **Advanced Search Ranking**: 12-tier prioritization system ensures you find what you're looking for. Pinned apps, exact matches, and prefix matches are intelligently ranked with frecency-based scoring (zoxide-style) that learns from your usage patterns
+- **Advanced Search Ranking**: 12-tier prioritization system ensures you find what you're looking for. Pinned apps, exact matches, and prefix matches are intelligently ranked with configurable scoring (`frecency`, `recency`, or `frequency`)
 - **Smart Matching**: Searches names, descriptions, keywords, and categories
-- **Smart Ranking**: Apps ranked by frequency and recent usage with time-bucketed multipliers
+- **Smart Ranking**: Choose ranking behavior with `ranking_mode` (`frecency`, `recency`, `frequency`)
 - **Desktop Filtering**: Respects `OnlyShowIn`/`NotShowIn` fields
 - **PATH Executables**: Optionally show CLI tools from `$PATH`
 - **Match Modes**: Fuzzy (default) or exact matching
@@ -462,17 +462,19 @@ cursor = "█"
 # App launcher
 terminal_launcher = "alacritty -e"
 
+# Pin/favorite settings (root-level UI options)
+pin_color = "rgb(255,165,0)"       # Color for pin icon (orange)
+pin_icon = "📌"                     # Icon for pinned apps
+
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment
 list_executables_in_path = false   # Show CLI tools from $PATH
 hide_before_typing = false         # Hide list until you start typing
 match_mode = "fuzzy"               # "fuzzy" or "exact"
+ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
+pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned", "newest_pinned"
 confirm_first_launch = false       # Confirm before launching new apps with -p
 prefix_depth = 3                   # Character depth for prefix matching priority
-
-# Pin/favorite settings
-pin_color = "rgb(255,165,0)"       # Color for pin icon (orange)
-pin_icon = "📌"                     # Icon for pinned apps
 ```
 
 ### Advanced Options
