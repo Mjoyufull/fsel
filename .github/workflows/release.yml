@@ -42,7 +42,7 @@ on:
   pull_request:
   push:
     tags:
-      - "**[0-9]+.[0-9]+.[0-9]+*"
+      - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
@@ -51,7 +51,7 @@ jobs:
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
       tag: ${{ !github.event.pull_request && github.ref_name || '' }}
-      tag-flag: ${{ steps.plan.outputs.tag_flag }}
+      tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
       publishing: ${{ !github.event.pull_request }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -76,30 +76,8 @@ jobs:
       # (PRs run on the *source* but secrets are usually on the *target* -- that's *good*
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
-        shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            dist plan --output-format=json > plan-dist-manifest.json
-            echo "tag_flag=" >> "$GITHUB_OUTPUT"
-          else
-            DIST_PACKAGE="$(awk -F'"' '/^name = "/ { print $2; exit }' Cargo.toml)"
-            DIST_VERSION="$(awk -F'"' '/^version = "/ { print $2; exit }' Cargo.toml)"
-            if [[ -z "$DIST_PACKAGE" || -z "$DIST_VERSION" ]]; then
-              echo "::error::Unable to read package name/version from Cargo.toml"
-              exit 1
-            fi
-
-            RAW_TAG="${{ github.ref_name }}"
-            BASE_VERSION="${DIST_VERSION%%-*}"
-            if [[ "$RAW_TAG" != "$BASE_VERSION" && "$RAW_TAG" != "$DIST_VERSION" ]]; then
-              echo "::error::Git tag '$RAW_TAG' doesn't match Cargo version '$DIST_VERSION' (or base '$BASE_VERSION')"
-              exit 1
-            fi
-
-            DIST_TAG="${DIST_PACKAGE}-v${DIST_VERSION}"
-            dist host --steps=create --tag="$DIST_TAG" --output-format=json > plan-dist-manifest.json
-            echo "tag_flag=--tag=$DIST_TAG" >> "$GITHUB_OUTPUT"
-          fi
+          dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
