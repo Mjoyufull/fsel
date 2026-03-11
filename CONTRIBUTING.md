@@ -671,7 +671,7 @@ What you expected to happen.
 What actually happened.
 
 **Environment**
-- fsel version: [e.g., 3.1.0-kiwicrab]
+- fsel version: [e.g., 3.2.0-kiwicrab]
 - OS: [e.g., Arch Linux, kernel 6.6.1]
 - Terminal: [e.g., kitty 0.30.0]
 - Rust version: [output of `rustc --version`]
@@ -757,7 +757,7 @@ A maintainer creates a release branch when:
    ```sh
    git checkout dev
    git pull origin dev
-   git checkout -b release/3.1.0-kiwicrab  # Replace with actual version
+   git checkout -b release/3.2.0-kiwicrab  # Replace with actual version
    ```
 5. Update version references on the release branch:
    - `Cargo.toml` (root directory)
@@ -766,7 +766,7 @@ A maintainer creates a release branch when:
    - Man pages (`fsel.1` or similar)
 6. Commit version bump:
    ```sh
-   git commit -am "chore: bump version to 3.1.0-kiwicrab"
+   git commit -am "chore: bump version to 3.2.0-kiwicrab"
    ```
 7. Prepare release notes using the template in [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md); update **RELEASELOG.md** on the release branch with the release title and body, adding a `---` separator above the previous release(s).
 8. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
@@ -792,20 +792,20 @@ This policy started from version 2.0.0. All 3.x.x releases use `kiwicrab`.
 # 1. Merge release branch to main
 git checkout main
 git pull origin main
-git merge release/3.1.0-kiwicrab
+git merge release/3.2.0-kiwicrab
 
 # 2. Tag the release (version number only, no "v" prefix per PROJECT_STANDARDS)
-git tag -a 3.1.0 -m "3.1.0"
+git tag -a 3.2.0 -m "3.2.0"
 git push origin main --tags
 
 # 3. Merge release branch back to dev (so dev has the version bump)
 git checkout dev
-git merge release/3.1.0-kiwicrab
+git merge release/3.2.0-kiwicrab
 git push origin dev
 
 # 4. Delete the release branch
-git branch -d release/3.1.0-kiwicrab
-git push origin --delete release/3.1.0-kiwicrab
+git branch -d release/3.2.0-kiwicrab
+git push origin --delete release/3.2.0-kiwicrab
 ```
 
 **Why this workflow:**
@@ -820,7 +820,7 @@ git push origin --delete release/3.1.0-kiwicrab
 Create a release using the release body template in [PROJECT_STANDARDS.md](./PROJECT_STANDARDS.md) (same structure as the block added to RELEASELOG.md). Example format:
 
 ```markdown
-## [3.1.0-kiwicrab] - YYYY-MM-DD
+## [3.2.0-kiwicrab] - YYYY-MM-DD
 
 ### Added
 - Native inline and fullscreen image previews in cclip mode via [ratatui-image](https://github.com/benjajaja/ratatui-image) (Kitty, Sixel, Halfblocks; no chafa required)
