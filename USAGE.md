@@ -335,6 +335,7 @@ fsel -T
 - Search snapshots with full scoring breakdown:
   - Tier classification (Pinned App Name Exact, Normal Fuzzy Match, etc.)
   - Bucket score, matcher score, ranking boost
+  - Note: the user-facing `ranking boost` appears in logs as the active ranking label, e.g. `frecency: 0.500`.
   - Top 50 matches with complete breakdown
   - Filter timing
 - Selection changes (which app is selected, scroll position)
