@@ -11,6 +11,8 @@ allow-dirty = ["ci"]
 ci = "github"
 # The installers to generate for each app
 installers = []
+# GitHub already provides source archives; don't publish duplicate source tarballs.
+source-tarball = false
 # Target platforms to build apps for (Rust target-triple syntax).
 # fsel is Linux and *BSD only; we only list Linux here because GitHub Actions
 # has no FreeBSD runners. BSD users can build from source or use ports.

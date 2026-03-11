@@ -286,8 +286,8 @@ jobs:
           merge-multiple: true
       - name: Cleanup
         run: |
-          # Remove the granular manifests
-          rm -f artifacts/*-dist-manifest.json
+          # Remove dist manifests from release attachments (CI metadata only)
+          rm -f artifacts/*-dist-manifest.json artifacts/dist-manifest.json
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
