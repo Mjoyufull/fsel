@@ -55,9 +55,9 @@ Get up and running in 30 seconds:
 nix run github:Mjoyufull/fsel
 
 # Or the Aur
+$ paru -S fsel-bin
+ # or for git package
 $ yay -S fsel-git
- # or
-$ paru -S fsel-git
 
 # Or build from source
 git clone https://github.com/Mjoyufull/fsel && cd fsel
