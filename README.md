@@ -59,6 +59,10 @@ $ paru -S fsel-bin
  # or for git package
 $ yay -S fsel-git
 
+# Or Void Linux (Unoffical Repo)
+echo repository=https://raw.githubusercontent.com/Event-Horizon-VL/blackhole-vl/repository-x86_64 | sudo tee /etc/xbps.d/20-repository-extra.conf
+sudo xbps-install -S fsel
+
 # Or build from source
 git clone https://github.com/Mjoyufull/fsel && cd fsel
 cargo build --release
