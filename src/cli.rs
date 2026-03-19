@@ -479,7 +479,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         > 1
     {
         eprintln!("Error: Only one launch method can be specified at a time");
-        eprintln!("Available methods: --launch-prefix, --systemd-run, --uwsm");
+        eprintln!("Available methods: --systemd-run, --uwsm");
         std::process::exit(1);
     }
     if default.systemd_run {
