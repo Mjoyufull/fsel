@@ -472,11 +472,21 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     default.no_exec = fsel_config.general.no_exec;
     default.confirm_first_launch = fsel_config.general.confirm_first_launch;
     default.prefix_depth = fsel_config.general.prefix_depth;
+    if [default.systemd_run, default.uwsm]
+        .iter()
+        .filter(|&&x| x)
+        .count()
+        > 1
+    {
+        eprintln!("Error: Only one launch method can be specified at a time");
+        eprintln!("Available methods: --launch-prefix, --systemd-run, --uwsm");
+        std::process::exit(1);
+    }
     if default.systemd_run {
-        default.launch_prefix = systemd_run_prefix();
+        set_systemd_run(&mut default);
     }
     if default.uwsm {
-        default.launch_prefix = uwsm_prefix();
+        set_uwsm(&mut default);
     }
 
     // apply [app_launcher] section overrides if they exist
@@ -490,8 +500,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         default.hide_before_typing = hide;
     }
     if let Some(prefix) = fsel_config.app_launcher.launch_prefix {
-        default.launch_prefix_set = !prefix.is_empty();
-        default.launch_prefix = prefix;
+        set_launch_prefix(&mut default, prefix);
     }
     if let Some(ref mode) = fsel_config.app_launcher.match_mode {
         default.match_mode = match mode.as_str() {
@@ -728,6 +737,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     // 4. Parse CLI Overrides
     let mut parser = lexopt::Parser::from_env();
+    let mut cli_launch_methods = 0;
 
     // Check for -ss option first and handle it specially
     let args: Vec<String> = env::args().collect();
@@ -783,22 +793,25 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 default.no_exec = true;
             }
             Long("launch-prefix") => {
-                default.launch_prefix_set = true;
-                default.launch_prefix = parse_launch_prefix(
-                    &parser
-                        .value()?
-                        .into_string()
-                        .map_err(|_| "Launch prefix must be valid UTF-8")?,
-                )
-                .map_err(lexopt::Error::from)?;
+                cli_launch_methods += 1;
+                set_launch_prefix(
+                    &mut default,
+                    parse_launch_prefix(
+                        &parser
+                            .value()?
+                            .into_string()
+                            .map_err(|_| "Launch prefix must be valid UTF-8")?,
+                    )
+                    .map_err(lexopt::Error::from)?,
+                );
             }
             Long("systemd-run") => {
-                default.systemd_run = true;
-                default.launch_prefix = systemd_run_prefix();
+                cli_launch_methods += 1;
+                set_systemd_run(&mut default);
             }
             Long("uwsm") => {
-                default.uwsm = true;
-                default.launch_prefix = uwsm_prefix();
+                cli_launch_methods += 1;
+                set_uwsm(&mut default);
             }
             Short('d') | Long("detach") => {
                 default.detach = true;
@@ -1093,16 +1106,12 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     // Validate flag conflicts - no-exec overrides all launch methods
     if default.no_exec {
-        if default.systemd_run || default.uwsm || default.launch_prefix_set {
+        if active_launch_method_count(&default) > 0 {
             eprintln!("Warning: --no-exec overrides other launch method flags");
         }
     } else {
         // Check for mutually exclusive launch methods
-        let launch_methods = [default.systemd_run, default.uwsm, default.launch_prefix_set]
-            .iter()
-            .filter(|&&x| x)
-            .count();
-        if launch_methods > 1 {
+        if cli_launch_methods > 1 || active_launch_method_count(&default) > 1 {
             eprintln!("Error: Only one launch method can be specified at a time");
             eprintln!("Available methods: --launch-prefix, --systemd-run, --uwsm");
             std::process::exit(1);
@@ -1121,6 +1130,38 @@ fn systemd_run_prefix() -> Vec<String> {
 
 fn uwsm_prefix() -> Vec<String> {
     vec!["uwsm".into(), "app".into(), "--".into()]
+}
+
+fn clear_launch_method(opts: &mut Opts) {
+    opts.systemd_run = false;
+    opts.uwsm = false;
+    opts.launch_prefix_set = false;
+    opts.launch_prefix.clear();
+}
+
+fn set_launch_prefix(opts: &mut Opts, prefix: Vec<String>) {
+    clear_launch_method(opts);
+    opts.launch_prefix_set = !prefix.is_empty();
+    opts.launch_prefix = prefix;
+}
+
+fn set_systemd_run(opts: &mut Opts) {
+    clear_launch_method(opts);
+    opts.systemd_run = true;
+    opts.launch_prefix = systemd_run_prefix();
+}
+
+fn set_uwsm(opts: &mut Opts) {
+    clear_launch_method(opts);
+    opts.uwsm = true;
+    opts.launch_prefix = uwsm_prefix();
+}
+
+fn active_launch_method_count(opts: &Opts) -> usize {
+    [opts.systemd_run, opts.uwsm, opts.launch_prefix_set]
+        .iter()
+        .filter(|&&x| x)
+        .count()
 }
 
 fn parse_launch_prefix(value: &str) -> Result<Vec<String>, &'static str> {
@@ -1271,7 +1312,9 @@ fn parse_pinned_order_mode(value: &str) -> Option<PinnedOrderMode> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_launch_prefix;
+    use super::{
+        active_launch_method_count, parse_launch_prefix, set_launch_prefix, set_systemd_run, Opts,
+    };
 
     #[test]
     fn parse_launch_prefix_supports_shell_words() {
@@ -1284,5 +1327,16 @@ mod tests {
     #[test]
     fn parse_launch_prefix_rejects_empty_values() {
         assert!(parse_launch_prefix("").is_err());
+    }
+
+    #[test]
+    fn later_launch_method_overrides_previous_state() {
+        let mut opts = Opts::default();
+        set_systemd_run(&mut opts);
+        set_launch_prefix(&mut opts, vec!["runapp".into(), "--".into()]);
+        assert_eq!(active_launch_method_count(&opts), 1);
+        assert!(!opts.systemd_run);
+        assert!(!opts.uwsm);
+        assert!(opts.launch_prefix_set);
     }
 }
