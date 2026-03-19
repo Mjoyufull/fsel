@@ -60,6 +60,7 @@ pub struct AppLauncherConfig {
     pub filter_desktop: Option<bool>,
     pub list_executables_in_path: Option<bool>,
     pub hide_before_typing: Option<bool>,
+    pub launch_prefix: Option<Vec<String>>,
     pub match_mode: Option<String>,
     pub ranking_mode: Option<String>,
     pub pinned_order: Option<String>,
@@ -83,8 +84,6 @@ pub struct GeneralConfig {
     pub ranking_mode: String,
     #[serde(default = "default_pinned_order")]
     pub pinned_order: String,
-    #[serde(default)]
-    pub sway: bool,
     #[serde(default)]
     pub systemd_run: bool,
     #[serde(default)]
@@ -248,7 +247,6 @@ impl Default for FselConfig {
                 match_mode: default_match_mode(),
                 ranking_mode: default_ranking_mode(),
                 pinned_order: default_pinned_order(),
-                sway: env::var("SWAYSOCK").is_ok(),
                 systemd_run: false,
                 uwsm: false,
                 detach: false,
@@ -344,9 +342,6 @@ impl FselConfig {
         }
         if let Ok(val) = env::var("FSEL_PINNED_ORDER") {
             cfg.general.pinned_order = val;
-        }
-        if let Ok(val) = env::var("FSEL_SWAY") {
-            cfg.general.sway = val.parse().unwrap_or(cfg.general.sway);
         }
         if let Ok(val) = env::var("FSEL_SYSTEMD_RUN") {
             cfg.general.systemd_run = val.parse().unwrap_or(cfg.general.systemd_run);
@@ -592,6 +587,11 @@ impl FselConfig {
         if let Ok(val) = env::var("FSEL_APP_LAUNCHER_HIDE_BEFORE_TYPING") {
             cfg.app_launcher.hide_before_typing =
                 Some(val.parse().unwrap_or(cfg.general.hide_before_typing));
+        }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_LAUNCH_PREFIX") {
+            if let Ok(prefix) = shell_words::split(&val) {
+                cfg.app_launcher.launch_prefix = Some(prefix);
+            }
         }
         if let Ok(val) = env::var("FSEL_APP_LAUNCHER_MATCH_MODE") {
             cfg.app_launcher.match_mode = Some(val);

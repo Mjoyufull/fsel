@@ -80,6 +80,10 @@ list_executables_in_path = false
 # Hide app list until you start typing
 hide_before_typing = false
 
+# Optional command prefix used before launched apps
+# Example: ["runapp", "--"] or ["uwsm", "app", "--"]
+# launch_prefix = ["runapp", "--"]
+
 # Match mode: "fuzzy" or "exact"
 # fuzzy = fzf-style matching (fire matches Firefox)
 # exact = only exact/starts-with/contains matches
