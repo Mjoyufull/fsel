@@ -55,10 +55,8 @@ fsel
 fsel -t
 fsel --tty
 
-# Through Sway
-fsel  # Auto-detected if $SWAYSOCK is set
-fsel -s  # Disable Sway integration (short form)
-fsel --nosway  # Disable Sway integration (long form)
+# Through a custom launcher prefix
+fsel --launch-prefix="runapp --"
 
 # Through systemd
 fsel --systemd-run
@@ -69,7 +67,8 @@ fsel --uwsm
 fsel --uwsm --detach          # Fully detached via uwsm
 
 # Detach from terminal (prevents apps from being killed when terminal closes)
-# Useful for apps like Discord or Steam; works standalone or with --systemd-run/--uwsm
+# Useful for apps like Discord or Steam; works standalone or with launch prefixes,
+# --systemd-run, or --uwsm
 fsel --detach
 
 # Print command instead of running
@@ -290,14 +289,14 @@ app code         # Instantly launches VS Code
 
 **Optional: Add launch method flags if needed:**
 ```toml
+# With a custom launcher prefix
+cmd = "fsel --launch-prefix='runapp --' -vv -d -r -p \"{}\""
+
 # With uwsm (requires uwsm installed)
 cmd = "fsel --uwsm -vv -d -r -p \"{}\""
 
 # With systemd-run (requires systemd)
 cmd = "fsel --systemd-run -vv -d -r -p \"{}\""
-
-# With Sway (auto-detected if $SWAYSOCK is set)
-cmd = "fsel -vv -r -d -p \"{}\""
 
 ```
 

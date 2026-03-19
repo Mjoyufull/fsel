@@ -204,6 +204,7 @@ fsel -p terminal
 fsel -p fire  # Finds Firefox
 
 # Combine with launch options
+fsel --launch-prefix="runapp --" -p discord
 fsel --uwsm -p discord
 fsel --systemd-run -vv -p code
 ```
@@ -368,6 +369,7 @@ Usage:
 │  ├─ -r, --replace                Replace running fsel/cclip instance
 │  ├─ -d, --detach                 Detach launched applications (GUI-safe)
 │  ├─ -v, --verbose                Increase verbosity (repeatable)
+│  ├─ --launch-prefix <CMD>        Launch apps through a custom command prefix
 │  ├─ --systemd-run                Launch via systemd-run --user --scope
 │  ├─ --uwsm                       Launch via uwsm app
 │  ├─ --no-exec                    Print selection to stdout instead of launching
@@ -420,7 +422,7 @@ Usage:
 #### Launch Methods
 
 - **Default**: Standard execution
-- **Sway Integration**: Automatically enabled when `$SWAYSOCK` is set. Uses `swaymsg exec` to launch applications in the current workspace (requires Sway)
+- **Custom Prefix**: `--launch-prefix="runapp --"` or `[app_launcher].launch_prefix = ["runapp", "--"]`
 - **systemd-run**: `--systemd-run` launches applications in isolated systemd user scopes (requires systemd)
 - **uwsm**: `--uwsm` launches applications through the Universal Wayland Session Manager (requires uwsm to be installed)
 
@@ -474,6 +476,7 @@ pin_icon = "📌"                     # Icon for pinned apps
 filter_desktop = true              # Filter apps by desktop environment
 list_executables_in_path = false   # Show CLI tools from $PATH
 hide_before_typing = false         # Hide list until you start typing
+launch_prefix = ["runapp", "--"]   # Optional command prefix before launched apps
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
 pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned", "newest_pinned"

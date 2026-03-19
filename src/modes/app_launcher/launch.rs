@@ -6,7 +6,14 @@ use std::ffi::CString;
 use std::io;
 use std::process;
 
-/// launch an app with the specified configuration
+fn split_command(command: &str, name: &str) -> Result<Vec<String>> {
+    if command.trim().is_empty() {
+        return Ok(vec![]);
+    }
+    shell_words::split(command).map_err(|e| eyre::eyre!("Invalid {name}: {e}"))
+}
+
+/// Launch an application using the resolved launch prefix and terminal wrapper.
 pub fn launch_app(
     app: &crate::desktop::App,
     cli: &crate::cli::Opts,
@@ -128,27 +135,13 @@ pub fn launch_app(
         return Err(err.into());
     }
 
-    let mut runner: Vec<&str> = vec![];
-
-    if cli.uwsm {
-        runner.insert(0, "uwsm");
-        runner.insert(1, "app");
-        runner.insert(2, "--");
-    } else if cli.systemd_run {
-        runner.insert(0, "systemd-run");
-        runner.insert(1, "--user");
-        runner.insert(2, "--scope");
-    } else if cli.sway {
-        runner.extend_from_slice(&["swaymsg", "exec", "--"]);
-    }
-
+    let mut runner = cli.launch_prefix.clone();
     if app.is_terminal {
-        runner.extend_from_slice(&cli.terminal_launcher.split(' ').collect::<Vec<&str>>());
+        runner.extend(split_command(&cli.terminal_launcher, "terminal_launcher")?);
     }
+    runner.extend(commands);
 
-    runner.extend_from_slice(&commands.iter().map(AsRef::as_ref).collect::<Vec<&str>>());
-
-    let mut exec = process::Command::new(runner[0]);
+    let mut exec = process::Command::new(&runner[0]);
     exec.args(&runner[1..]);
 
     // Ensure detached launches always get their own session and null stdio
@@ -225,4 +218,24 @@ pub fn launch_app(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_command;
+
+    #[test]
+    fn split_command_handles_quotes() {
+        assert_eq!(
+            split_command("kitty --class \"fsel term\" -e", "terminal_launcher").unwrap(),
+            ["kitty", "--class", "fsel term", "-e"]
+        );
+    }
+
+    #[test]
+    fn split_command_allows_empty_strings() {
+        assert!(split_command("   ", "terminal_launcher")
+            .unwrap()
+            .is_empty());
+    }
 }

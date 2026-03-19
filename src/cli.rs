@@ -67,6 +67,8 @@ Control Flags:
   -r, --replace          Replace running fsel/cclip instance
   -d, --detach           Detach launched applications (GUI-safe)
   -v, --verbose          Increase verbosity (repeatable)
+      --launch-prefix <CMD>
+                          Launch apps through a custom command prefix
       --systemd-run      Launch via systemd-run --user --scope
       --uwsm             Launch via uwsm app
 
@@ -105,6 +107,7 @@ Usage:
 │  ├─ -r, --replace                Replace running fsel/cclip instance
 │  ├─ -d, --detach                 Detach launched applications (GUI-safe)
 │  ├─ -v, --verbose                Increase verbosity (repeatable)
+│  ├─ --launch-prefix <CMD>        Launch apps through a custom command prefix
 │  ├─ --systemd-run                Launch via systemd-run --user --scope
 │  ├─ --uwsm                       Launch via uwsm app
 │  ├─ --no-exec                    Print selection to stdout instead of launching
@@ -172,8 +175,6 @@ pub struct Opts {
     pub terminal_launcher: String,
     /// Replace already running instance of Fsel
     pub replace: bool,
-    /// Enable Sway integration (default when `$SWAYSOCK` is not empty)
-    pub sway: bool,
     /// Cursor character for the search
     pub cursor: String,
     /// Verbosity level
@@ -184,6 +185,10 @@ pub struct Opts {
     pub disable_mouse: bool,
     /// Print selected application to stdout instead of launching
     pub no_exec: bool,
+    /// Launch applications using a custom command prefix
+    pub launch_prefix: Vec<String>,
+    /// True when launch_prefix was explicitly configured as a custom prefix
+    pub launch_prefix_set: bool,
     /// Launch applications using systemd-run --user --scope
     pub systemd_run: bool,
     /// Launch applications using uwsm app
@@ -312,12 +317,13 @@ impl Default for Opts {
             refresh_cache: false,
             terminal_launcher: "alacritty -e".to_string(),
             replace: false,
-            sway: false,
             cursor: "█".to_string(),
             verbose: None,
             hard_stop: false,
             disable_mouse: false,
             no_exec: false,
+            launch_prefix: vec![],
+            launch_prefix_set: false,
             systemd_run: false,
             uwsm: false,
             detach: false,
@@ -460,13 +466,28 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         parse_ranking_mode(&fsel_config.general.ranking_mode).unwrap_or(RankingMode::Frecency);
     default.pinned_order_mode = parse_pinned_order_mode(&fsel_config.general.pinned_order)
         .unwrap_or(PinnedOrderMode::Ranking);
-    default.sway = fsel_config.general.sway;
     default.systemd_run = fsel_config.general.systemd_run;
     default.uwsm = fsel_config.general.uwsm;
     default.detach = fsel_config.general.detach;
     default.no_exec = fsel_config.general.no_exec;
     default.confirm_first_launch = fsel_config.general.confirm_first_launch;
     default.prefix_depth = fsel_config.general.prefix_depth;
+    if [default.systemd_run, default.uwsm]
+        .iter()
+        .filter(|&&x| x)
+        .count()
+        > 1
+    {
+        eprintln!("Error: Only one launch method can be specified at a time");
+        eprintln!("Available methods: --systemd-run, --uwsm");
+        std::process::exit(1);
+    }
+    if default.systemd_run {
+        set_systemd_run(&mut default);
+    }
+    if default.uwsm {
+        set_uwsm(&mut default);
+    }
 
     // apply [app_launcher] section overrides if they exist
     if let Some(filter) = fsel_config.app_launcher.filter_desktop {
@@ -477,6 +498,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
     if let Some(hide) = fsel_config.app_launcher.hide_before_typing {
         default.hide_before_typing = hide;
+    }
+    if let Some(prefix) = fsel_config.app_launcher.launch_prefix {
+        set_launch_prefix(&mut default, prefix);
     }
     if let Some(ref mode) = fsel_config.app_launcher.match_mode {
         default.match_mode = match mode.as_str() {
@@ -713,6 +737,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     // 4. Parse CLI Overrides
     let mut parser = lexopt::Parser::from_env();
+    let mut cli_launch_methods = 0;
 
     // Check for -ss option first and handle it specially
     let args: Vec<String> = env::args().collect();
@@ -742,19 +767,11 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
         }
     }
 
-    // Check for SWAYSOCK (this should override config if present)
-    if let Ok(_socket) = env::var("SWAYSOCK") {
-        default.sway = true;
-    }
-
     while let Some(arg) = parser.next()? {
         match arg {
             Short('t') | Long("tty") => {
                 default.tty = true;
                 default.terminal_launcher.clear();
-            }
-            Short('s') | Long("nosway") => {
-                default.sway = false;
             }
             Short('r') | Long("replace") => {
                 default.replace = true;
@@ -775,11 +792,26 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             Long("no-exec") => {
                 default.no_exec = true;
             }
+            Long("launch-prefix") => {
+                cli_launch_methods += 1;
+                set_launch_prefix(
+                    &mut default,
+                    parse_launch_prefix(
+                        &parser
+                            .value()?
+                            .into_string()
+                            .map_err(|_| "Launch prefix must be valid UTF-8")?,
+                    )
+                    .map_err(lexopt::Error::from)?,
+                );
+            }
             Long("systemd-run") => {
-                default.systemd_run = true;
+                cli_launch_methods += 1;
+                set_systemd_run(&mut default);
             }
             Long("uwsm") => {
-                default.uwsm = true;
+                cli_launch_methods += 1;
+                set_uwsm(&mut default);
             }
             Short('d') | Long("detach") => {
                 default.detach = true;
@@ -969,28 +1001,22 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
             _ => {
                 // Handle common misspellings and provide helpful error messages
                 let error_msg = match &arg {
-                    Long(name) => {
-                        match *name {
-                            "clip" => "Unknown option '--clip'. Did you mean '--cclip'?",
-                            "menu" => "Unknown option '--menu'. Did you mean '--dmenu'?",
-                            "dme" | "dmen" => "Unknown option. Did you mean '--dmenu'?",
-                            "cc" | "ccli" => "Unknown option. Did you mean '--cclip'?",
-                            "sway" => "Unknown option '--sway'. Sway integration is enabled by default when SWAYSOCK is set. Use '-s' or '--nosway' to disable it.",
-                            "help" => "Unknown option '--help'. Use '-h' or '--help'.",
-                            "version" => "Unknown option '--version'. Use '-V' or '--version'.",
-                            _ => "Unknown option. Use '-h' or '--help' to see available options."
-                        }
-                    }
-                    Short(c) => {
-                        match c {
-                            'C' => "Unknown option '-C'. Did you mean '-c' for --config?",
-                            'P' => "Unknown option '-P'. Did you mean '-p' for --program?",
-                            'S' => "Unknown option '-S'. Did you mean '-s' for --nosway?",
-                            'R' => "Unknown option '-R'. Did you mean '-r' for --replace?",
-                            'H' => "Unknown option '-H'. Did you mean '-h' for --help?",
-                            _ => "Unknown option. Use '-h' or '--help' to see available options."
-                        }
-                    }
+                    Long(name) => match *name {
+                        "clip" => "Unknown option '--clip'. Did you mean '--cclip'?",
+                        "menu" => "Unknown option '--menu'. Did you mean '--dmenu'?",
+                        "dme" | "dmen" => "Unknown option. Did you mean '--dmenu'?",
+                        "cc" | "ccli" => "Unknown option. Did you mean '--cclip'?",
+                        "help" => "Unknown option '--help'. Use '-h' or '--help'.",
+                        "version" => "Unknown option '--version'. Use '-V' or '--version'.",
+                        _ => "Unknown option. Use '-h' or '--help' to see available options.",
+                    },
+                    Short(c) => match c {
+                        'C' => "Unknown option '-C'. Did you mean '-c' for --config?",
+                        'P' => "Unknown option '-P'. Did you mean '-p' for --program?",
+                        'R' => "Unknown option '-R'. Did you mean '-r' for --replace?",
+                        'H' => "Unknown option '-H'. Did you mean '-h' for --help?",
+                        _ => "Unknown option. Use '-h' or '--help' to see available options.",
+                    },
                     Value(_val) => {
                         // Unexpected value
                         return Err(arg.unexpected());
@@ -1000,7 +1026,6 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 eprintln!("Error: {}", error_msg);
                 eprintln!();
                 eprintln!("Available options:");
-                eprintln!("  -s, --nosway           Disable Sway integration");
                 eprintln!("  -c, --config <file>    Specify config file");
                 eprintln!("  -r, --replace          Replace existing instance (fsel/cclip only)");
                 eprintln!("  -p, --program [name]   Launch program directly (optional)");
@@ -1011,6 +1036,7 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 eprintln!("      --dmenu            Dmenu mode");
                 eprintln!("      --cclip            Clipboard history mode");
                 eprintln!("      --no-exec          Print command instead of running");
+                eprintln!("      --launch-prefix    Use a custom launch prefix");
                 eprintln!("      --systemd-run      Use systemd-run");
                 eprintln!("      --uwsm             Use uwsm");
                 eprintln!("  -d, --detach           Detach from terminal");
@@ -1080,18 +1106,14 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
     // Validate flag conflicts - no-exec overrides all launch methods
     if default.no_exec {
-        if default.sway || default.systemd_run || default.uwsm {
+        if active_launch_method_count(&default) > 0 {
             eprintln!("Warning: --no-exec overrides other launch method flags");
         }
     } else {
         // Check for mutually exclusive launch methods
-        let launch_methods = [default.systemd_run, default.uwsm, default.sway]
-            .iter()
-            .filter(|&&x| x)
-            .count();
-        if launch_methods > 1 {
+        if cli_launch_methods > 1 || active_launch_method_count(&default) > 1 {
             eprintln!("Error: Only one launch method can be specified at a time");
-            eprintln!("Available methods: --systemd-run, --uwsm, Sway integration (auto-detected)");
+            eprintln!("Available methods: --launch-prefix, --systemd-run, --uwsm");
             std::process::exit(1);
         }
     }
@@ -1101,6 +1123,55 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
 // Re-export PanelPosition from ui module for backwards compatibility
 pub use crate::ui::PanelPosition;
+
+fn systemd_run_prefix() -> Vec<String> {
+    vec!["systemd-run".into(), "--user".into(), "--scope".into()]
+}
+
+fn uwsm_prefix() -> Vec<String> {
+    vec!["uwsm".into(), "app".into(), "--".into()]
+}
+
+fn clear_launch_method(opts: &mut Opts) {
+    opts.systemd_run = false;
+    opts.uwsm = false;
+    opts.launch_prefix_set = false;
+    opts.launch_prefix.clear();
+}
+
+fn set_launch_prefix(opts: &mut Opts, prefix: Vec<String>) {
+    clear_launch_method(opts);
+    opts.launch_prefix_set = !prefix.is_empty();
+    opts.launch_prefix = prefix;
+}
+
+fn set_systemd_run(opts: &mut Opts) {
+    clear_launch_method(opts);
+    opts.systemd_run = true;
+    opts.launch_prefix = systemd_run_prefix();
+}
+
+fn set_uwsm(opts: &mut Opts) {
+    clear_launch_method(opts);
+    opts.uwsm = true;
+    opts.launch_prefix = uwsm_prefix();
+}
+
+fn active_launch_method_count(opts: &Opts) -> usize {
+    [opts.systemd_run, opts.uwsm, opts.launch_prefix_set]
+        .iter()
+        .filter(|&&x| x)
+        .count()
+}
+
+fn parse_launch_prefix(value: &str) -> Result<Vec<String>, &'static str> {
+    let prefix =
+        shell_words::split(value).map_err(|_| "Launch prefix must use valid shell syntax")?;
+    if prefix.is_empty() {
+        return Err("Launch prefix cannot be empty");
+    }
+    Ok(prefix)
+}
 
 /// Parses a [String] into a ratatui [color]
 ///
@@ -1236,5 +1307,36 @@ fn parse_pinned_order_mode(value: &str) -> Option<PinnedOrderMode> {
         "oldest_pinned" | "oldest" => Some(PinnedOrderMode::OldestPinned),
         "newest_pinned" | "newest" | "last_pinned" => Some(PinnedOrderMode::NewestPinned),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        active_launch_method_count, parse_launch_prefix, set_launch_prefix, set_systemd_run, Opts,
+    };
+
+    #[test]
+    fn parse_launch_prefix_supports_shell_words() {
+        assert_eq!(
+            parse_launch_prefix("runapp --tag \"gui apps\" --").unwrap(),
+            ["runapp", "--tag", "gui apps", "--"]
+        );
+    }
+
+    #[test]
+    fn parse_launch_prefix_rejects_empty_values() {
+        assert!(parse_launch_prefix("").is_err());
+    }
+
+    #[test]
+    fn later_launch_method_overrides_previous_state() {
+        let mut opts = Opts::default();
+        set_systemd_run(&mut opts);
+        set_launch_prefix(&mut opts, vec!["runapp".into(), "--".into()]);
+        assert_eq!(active_launch_method_count(&opts), 1);
+        assert!(!opts.systemd_run);
+        assert!(!opts.uwsm);
+        assert!(opts.launch_prefix_set);
     }
 }
