@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 /// Resolve an icon name to its filesystem path using XDG theme specs
-#[allow(dead_code)
+#[allow(dead_code)]
 pub fn lookup(name: &str, size: u16) -> Option<PathBuf> {
     // Handle absolute paths if provided directly in the Icon field
     if name.starts_with('/') {
@@ -10,7 +10,7 @@ pub fn lookup(name: &str, size: u16) -> Option<PathBuf> {
             return Some(path);
         }
     }
-}
+
 
     // Get icon theme
     let theme = linicon_theme::get_icon_theme().unwrap_or_else(|| "hicolor".to_string());
