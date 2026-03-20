@@ -23,6 +23,13 @@ fsel -ss firefox
 # Direct launch (no UI)
 fsel -p firefox
 
+# Use custom config
+fsel -c ~/.config/fsel/test-config.toml
+fsel --config ~/.config/fsel/test-config.toml
+
+# Hide list until typing
+fsel --hide-before-typing
+
 # Show CLI tools from $PATH
 fsel --list-executables-in-path
 
@@ -69,6 +76,7 @@ fsel --uwsm --detach          # Fully detached via uwsm
 # Detach from terminal (prevents apps from being killed when terminal closes)
 # Useful for apps like Discord or Steam; works standalone or with launch prefixes,
 # --systemd-run, or --uwsm
+fsel -d
 fsel --detach
 
 # Print command instead of running
