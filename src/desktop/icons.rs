@@ -10,6 +10,7 @@ pub fn lookup(name: &str, size: u16) -> Option<PathBuf> {
             return Some(path);
         }
     }
+}
 
     // Get icon theme
     let theme = linicon_theme::get_icon_theme().unwrap_or_else(|| "hicolor".to_string());
