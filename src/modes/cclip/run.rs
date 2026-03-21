@@ -1729,20 +1729,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::effective_content_height;
-
-    #[test]
-    fn effective_content_height_allows_zero() {
-        assert_eq!(effective_content_height(40, 0), 0);
-    }
-
-    #[test]
-    fn effective_content_height_keeps_visible_panels_usable() {
-        assert_eq!(effective_content_height(20, 1), 3);
-    }
-}
 /// Helper to reload clipboard items and restore selection/scroll
 fn reload_and_restore(
     ui: &mut DmenuUI,
@@ -1825,5 +1811,20 @@ fn reload_and_restore(
     let max_scroll = ui.shown.len().saturating_sub(visible_height);
     if ui.scroll_offset > max_scroll {
         ui.scroll_offset = max_scroll;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_content_height;
+
+    #[test]
+    fn effective_content_height_allows_zero() {
+        assert_eq!(effective_content_height(40, 0), 0);
+    }
+
+    #[test]
+    fn effective_content_height_keeps_visible_panels_usable() {
+        assert_eq!(effective_content_height(20, 1), 3);
     }
 }
