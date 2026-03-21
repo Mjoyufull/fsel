@@ -53,7 +53,8 @@ header_title_color = "LightBlue"
 
 # ===== LAYOUT =====
 
-# Top panel height as percentage (10-70%)
+# Top panel height as percentage (0-70%)
+# Set to 0 to hide the title/content panel entirely
 title_panel_height_percent = 30
 
 # Input panel height in lines (1-10)

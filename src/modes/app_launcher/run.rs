@@ -427,7 +427,10 @@ pub async fn run(cli: Opts) -> Result<()> {
                     Event::Input(key) => {
                          // figure out how many items actually fit on screen
                          let total_height = terminal.size()?.height;
-                         let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
+                         let title_height = crate::ui::effective_title_height(
+                             total_height,
+                             cli.title_panel_height_percent,
+                         );
                          let input_height = cli.input_panel_height;
                          let apps_panel_height = total_height.saturating_sub(title_height + input_height);
                          let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for borders
@@ -512,9 +515,10 @@ pub async fn run(cli: Opts) -> Result<()> {
 
                         // Calculate panel positions based on title_panel_position
                         let total_height = terminal.size()?.height;
-                        let title_height = (total_height as f32 * cli.title_panel_height_percent as f32
-                            / 100.0)
-                            .round() as u16;
+                        let title_height = crate::ui::effective_title_height(
+                            total_height,
+                            cli.title_panel_height_percent,
+                        );
                         let input_height = cli.input_panel_height;
                         let title_panel_position = cli
                             .title_panel_position

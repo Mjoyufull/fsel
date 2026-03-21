@@ -5,6 +5,7 @@ mod input;
 mod keybinds;
 mod types;
 
+pub(crate) use app_ui::effective_title_height;
 pub use app_ui::UI;
 pub use dmenu_ui::{DmenuUI, TagMode};
 pub use graphics::{DisplayState, GraphicsAdapter, ImageManager, DISPLAY_STATE};
