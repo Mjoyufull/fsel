@@ -16,6 +16,10 @@ fn effective_content_height(total_height: u16, content_panel_percent: u16) -> u1
     }
 }
 
+fn items_panel_height(total_height: u16, content_height: u16, input_panel_height: u16) -> u16 {
+    total_height.saturating_sub(content_height.saturating_add(input_panel_height))
+}
+
 /// Run dmenu mode
 pub fn run(cli: &Opts) -> Result<()> {
     use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
@@ -495,8 +499,11 @@ pub fn run(cli: &Opts) -> Result<()> {
                             // Use same calculation as rendering code
                             let content_height =
                                 effective_content_height(total_height, content_panel_height);
-                            let items_panel_height =
-                                total_height.saturating_sub(content_height + input_panel_height);
+                            let items_panel_height = items_panel_height(
+                                total_height,
+                                content_height,
+                                input_panel_height,
+                            );
                             let max_visible = items_panel_height.saturating_sub(2) as usize;
 
                             if max_visible > 0 && ui.shown.len() > max_visible {
@@ -532,8 +539,11 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 // Use same calculation as rendering code
                                 let content_height =
                                     effective_content_height(total_height, content_panel_height);
-                                let items_panel_height = total_height
-                                    .saturating_sub(content_height + input_panel_height);
+                                let items_panel_height = items_panel_height(
+                                    total_height,
+                                    content_height,
+                                    input_panel_height,
+                                );
                                 let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
 
                                 if max_visible == 0 {
@@ -578,8 +588,11 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 // Use same calculation as rendering code
                                 let content_height =
                                     effective_content_height(total_height, content_panel_height);
-                                let items_panel_height = total_height
-                                    .saturating_sub(content_height + input_panel_height);
+                                let items_panel_height = items_panel_height(
+                                    total_height,
+                                    content_height,
+                                    input_panel_height,
+                                );
                                 let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
 
                                 if max_visible == 0 {
@@ -621,7 +634,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                 // Use same calculation as rendering code
                 let content_height = effective_content_height(total_height, content_panel_height);
                 let items_panel_height =
-                    total_height.saturating_sub(content_height + input_panel_height);
+                    items_panel_height(total_height, content_height, input_panel_height);
 
                 // Get content panel position to calculate items panel position
                 let content_panel_position = get_dmenu_panel_position(
@@ -730,6 +743,7 @@ pub fn run(cli: &Opts) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::effective_content_height;
+    use super::items_panel_height;
 
     #[test]
     fn effective_content_height_allows_zero() {
@@ -739,5 +753,15 @@ mod tests {
     #[test]
     fn effective_content_height_keeps_visible_panels_usable() {
         assert_eq!(effective_content_height(20, 1), 3);
+    }
+
+    #[test]
+    fn items_panel_height_saturates_when_panels_exceed_total_height() {
+        assert_eq!(items_panel_height(10, u16::MAX, u16::MAX), 0);
+    }
+
+    #[test]
+    fn items_panel_height_matches_normal_layout_math() {
+        assert_eq!(items_panel_height(30, 10, 3), 17);
     }
 }
