@@ -106,11 +106,11 @@ That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@3.3.0-kiwicrab
+    $ cargo install fsel@3.3.1-kiwicrab
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@3.3.0-kiwicrab --force
+    $ cargo install fsel@3.3.1-kiwicrab --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
