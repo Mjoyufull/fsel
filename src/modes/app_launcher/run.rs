@@ -30,9 +30,9 @@ pub async fn run(cli: Opts) -> Result<()> {
     }
     // Less than 2 characters, ignore and continue to TUI
 
-    crate::setup_terminal(cli.disable_mouse)?;
+    crate::ui::terminal::setup_terminal(cli.disable_mouse)?;
     defer! {
-        let _ = crate::shutdown_terminal(cli.disable_mouse);
+        let _ = crate::ui::terminal::shutdown_terminal(cli.disable_mouse);
     }
     let db: std::sync::Arc<redb::Database>;
     let lock_path: path::PathBuf;
@@ -69,7 +69,8 @@ pub async fn run(cli: Opts) -> Result<()> {
                         target_pids.insert(pid);
                     }
 
-                    if let Ok(holders) = crate::find_processes_holding_file(&hist_db_file) {
+                    if let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file)
+                    {
                         target_pids.extend(holders);
                     }
 
@@ -113,7 +114,9 @@ pub async fn run(cli: Opts) -> Result<()> {
                         }
                     }
 
-                    if let Ok(mut remaining) = crate::find_processes_holding_file(&hist_db_file) {
+                    if let Ok(mut remaining) =
+                        crate::process::find_processes_holding_file(&hist_db_file)
+                    {
                         remaining.retain(|pid| !target_pids.contains(pid));
 
                         if !remaining.is_empty() {
@@ -127,7 +130,7 @@ pub async fn run(cli: Opts) -> Result<()> {
                     return Err(eyre!("Fsel is already running"));
                 }
             } else if cli.replace
-                && let Ok(holders) = crate::find_processes_holding_file(&hist_db_file)
+                && let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file)
                 && !holders.is_empty()
             {
                 for pid in holders.clone() {
@@ -170,7 +173,8 @@ pub async fn run(cli: Opts) -> Result<()> {
                     }
                 }
 
-                if let Ok(final_holders) = crate::find_processes_holding_file(&hist_db_file)
+                if let Ok(final_holders) =
+                    crate::process::find_processes_holding_file(&hist_db_file)
                     && !final_holders.is_empty()
                 {
                     return Err(eyre::eyre!(
@@ -638,7 +642,7 @@ pub async fn run(cli: Opts) -> Result<()> {
                     eprintln!("Failed to record access: {}", e);
                 }
 
-                crate::shutdown_terminal(cli.disable_mouse)?;
+                crate::ui::terminal::shutdown_terminal(cli.disable_mouse)?;
 
                 // Launch
                 // Handle --no-exec
@@ -654,7 +658,7 @@ pub async fn run(cli: Opts) -> Result<()> {
     }
 
     if !state.should_launch {
-        crate::shutdown_terminal(cli.disable_mouse)?;
+        crate::ui::terminal::shutdown_terminal(cli.disable_mouse)?;
     }
 
     // Log session end if in test mode

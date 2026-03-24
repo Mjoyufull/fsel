@@ -6,11 +6,7 @@
 use crate::cli::Opts;
 use crate::common::Item;
 use crate::ui::{DmenuUI, InputConfig, InputEvent as Event, TagMode};
-use crossterm::{
-    ExecutableCommand,
-    event::{DisableMouseCapture, EnableMouseCapture, MouseButton, MouseEventKind},
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::{MouseButton, MouseEventKind};
 use eyre::{Result, WrapErr, eyre};
 use futures::FutureExt;
 use ratatui::Terminal;
@@ -192,29 +188,16 @@ pub async fn run(cli: &Opts) -> Result<()> {
         .collect();
 
     // Setup terminal
-    enable_raw_mode().wrap_err("Failed to enable raw mode")?;
-    io::stderr()
-        .execute(EnterAlternateScreen)
-        .wrap_err("Failed to enter alternate screen")?;
-
     // Get effective disable_mouse setting with cclip -> dmenu -> regular inheritance
     let disable_mouse = cli
         .cclip_disable_mouse
         .or(cli.dmenu_disable_mouse)
         .unwrap_or(cli.disable_mouse);
-    if !disable_mouse {
-        io::stderr()
-            .execute(EnableMouseCapture)
-            .wrap_err("Failed to enable mouse capture")?;
-    }
+    crate::ui::terminal::setup_terminal(disable_mouse)?;
 
     // Ensure cleanup on exit
     defer! {
-        if !disable_mouse {
-            let _ = io::stderr().execute(DisableMouseCapture);
-        }
-        let _ = io::stderr().execute(LeaveAlternateScreen);
-        let _ = disable_raw_mode();
+        let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
     }
 
     // Initialize terminal using stderr to keep stdout clean
@@ -1346,12 +1329,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                         .wrap_err("Failed to show cursor");
                                                     show_cursor_result?;
                                                     drop(terminal);
-                                                    if !disable_mouse {
-                                                        let _ =
-                                                            io::stderr().execute(DisableMouseCapture);
-                                                    }
-                                                    let _ = io::stderr().execute(LeaveAlternateScreen);
-                                                    let _ = disable_raw_mode();
+                                                    let _ = crate::ui::terminal::shutdown_terminal(
+                                                        disable_mouse,
+                                                    );
                                                     return Ok(());
                                                 }
                                                 Err(e) => {
@@ -1704,11 +1684,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                 terminal.show_cursor().wrap_err("Failed to show cursor");
                                             show_cursor_result?;
                                             drop(terminal);
-                                            if !disable_mouse {
-                                                let _ = io::stderr().execute(DisableMouseCapture);
-                                            }
-                                            let _ = io::stderr().execute(LeaveAlternateScreen);
-                                            let _ = disable_raw_mode();
+                                            let _ =
+                                                crate::ui::terminal::shutdown_terminal(disable_mouse);
                                             return Ok(());
                                         }
                                         Err(e) => {

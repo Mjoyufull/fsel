@@ -3,6 +3,7 @@ mod dmenu_ui;
 mod graphics;
 mod input;
 mod keybinds;
+pub(crate) mod terminal;
 mod types;
 
 pub use app_ui::UI;

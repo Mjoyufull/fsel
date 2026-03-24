@@ -22,11 +22,6 @@ fn items_panel_height(total_height: u16, content_height: u16, input_panel_height
 
 /// Run dmenu mode
 pub fn run(cli: &Opts) -> Result<()> {
-    use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
-    use crossterm::{
-        ExecutableCommand,
-        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-    };
     use ratatui::Terminal;
     use ratatui::backend::CrosstermBackend;
     use ratatui::layout::{Alignment, Constraint, Direction, Layout};
@@ -68,26 +63,13 @@ pub fn run(cli: &Opts) -> Result<()> {
     );
 
     // Setup terminal
-    enable_raw_mode().wrap_err("Failed to enable raw mode")?;
-    io::stderr()
-        .execute(EnterAlternateScreen)
-        .wrap_err("Failed to enter alternate screen")?;
-
     // Get effective disable_mouse setting with dmenu -> regular inheritance
     let disable_mouse = cli.dmenu_disable_mouse.unwrap_or(cli.disable_mouse);
-    if !disable_mouse {
-        io::stderr()
-            .execute(EnableMouseCapture)
-            .wrap_err("Failed to enable mouse capture")?;
-    }
+    crate::ui::terminal::setup_terminal(disable_mouse)?;
 
     // Ensure cleanup on exit
     defer! {
-        if !disable_mouse {
-            let _ = io::stderr().execute(DisableMouseCapture);
-        }
-        let _ = io::stderr().execute(LeaveAlternateScreen);
-        let _ = disable_raw_mode();
+        let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
     }
 
     // Initialize terminal using stderr to keep stdout clean for dmenu output
@@ -423,11 +405,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
                                 drop(terminal);
-                                if !disable_mouse {
-                                    let _ = io::stderr().execute(DisableMouseCapture);
-                                }
-                                let _ = io::stderr().execute(LeaveAlternateScreen);
-                                let _ = disable_raw_mode();
+                                let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
 
                                 // Print to stdout
                                 println!("{}", output);
@@ -437,11 +415,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                             // No selection but have query - output the query itself (unless only_match is set)
                             terminal.show_cursor().wrap_err("Failed to show cursor")?;
                             drop(terminal);
-                            if !disable_mouse {
-                                let _ = io::stderr().execute(DisableMouseCapture);
-                            }
-                            let _ = io::stderr().execute(LeaveAlternateScreen);
-                            let _ = disable_raw_mode();
+                            let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
 
                             println!("{}", ui.query);
                             return Ok(());
@@ -699,11 +673,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 // Clean up terminal completely
                                 terminal.show_cursor().wrap_err("Failed to show cursor")?;
                                 drop(terminal); // Ensure terminal is fully cleaned up
-                                if !disable_mouse {
-                                    let _ = io::stderr().execute(DisableMouseCapture);
-                                }
-                                let _ = io::stderr().execute(LeaveAlternateScreen);
-                                let _ = disable_raw_mode();
+                                let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
 
                                 // Output selection in clean context
                                 println!("{}", selected_line);
