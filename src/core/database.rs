@@ -1,25 +1,14 @@
-use directories::ProjectDirs;
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr};
 use redb::{ReadableDatabase, ReadableTable};
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
 /// open the database, creating the directory if needed
 /// returns the database and the data directory path
 pub fn open_history_db() -> Result<(std::sync::Arc<redb::Database>, PathBuf)> {
-    let project_dirs = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME"))
-        .ok_or_else(|| eyre!("can't find data dir for {}", env!("CARGO_PKG_NAME")))?;
-
-    let mut db_path = project_dirs.data_local_dir().to_path_buf();
-
-    if !db_path.exists() {
-        fs::create_dir_all(&db_path)?;
-    }
-
-    let data_dir = db_path.clone();
-    db_path.push("hist_db.redb");
+    let data_dir = crate::app::paths::runtime_data_dir()?;
+    let db_path = crate::app::paths::history_db_path()?;
 
     let db = redb::Database::create(&db_path)
         .wrap_err_with(|| format!(

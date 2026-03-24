@@ -1,4 +1,3 @@
-use directories::ProjectDirs;
 use serde::Deserialize;
 use std::env;
 use std::fs;
@@ -291,12 +290,8 @@ impl FselConfig {
         let cli_provided = cli_config_path.is_some();
         let config_path = if let Some(path) = cli_config_path {
             Some(path)
-        } else if let Some(proj_dirs) = ProjectDirs::from("", "", "fsel") {
-            let mut p = proj_dirs.config_dir().to_path_buf();
-            p.push("config.toml");
-            Some(p)
         } else {
-            None
+            crate::app::paths::legacy_config_file_path()
         };
 
         // Load config from file or use defaults

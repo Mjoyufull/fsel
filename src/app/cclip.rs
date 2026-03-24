@@ -1,4 +1,3 @@
-use directories::ProjectDirs;
 use eyre::{WrapErr, eyre};
 use std::{fs, io, path};
 
@@ -25,17 +24,7 @@ pub(crate) fn run(cli: &cli::Opts) -> eyre::Result<()> {
         std::process::exit(1);
     }
 
-    let lock_path =
-        if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
-            let mut cache_dir = project_dirs.cache_dir().to_path_buf();
-            if !cache_dir.exists() {
-                fs::create_dir_all(&cache_dir)?;
-            }
-            cache_dir.push("fsel-cclip.lock");
-            cache_dir
-        } else {
-            return Err(eyre!("can't find cache dir for {}", env!("CARGO_PKG_NAME")));
-        };
+    let lock_path = super::paths::cclip_lock_path()?;
 
     let contents = match fs::read_to_string(&lock_path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),

@@ -5,6 +5,7 @@ use crate::modes;
 use crate::ui::terminal;
 
 mod cclip;
+pub(crate) mod paths;
 
 pub(crate) fn run() -> eyre::Result<()> {
     let cli = cli::parse()?;

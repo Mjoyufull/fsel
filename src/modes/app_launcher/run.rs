@@ -6,7 +6,6 @@ use eyre::{Result, WrapErr, eyre};
 use crate::ui::{InputConfig, InputEvent as Event, UI};
 
 use crate::core::state::{Message, State, sort_by_ranking};
-use directories::ProjectDirs;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use redb::ReadableTable;
@@ -35,105 +34,31 @@ pub async fn run(cli: Opts) -> Result<()> {
         let _ = crate::ui::terminal::shutdown_terminal(cli.disable_mouse);
     }
     let db: std::sync::Arc<redb::Database>;
-    let lock_path: path::PathBuf;
+    let data_dir = crate::app::paths::runtime_data_dir()?;
+    let hist_db_file = crate::app::paths::history_db_path()?;
+    let lock_path = crate::app::paths::launcher_lock_path()?;
 
-    // Open redb database
-    if let Some(project_dirs) = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME")) {
-        let data_dir = project_dirs.data_local_dir().to_path_buf();
+    // Check if Fsel is already running (mode-specific lock file) - BEFORE opening database
+    {
+        let contents = match fs::read_to_string(&lock_path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
+            Ok(c) => c,
+            Err(e) => return Err(e).wrap_err("Failed to read lockfile"),
+        };
 
-        if !data_dir.exists() {
-            // Create dir if it doesn't exist
-            if let Err(error) = fs::create_dir_all(&data_dir) {
-                return Err(eyre!("Failed to create data directory: {}", error));
-            }
-        }
+        if !contents.is_empty() {
+            if cli.replace {
+                let mut target_pids: BTreeSet<i32> = BTreeSet::new();
 
-        let hist_db_file = data_dir.join("hist_db.redb");
-
-        // Check if Fsel is already running (mode-specific lock file) - BEFORE opening database
-        {
-            let mut lock = data_dir.clone();
-            lock.push("fsel-fsel.lock");
-            lock_path = lock;
-            let contents = match fs::read_to_string(&lock_path) {
-                Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-                Ok(c) => c,
-                Err(e) => return Err(e).wrap_err("Failed to read lockfile"),
-            };
-
-            if !contents.is_empty() {
-                if cli.replace {
-                    let mut target_pids: BTreeSet<i32> = BTreeSet::new();
-
-                    if let Ok(pid) = contents.parse::<i32>() {
-                        target_pids.insert(pid);
-                    }
-
-                    if let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file)
-                    {
-                        target_pids.extend(holders);
-                    }
-
-                    for pid in target_pids.clone() {
-                        if let Err(e) = crate::process::kill_process_sigterm_result(pid)
-                            && e.raw_os_error() != Some(libc::ESRCH)
-                        {
-                            return Err(eyre!("Failed to kill process {}: {}", pid, e));
-                            // Log or handle error, but don't necessarily exit
-                        }
-
-                        const CHECK_INTERVAL_MS: u64 = 5;
-                        const TOTAL_WAIT_MS: u64 = 30;
-                        let mut waited_ms = 0u64;
-                        let mut escalated = false;
-
-                        loop {
-                            #[allow(unsafe_code)]
-                            let still_running = unsafe { libc::kill(pid, 0) == 0 };
-
-                            if !still_running {
-                                break;
-                            }
-
-                            if !escalated {
-                                #[allow(unsafe_code)]
-                                unsafe {
-                                    let _ = libc::kill(pid, libc::SIGKILL);
-                                }
-                                escalated = true;
-                            }
-
-                            if waited_ms >= TOTAL_WAIT_MS {
-                                return Err(eyre::eyre!(
-                                    "Existing fsel instance (pid {pid}) refused to exit"
-                                ));
-                            }
-
-                            std::thread::sleep(std::time::Duration::from_millis(CHECK_INTERVAL_MS));
-                            waited_ms += CHECK_INTERVAL_MS;
-                        }
-                    }
-
-                    if let Ok(mut remaining) =
-                        crate::process::find_processes_holding_file(&hist_db_file)
-                    {
-                        remaining.retain(|pid| !target_pids.contains(pid));
-
-                        if !remaining.is_empty() {
-                            return Err(eyre::eyre!(
-                                "Existing fsel instance (pid(s) {:?}) refused to exit",
-                                remaining
-                            ));
-                        }
-                    }
-                } else {
-                    return Err(eyre!("Fsel is already running"));
+                if let Ok(pid) = contents.parse::<i32>() {
+                    target_pids.insert(pid);
                 }
-            } else if cli.replace
-                && let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file)
-                && !holders.is_empty()
-            {
-                for pid in holders.clone() {
+
+                if let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file) {
+                    target_pids.extend(holders);
+                }
+
+                for pid in target_pids.clone() {
                     if let Err(e) = crate::process::kill_process_sigterm_result(pid)
                         && e.raw_os_error() != Some(libc::ESRCH)
                     {
@@ -173,116 +98,168 @@ pub async fn run(cli: Opts) -> Result<()> {
                     }
                 }
 
-                if let Ok(final_holders) =
+                if let Ok(mut remaining) =
                     crate::process::find_processes_holding_file(&hist_db_file)
-                    && !final_holders.is_empty()
                 {
-                    return Err(eyre::eyre!(
-                        "Existing fsel instance (pid(s) {:?}) refused to exit",
-                        final_holders
-                    ));
+                    remaining.retain(|pid| !target_pids.contains(pid));
+
+                    if !remaining.is_empty() {
+                        return Err(eyre::eyre!(
+                            "Existing fsel instance (pid(s) {:?}) refused to exit",
+                            remaining
+                        ));
+                    }
                 }
+            } else {
+                return Err(eyre!("Fsel is already running"));
             }
-
-            if let Err(err) = fs::remove_file(&lock_path)
-                && err.kind() != io::ErrorKind::NotFound
-            {
-                return Err(err).wrap_err("Failed to remove existing lockfile");
-            }
-
-            let mut lock_file = fs::File::create(&lock_path)?;
-            let pid;
-            #[allow(unsafe_code)]
-            unsafe {
-                pid = libc::getpid();
-            }
-            use std::io::Write;
-            lock_file.write_all(pid.to_string().as_bytes())?;
-        }
-
-        // Lock file cleanup guard
-        struct LockGuard(path::PathBuf);
-        impl Drop for LockGuard {
-            fn drop(&mut self) {
-                let _ = fs::remove_file(&self.0);
-            }
-        }
-        let _lock_guard = LockGuard(lock_path.clone());
-
-        let mut db_instance = redb::Database::create(&hist_db_file);
-        if let Err(err) = &db_instance
-            && cli.replace
-            && err.to_string().contains("Cannot acquire lock")
+        } else if cli.replace
+            && let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file)
+            && !holders.is_empty()
         {
-            std::thread::sleep(std::time::Duration::from_millis(15));
-            db_instance = redb::Database::create(&hist_db_file);
-        }
-
-        let db_instance = db_instance
-            .wrap_err_with(|| format!("Failed to open database at {:?}", hist_db_file))?;
-
-        db = std::sync::Arc::new(db_instance);
-
-        if cli.clear_history {
-            // Clear all tables in redb
-            const HISTORY_TABLE: redb::TableDefinition<&str, u64> =
-                redb::TableDefinition::new("history");
-            const PINNED_TABLE: redb::TableDefinition<&str, &[u8]> =
-                redb::TableDefinition::new("pinned_apps");
-
-            let write_txn = db.begin_write().wrap_err("Error starting transaction")?;
-            {
-                let mut history_table = write_txn.open_table(HISTORY_TABLE)?;
-                let mut pinned_table = write_txn.open_table(PINNED_TABLE)?;
-
-                // Collect keys first, then delete
-                let history_keys: Vec<String> = history_table
-                    .iter()?
-                    .filter_map(|r| r.ok().map(|(k, _)| k.value().to_string()))
-                    .collect();
-                let pinned_keys: Vec<String> = pinned_table
-                    .iter()?
-                    .filter_map(|r| r.ok().map(|(k, _)| k.value().to_string()))
-                    .collect();
-
-                for key in history_keys {
-                    history_table.remove(key.as_str())?;
+            for pid in holders.clone() {
+                if let Err(e) = crate::process::kill_process_sigterm_result(pid)
+                    && e.raw_os_error() != Some(libc::ESRCH)
+                {
+                    return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                    // Log or handle error, but don't necessarily exit
                 }
-                for key in pinned_keys {
-                    pinned_table.remove(key.as_str())?;
+
+                const CHECK_INTERVAL_MS: u64 = 5;
+                const TOTAL_WAIT_MS: u64 = 30;
+                let mut waited_ms = 0u64;
+                let mut escalated = false;
+
+                loop {
+                    #[allow(unsafe_code)]
+                    let still_running = unsafe { libc::kill(pid, 0) == 0 };
+
+                    if !still_running {
+                        break;
+                    }
+
+                    if !escalated {
+                        #[allow(unsafe_code)]
+                        unsafe {
+                            let _ = libc::kill(pid, libc::SIGKILL);
+                        }
+                        escalated = true;
+                    }
+
+                    if waited_ms >= TOTAL_WAIT_MS {
+                        return Err(eyre::eyre!(
+                            "Existing fsel instance (pid {pid}) refused to exit"
+                        ));
+                    }
+
+                    std::thread::sleep(std::time::Duration::from_millis(CHECK_INTERVAL_MS));
+                    waited_ms += CHECK_INTERVAL_MS;
                 }
             }
-            write_txn.commit().wrap_err("Error clearing database")?;
 
-            println!("Database cleared succesfully!");
-            println!(
-                "To fully remove the database, delete {}",
-                project_dirs.data_local_dir().display()
-            );
-            // Lock file cleanup is handled by LockGuard when it goes out of scope
-            return Ok(());
+            if let Ok(final_holders) = crate::process::find_processes_holding_file(&hist_db_file)
+                && !final_holders.is_empty()
+            {
+                return Err(eyre::eyre!(
+                    "Existing fsel instance (pid(s) {:?}) refused to exit",
+                    final_holders
+                ));
+            }
         }
 
-        if cli.clear_cache {
-            let cache = crate::core::cache::DesktopCache::new(db.clone())?;
-            cache.clear().wrap_err("Error clearing cache")?;
-            println!("Desktop file cache cleared successfully!");
-            return Ok(());
+        if let Err(err) = fs::remove_file(&lock_path)
+            && err.kind() != io::ErrorKind::NotFound
+        {
+            return Err(err).wrap_err("Failed to remove existing lockfile");
         }
 
-        if cli.refresh_cache {
-            let cache = crate::core::cache::DesktopCache::new(db.clone())?;
-            // Just clear the file list, parsed apps stay cached
-            cache.clear_file_list().wrap_err("Error refreshing cache")?;
-            println!("Desktop file list refreshed - will rescan on next launch!");
-            return Ok(());
+        let mut lock_file = fs::File::create(&lock_path)?;
+        let pid;
+        #[allow(unsafe_code)]
+        unsafe {
+            pid = libc::getpid();
         }
-    } else {
-        return Err(eyre!(
-            "can't find data dir for {}, is your system broken?",
-            env!("CARGO_PKG_NAME")
-        ));
-    };
+        use std::io::Write;
+        lock_file.write_all(pid.to_string().as_bytes())?;
+    }
+
+    // Lock file cleanup guard
+    struct LockGuard(path::PathBuf);
+    impl Drop for LockGuard {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+    let _lock_guard = LockGuard(lock_path.clone());
+
+    let mut db_instance = redb::Database::create(&hist_db_file);
+    if let Err(err) = &db_instance
+        && cli.replace
+        && err.to_string().contains("Cannot acquire lock")
+    {
+        std::thread::sleep(std::time::Duration::from_millis(15));
+        db_instance = redb::Database::create(&hist_db_file);
+    }
+
+    let db_instance =
+        db_instance.wrap_err_with(|| format!("Failed to open database at {:?}", hist_db_file))?;
+
+    db = std::sync::Arc::new(db_instance);
+
+    if cli.clear_history {
+        // Clear all tables in redb
+        const HISTORY_TABLE: redb::TableDefinition<&str, u64> =
+            redb::TableDefinition::new("history");
+        const PINNED_TABLE: redb::TableDefinition<&str, &[u8]> =
+            redb::TableDefinition::new("pinned_apps");
+
+        let write_txn = db.begin_write().wrap_err("Error starting transaction")?;
+        {
+            let mut history_table = write_txn.open_table(HISTORY_TABLE)?;
+            let mut pinned_table = write_txn.open_table(PINNED_TABLE)?;
+
+            // Collect keys first, then delete
+            let history_keys: Vec<String> = history_table
+                .iter()?
+                .filter_map(|r| r.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+            let pinned_keys: Vec<String> = pinned_table
+                .iter()?
+                .filter_map(|r| r.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
+
+            for key in history_keys {
+                history_table.remove(key.as_str())?;
+            }
+            for key in pinned_keys {
+                pinned_table.remove(key.as_str())?;
+            }
+        }
+        write_txn.commit().wrap_err("Error clearing database")?;
+
+        println!("Database cleared succesfully!");
+        println!(
+            "To fully remove the database, delete {}",
+            data_dir.display()
+        );
+        // Lock file cleanup is handled by LockGuard when it goes out of scope
+        return Ok(());
+    }
+
+    if cli.clear_cache {
+        let cache = crate::core::cache::DesktopCache::new(db.clone())?;
+        cache.clear().wrap_err("Error clearing cache")?;
+        println!("Desktop file cache cleared successfully!");
+        return Ok(());
+    }
+
+    if cli.refresh_cache {
+        let cache = crate::core::cache::DesktopCache::new(db.clone())?;
+        // Just clear the file list, parsed apps stay cached
+        cache.clear_file_list().wrap_err("Error refreshing cache")?;
+        println!("Desktop file list refreshed - will rescan on next launch!");
+        return Ok(());
+    }
 
     // Directories to look for applications (XDG Base Directory Specification)
     let mut dirs: Vec<path::PathBuf> = vec![];
