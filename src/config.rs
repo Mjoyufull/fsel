@@ -54,7 +54,7 @@ pub struct FselConfig {
     pub app_launcher: AppLauncherConfig,
 }
 
-/// Legacy [app_launcher] section for backward compatibility
+/// Legacy `[app_launcher]` section for backward compatibility
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct AppLauncherConfig {
     pub filter_desktop: Option<bool>,
@@ -588,10 +588,10 @@ impl FselConfig {
             cfg.app_launcher.hide_before_typing =
                 Some(val.parse().unwrap_or(cfg.general.hide_before_typing));
         }
-        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_LAUNCH_PREFIX") {
-            if let Ok(prefix) = shell_words::split(&val) {
-                cfg.app_launcher.launch_prefix = Some(prefix);
-            }
+        if let Ok(val) = env::var("FSEL_APP_LAUNCHER_LAUNCH_PREFIX")
+            && let Ok(prefix) = shell_words::split(&val)
+        {
+            cfg.app_launcher.launch_prefix = Some(prefix);
         }
         if let Ok(val) = env::var("FSEL_APP_LAUNCHER_MATCH_MODE") {
             cfg.app_launcher.match_mode = Some(val);

@@ -1,7 +1,7 @@
 // Clipboard database scanning functions
 
 use super::CclipItem;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use std::process::{Command, Stdio};
 
 /// Get clipboard history from cclip
@@ -116,7 +116,9 @@ pub fn check_cclip_database() -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.contains("unable to open database file") {
-            return Err(eyre!("cclip database not found. Make sure cclipd is running and has stored some clipboard history."));
+            return Err(eyre!(
+                "cclip database not found. Make sure cclipd is running and has stored some clipboard history."
+            ));
         } else {
             return Err(eyre!("cclip error: {}", stderr));
         }

@@ -1,5 +1,5 @@
 use directories::ProjectDirs;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 use redb::{ReadableDatabase, ReadableTable};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -181,10 +181,8 @@ pub fn load_pin_timestamps(db: &std::sync::Arc<redb::Database>) -> HashMap<Strin
         }
     }
 
-    if changed {
-        if let Err(e) = save_pinned_state(db, &pinned, &pin_timestamps) {
-            eprintln!("Warning: Failed to persist pin timestamps: {}", e);
-        }
+    if changed && let Err(e) = save_pinned_state(db, &pinned, &pin_timestamps) {
+        eprintln!("Warning: Failed to persist pin timestamps: {}", e);
     }
 
     pin_timestamps

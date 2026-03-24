@@ -7,24 +7,24 @@ use crate::cli::Opts;
 use crate::common::Item;
 use crate::ui::{DmenuUI, InputConfig, InputEvent as Event, TagMode};
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, MouseButton, MouseEventKind},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{DisableMouseCapture, EnableMouseCapture, MouseButton, MouseEventKind},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 use futures::FutureExt;
+use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
-use ratatui::Terminal;
 use scopeguard::defer;
 use std::collections::HashSet;
 use std::io;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 fn effective_content_height(total_height: u16, content_panel_percent: u16) -> u16 {
     if content_panel_percent == 0 {
@@ -344,15 +344,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
             // Check if current item is an image (only when not in tag mode)
             current_is_image = false;
             current_rowid_opt = None;
-            if image_preview_enabled && matches!(ui.tag_mode, TagMode::Normal) {
-                if let Some(selected) = ui.selected {
-                    if selected < ui.shown.len() {
-                        let item = &ui.shown[selected];
-                        if ui.is_cclip_image_item(item) {
-                            current_is_image = true;
-                            current_rowid_opt = ui.get_cclip_rowid(item);
-                        }
-                    }
+            if image_preview_enabled
+                && matches!(ui.tag_mode, TagMode::Normal)
+                && let Some(selected) = ui.selected
+                && selected < ui.shown.len()
+            {
+                let item = &ui.shown[selected];
+                if ui.is_cclip_image_item(item) {
+                    current_is_image = true;
+                    current_rowid_opt = ui.get_cclip_rowid(item);
                 }
             }
 
@@ -364,11 +364,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         let mut is_loading = false;
 
                         let manager_try_lock = manager.try_lock();
-                        if let Ok(mut manager_lock) = manager_try_lock {
-                            if manager_lock.is_cached(rowid) {
-                                manager_lock.set_image(rowid);
-                                already_loaded = true;
-                            }
+                        if let Ok(mut manager_lock) = manager_try_lock
+                            && manager_lock.is_cached(rowid)
+                        {
+                            manager_lock.set_image(rowid);
+                            already_loaded = true;
                         }
 
                         if !already_loaded {
@@ -835,23 +835,25 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 }
 
                 let mut image_rendered = false;
-                if show_content_panel && image_preview_enabled && current_is_image {
-                    if let Some(manager) = &mut image_manager {
-                        let manager_try_lock = manager.try_lock();
-                        if let Ok(mut manager_lock) = manager_try_lock {
-                            // Calculate image area INSIDE the content panel borders
-                            let content_chunk = chunks[content_panel_index];
-                            let image_area = ratatui::layout::Rect {
-                                x: content_chunk.x + 1,
-                                y: content_chunk.y + 1,
-                                width: content_chunk.width.saturating_sub(2),
-                                height: content_chunk.height.saturating_sub(2),
-                            };
-                            if let Err(e) = manager_lock.render(f, image_area) {
-                                render_error = Err(e);
-                            }
-                            image_rendered = true;
+                if show_content_panel
+                    && image_preview_enabled
+                    && current_is_image
+                    && let Some(manager) = &mut image_manager
+                {
+                    let manager_try_lock = manager.try_lock();
+                    if let Ok(mut manager_lock) = manager_try_lock {
+                        // Calculate image area INSIDE the content panel borders
+                        let content_chunk = chunks[content_panel_index];
+                        let image_area = ratatui::layout::Rect {
+                            x: content_chunk.x + 1,
+                            y: content_chunk.y + 1,
+                            width: content_chunk.width.saturating_sub(2),
+                            height: content_chunk.height.saturating_sub(2),
+                        };
+                        if let Err(e) = manager_lock.render(f, image_area) {
+                            render_error = Err(e);
                         }
+                        image_rendered = true;
                     }
                 }
 
@@ -904,8 +906,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     match (key.code, key.modifiers) {
                         // Fullscreen image preview keybind
                         (code, mods) if cli.keybinds.matches_image_preview(code, mods) => {
-                            if current_is_image {
-                                if let (Some(_rowid), Some(manager)) =
+                            if current_is_image
+                                && let (Some(_rowid), Some(manager)) =
                                     (&current_rowid_opt, &mut image_manager)
                                 {
                                     // Fullscreen modal loop with bounded error tolerance
@@ -914,11 +916,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         let mut render_err = Ok(());
                                         terminal.draw(|f| {
                                             let manager_try_lock = manager.try_lock();
-                                            if let Ok(mut manager_lock) = manager_try_lock {
-                                                if let Err(e) = manager_lock.render(f, f.area()) {
+                                            if let Ok(mut manager_lock) = manager_try_lock
+                                                && let Err(e) = manager_lock.render(f, f.area()) {
                                                     render_err = Err(e);
                                                 }
-                                            }
                                         })?;
                                         render_err?;
 
@@ -952,7 +953,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         *state = crate::ui::DisplayState::Image(rowid.clone());
                                     }
                                 }
-                            }
                         }
                         // Tag keybind (Ctrl+T)
                         (code, mods) if cli.keybinds.matches_tag(code, mods) => {
@@ -966,8 +966,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             let _ = terminal.clear();
                             force_sixel_sync = true;
 
-                            if let Some(selected_idx) = ui.selected {
-                                if !ui.shown.is_empty() && selected_idx < ui.shown.len() {
+                            if let Some(selected_idx) = ui.selected
+                                && !ui.shown.is_empty() && selected_idx < ui.shown.len() {
                                     let selected_item = ui.shown[selected_idx].original_line.clone();
                                     // Get available tags with just names (no formatting)
                                     let available_tags =
@@ -979,12 +979,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         selected_tag: None,
                                     };
                                 }
-                            }
                         }
                         // Untag keybind (Alt+T)
                         (KeyCode::Char('t'), KeyModifiers::ALT) => {
-                            if let Some(selected_idx) = ui.selected {
-                                if selected_idx < ui.shown.len() {
+                            if let Some(selected_idx) = ui.selected
+                                && selected_idx < ui.shown.len() {
                                     let item = &ui.shown[selected_idx];
                                     let selected_item = Some(item.original_line.clone());
                                     let parsed_item =
@@ -1019,13 +1018,12 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         }
                                     }
                                 }
-                            }
                         }
                         // Delete entry (Alt+Delete)
                         (code, mods) if cli.keybinds.matches_cclip_delete(code, mods) => {
                             if ui.tag_mode == TagMode::Normal {
-                                if let Some(selected) = ui.selected {
-                                    if selected < ui.shown.len() {
+                                if let Some(selected) = ui.selected
+                                    && selected < ui.shown.len() {
                                         let item = &ui.shown[selected];
                                         if let Some(rowid) = ui.get_cclip_rowid(item) {
                                             let delete_result = super::select::delete_item(&rowid);
@@ -1066,7 +1064,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                             }
                                         }
                                     }
-                                }
                                 continue;
                             }
                         }
@@ -1326,8 +1323,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 }
                                 TagMode::Normal => {
                                     // Normal mode: copy to clipboard
-                                    if let Some(selected) = ui.selected {
-                                        if selected < ui.shown.len() {
+                                    if let Some(selected) = ui.selected
+                                        && selected < ui.shown.len() {
                                             let original_line = &ui.shown[selected].original_line;
                                             let parsed_item =
                                                 super::CclipItem::from_line(original_line.clone());
@@ -1363,7 +1360,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                 }
                                             }
                                         }
-                                    }
                                 }
                             }
                         }

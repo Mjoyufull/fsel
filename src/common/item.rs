@@ -327,88 +327,82 @@ impl Item {
         &'a self,
         tag_metadata: Option<&'a crate::modes::cclip::TagMetadataFormatter>,
     ) -> ListItem<'a> {
-        if let Some(actual_tags) = &self.tags {
-            if !actual_tags.is_empty() {
-                if let Some(formatter) = tag_metadata {
-                    // Use actual tags from self.tags, not parsed from display_text
-                    let mut spans = Vec::new();
+        if let Some(actual_tags) = &self.tags
+            && !actual_tags.is_empty()
+            && let Some(formatter) = tag_metadata
+        {
+            // Use actual tags from self.tags, not parsed from display_text
+            let mut spans = Vec::new();
 
-                    // Find where tags are in display_text to split properly
-                    if let Some(tag_start) = self.display_text.find('[') {
-                        if let Some(tag_end) = self.display_text.find(']') {
-                            // Add text before tags
-                            if tag_start > 0 {
-                                spans.push(Span::raw(&self.display_text[..tag_start]));
-                            }
+            // Find where tags are in display_text to split properly
+            if let Some(tag_start) = self.display_text.find('[')
+                && let Some(tag_end) = self.display_text.find(']')
+            {
+                // Add text before tags
+                if tag_start > 0 {
+                    spans.push(Span::raw(&self.display_text[..tag_start]));
+                }
 
-                            // Get first tag color for brackets
-                            let first_tag_color = actual_tags
-                                .first()
-                                .and_then(|tag| formatter.get_color(tag))
-                                .unwrap_or(ratatui::style::Color::Green);
+                // Get first tag color for brackets
+                let first_tag_color = actual_tags
+                    .first()
+                    .and_then(|tag| formatter.get_color(tag))
+                    .unwrap_or(ratatui::style::Color::Green);
 
-                            // Opening bracket with first tag color
-                            spans.push(Span::styled("[", Style::default().fg(first_tag_color)));
+                // Opening bracket with first tag color
+                spans.push(Span::styled("[", Style::default().fg(first_tag_color)));
 
-                            // Format each tag individually with its own color
-                            // Extract the formatted tags from display_text to preserve color names
-                            let formatted_tags =
-                                if let Some(tag_start_idx) = self.display_text.find('[') {
-                                    if let Some(tag_end_idx) = self.display_text.find(']') {
-                                        let tags_str =
-                                            &self.display_text[tag_start_idx + 1..tag_end_idx];
-                                        tags_str.split(", ").collect::<Vec<&str>>()
-                                    } else {
-                                        vec![]
-                                    }
-                                } else {
-                                    vec![]
-                                };
+                // Format each tag individually with its own color
+                // Extract the formatted tags from display_text to preserve color names
+                let formatted_tags = if let Some(tag_start_idx) = self.display_text.find('[') {
+                    if let Some(tag_end_idx) = self.display_text.find(']') {
+                        let tags_str = &self.display_text[tag_start_idx + 1..tag_end_idx];
+                        tags_str.split(", ").collect::<Vec<&str>>()
+                    } else {
+                        vec![]
+                    }
+                } else {
+                    vec![]
+                };
 
-                            for (idx, tag_name) in actual_tags.iter().enumerate() {
-                                let tag_color = formatter
-                                    .get_color(tag_name)
-                                    .unwrap_or(ratatui::style::Color::Green);
+                for (idx, tag_name) in actual_tags.iter().enumerate() {
+                    let tag_color = formatter
+                        .get_color(tag_name)
+                        .unwrap_or(ratatui::style::Color::Green);
 
-                                // Use the formatted tag from display_text if available (includes color names)
-                                let display = if idx < formatted_tags.len() {
-                                    formatted_tags[idx].to_string()
-                                } else {
-                                    // Fallback: format manually
-                                    let mut display = String::new();
-                                    if let Some(meta) = formatter.metadata.get(tag_name) {
-                                        if let Some(emoji) = &meta.emoji {
-                                            display.push_str(emoji);
-                                            display.push(' ');
-                                        }
-                                    }
-                                    display.push_str(tag_name);
-                                    display
-                                };
-
-                                spans.push(Span::styled(display, Style::default().fg(tag_color)));
-
-                                // Add comma separator if not last tag
-                                if idx < actual_tags.len() - 1 {
-                                    spans.push(Span::styled(
-                                        ", ",
-                                        Style::default().fg(first_tag_color),
-                                    ));
-                                }
-                            }
-
-                            // Closing bracket with first tag color
-                            spans.push(Span::styled("]", Style::default().fg(first_tag_color)));
-
-                            // Add content after tags
-                            if tag_end + 2 < self.display_text.len() {
-                                spans.push(Span::raw(&self.display_text[tag_end + 2..]));
-                            }
-
-                            return ListItem::new(Line::from(spans));
+                    // Use the formatted tag from display_text if available (includes color names)
+                    let display = if idx < formatted_tags.len() {
+                        formatted_tags[idx].to_string()
+                    } else {
+                        // Fallback: format manually
+                        let mut display = String::new();
+                        if let Some(meta) = formatter.metadata.get(tag_name)
+                            && let Some(emoji) = &meta.emoji
+                        {
+                            display.push_str(emoji);
+                            display.push(' ');
                         }
+                        display.push_str(tag_name);
+                        display
+                    };
+
+                    spans.push(Span::styled(display, Style::default().fg(tag_color)));
+
+                    // Add comma separator if not last tag
+                    if idx < actual_tags.len() - 1 {
+                        spans.push(Span::styled(", ", Style::default().fg(first_tag_color)));
                     }
                 }
+
+                // Closing bracket with first tag color
+                spans.push(Span::styled("]", Style::default().fg(first_tag_color)));
+
+                // Add content after tags
+                if tag_end + 2 < self.display_text.len() {
+                    spans.push(Span::raw(&self.display_text[tag_end + 2..]));
+                }
+
+                return ListItem::new(Line::from(spans));
             }
         }
 

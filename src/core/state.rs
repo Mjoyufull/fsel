@@ -297,79 +297,79 @@ impl State {
 
     /// Update info text based on selected app
     pub fn update_info(&mut self, _highlight_color: Color, fancy_mode: bool, verbose: u64) {
-        if let Some(selected) = self.selected {
-            if let Some(app) = self.shown.get(selected) {
-                // the basics
-                self.text = if fancy_mode {
-                    // In fancy mode, skip the app name (it's in the header) and just show description
-                    app.description.clone()
+        if let Some(selected) = self.selected
+            && let Some(app) = self.shown.get(selected)
+        {
+            // the basics
+            self.text = if fancy_mode {
+                // In fancy mode, skip the app name (it's in the header) and just show description
+                app.description.clone()
+            } else {
+                // Normal mode: show app name and description
+                format!("{}\n\n{}", app.name, app.description)
+            };
+
+            // Helper to format recency
+            let format_recency = |ts: u64| -> String {
+                let now = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let diff = now.saturating_sub(ts);
+
+                if diff < 60 {
+                    format!("{}s ago", diff)
+                } else if diff < 3600 {
+                    format!("{}m ago", diff / 60)
+                } else if diff < 86400 {
+                    format!("{}h ago", diff / 3600)
                 } else {
-                    // Normal mode: show app name and description
-                    format!("{}\n\n{}", app.name, app.description)
-                };
+                    format!("{}d ago", diff / 86400)
+                }
+            };
 
-                // Helper to format recency
-                let format_recency = |ts: u64| -> String {
-                    let now = SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let diff = now.saturating_sub(ts);
+            // extra deets for the nerds
+            if verbose > 1 {
+                self.text.push_str("\n\n");
 
-                    if diff < 60 {
-                        format!("{}s ago", diff)
-                    } else if diff < 3600 {
-                        format!("{}m ago", diff / 60)
-                    } else if diff < 86400 {
-                        format!("{}h ago", diff / 3600)
-                    } else {
-                        format!("{}d ago", diff / 86400)
-                    }
-                };
+                if app.is_terminal {
+                    self.text
+                        .push_str(&format!("Exec (terminal): {}\n", app.command));
+                } else {
+                    self.text.push_str(&format!("Exec: {}\n", app.command));
+                }
 
-                // extra deets for the nerds
-                if verbose > 1 {
-                    self.text.push_str("\n\n");
+                if let Some(ref generic) = app.generic_name {
+                    self.text.push_str(&format!("Generic Name: {}\n", generic));
+                }
 
-                    if app.is_terminal {
+                if !app.categories.is_empty() {
+                    self.text
+                        .push_str(&format!("Categories: {}\n", app.categories.join(", ")));
+                }
+
+                if !app.keywords.is_empty() {
+                    self.text
+                        .push_str(&format!("Keywords: {}\n", app.keywords.join(", ")));
+                }
+
+                if verbose > 2 {
+                    if !app.mime_types.is_empty() {
                         self.text
-                            .push_str(&format!("Exec (terminal): {}\n", app.command));
-                    } else {
-                        self.text.push_str(&format!("Exec: {}\n", app.command));
+                            .push_str(&format!("MIME Types: {}\n", app.mime_types.join(", ")));
                     }
-
-                    if let Some(ref generic) = app.generic_name {
-                        self.text.push_str(&format!("Generic Name: {}\n", generic));
+                    self.text.push_str(&format!("Type: {}\n", app.entry_type));
+                    if let Some(ref icon) = app.icon {
+                        self.text.push_str(&format!("Icon: {}\n", icon));
                     }
-
-                    if !app.categories.is_empty() {
+                    // Recency first (before Times run) - matches screenshot order
+                    if let Some(ts) = app.last_access {
                         self.text
-                            .push_str(&format!("Categories: {}\n", app.categories.join(", ")));
+                            .push_str(&format!("Last Run: {}\n", format_recency(ts)));
                     }
-
-                    if !app.keywords.is_empty() {
-                        self.text
-                            .push_str(&format!("Keywords: {}\n", app.keywords.join(", ")));
-                    }
-
-                    if verbose > 2 {
-                        if !app.mime_types.is_empty() {
-                            self.text
-                                .push_str(&format!("MIME Types: {}\n", app.mime_types.join(", ")));
-                        }
-                        self.text.push_str(&format!("Type: {}\n", app.entry_type));
-                        if let Some(ref icon) = app.icon {
-                            self.text.push_str(&format!("Icon: {}\n", icon));
-                        }
-                        // Recency first (before Times run) - matches screenshot order
-                        if let Some(ts) = app.last_access {
-                            self.text
-                                .push_str(&format!("Last Run: {}\n", format_recency(ts)));
-                        }
-                        self.text.push_str(&format!("Times run: {}\n", app.history));
-                        self.text
-                            .push_str(&format!("Matching score: {}\n", app.score));
-                    }
+                    self.text.push_str(&format!("Times run: {}\n", app.history));
+                    self.text
+                        .push_str(&format!("Matching score: {}\n", app.score));
                 }
             }
         }

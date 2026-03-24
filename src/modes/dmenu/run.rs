@@ -24,9 +24,10 @@ fn items_panel_height(total_height: u16, content_height: u16, input_panel_height
 pub fn run(cli: &Opts) -> Result<()> {
     use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
     use crossterm::{
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         ExecutableCommand,
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
+    use ratatui::Terminal;
     use ratatui::backend::CrosstermBackend;
     use ratatui::layout::{Alignment, Constraint, Direction, Layout};
     use ratatui::style::{Modifier, Style};
@@ -34,7 +35,6 @@ pub fn run(cli: &Opts) -> Result<()> {
     use ratatui::widgets::{
         Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap,
     };
-    use ratatui::Terminal;
 
     // Check if stdin is piped (unless prompt-only mode)
     if !cli.dmenu_prompt_only && !super::parse::is_stdin_piped() {
@@ -130,10 +130,10 @@ pub fn run(cli: &Opts) -> Result<()> {
                 break;
             }
         }
-    } else if let Some(select_idx) = cli.dmenu_select_index {
-        if select_idx < ui.shown.len() {
-            ui.selected = Some(select_idx);
-        }
+    } else if let Some(select_idx) = cli.dmenu_select_index
+        && select_idx < ui.shown.len()
+    {
+        ui.selected = Some(select_idx);
     }
 
     // Ensure we have a valid selection if there are items

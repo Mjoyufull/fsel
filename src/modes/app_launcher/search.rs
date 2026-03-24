@@ -1,4 +1,4 @@
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use jwalk::WalkDir;
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use std::{env, fs, path};
@@ -20,29 +20,28 @@ pub fn find_app_by_name_fast(
     // Try the name index first - this is instant if the app is cached
     if let Ok(Some(app)) = desktop_cache.get_by_name(app_name) {
         // Apply filtering if needed
-        if cli.filter_desktop {
-            if let Ok(current_desktop) = env::var("XDG_CURRENT_DESKTOP") {
-                let desktops: Vec<String> =
-                    current_desktop.split(':').map(|s| s.to_string()).collect();
+        if cli.filter_desktop
+            && let Ok(current_desktop) = env::var("XDG_CURRENT_DESKTOP")
+        {
+            let desktops: Vec<String> = current_desktop.split(':').map(|s| s.to_string()).collect();
 
-                if !app.not_show_in.is_empty() {
-                    let should_hide = app
-                        .not_show_in
-                        .iter()
-                        .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                    if should_hide {
-                        return Ok(None);
-                    }
+            if !app.not_show_in.is_empty() {
+                let should_hide = app
+                    .not_show_in
+                    .iter()
+                    .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                if should_hide {
+                    return Ok(None);
                 }
+            }
 
-                if !app.only_show_in.is_empty() {
-                    let should_show = app
-                        .only_show_in
-                        .iter()
-                        .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                    if !should_show {
-                        return Ok(None);
-                    }
+            if !app.only_show_in.is_empty() {
+                let should_show = app
+                    .only_show_in
+                    .iter()
+                    .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                if !should_show {
+                    return Ok(None);
                 }
             }
         }
@@ -151,29 +150,29 @@ pub fn find_app_by_name_fast(
                 // Check if this is the app we're looking for
                 if app.name == app_name {
                     // Apply filtering if needed
-                    if cli.filter_desktop {
-                        if let Ok(current_desktop) = env::var("XDG_CURRENT_DESKTOP") {
-                            let desktops: Vec<String> =
-                                current_desktop.split(':').map(|s| s.to_string()).collect();
+                    if cli.filter_desktop
+                        && let Ok(current_desktop) = env::var("XDG_CURRENT_DESKTOP")
+                    {
+                        let desktops: Vec<String> =
+                            current_desktop.split(':').map(|s| s.to_string()).collect();
 
-                            if !app.not_show_in.is_empty() {
-                                let should_hide = app
-                                    .not_show_in
-                                    .iter()
-                                    .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                                if should_hide {
-                                    continue;
-                                }
+                        if !app.not_show_in.is_empty() {
+                            let should_hide = app
+                                .not_show_in
+                                .iter()
+                                .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                            if should_hide {
+                                continue;
                             }
+                        }
 
-                            if !app.only_show_in.is_empty() {
-                                let should_show = app
-                                    .only_show_in
-                                    .iter()
-                                    .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
-                                if !should_show {
-                                    continue;
-                                }
+                        if !app.only_show_in.is_empty() {
+                            let should_show = app
+                                .only_show_in
+                                .iter()
+                                .any(|d| desktops.iter().any(|cd| cd.eq_ignore_ascii_case(d)));
+                            if !should_show {
+                                continue;
                             }
                         }
                     }
@@ -214,14 +213,14 @@ pub fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> Result<()
     }
 
     // Try prefix match in history (e.g., "fire" -> "Firefox")
-    if let Some((app_name, _)) = history_cache.get_best_match(program_name) {
-        if let Some(app) = find_app_by_name_fast(&db, app_name, cli)? {
-            if cli.no_exec {
-                println!("{}", app.command);
-                return Ok(());
-            }
-            return super::launch::launch_app(&app, cli, &db);
+    if let Some((app_name, _)) = history_cache.get_best_match(program_name)
+        && let Some(app) = find_app_by_name_fast(&db, app_name, cli)?
+    {
+        if cli.no_exec {
+            println!("{}", app.command);
+            return Ok(());
         }
+        return super::launch::launch_app(&app, cli, &db);
     }
 
     // SLOW PATH: No exact match in history, need to load all apps

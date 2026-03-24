@@ -38,10 +38,10 @@ fn get_locale() -> &'static [String] {
             locales.push(base_locale.to_string());
 
             // Add language only (e.g., "en")
-            if let Some(lang) = base_locale.split('_').next() {
-                if lang != base_locale {
-                    locales.push(lang.to_string());
-                }
+            if let Some(lang) = base_locale.split('_').next()
+                && lang != base_locale
+            {
+                locales.push(lang.to_string());
             }
         }
 
@@ -314,73 +314,66 @@ pub fn read_with_options(
             .collect();
 
         // Batch cache all newly parsed apps in ONE transaction (fast!)
-        if !apps_to_cache.is_empty() {
-            if let Some(ref cache) = desktop_cache {
-                let _ = cache.batch_set(apps_to_cache);
-            }
+        if !apps_to_cache.is_empty()
+            && let Some(ref cache) = desktop_cache
+        {
+            let _ = cache.batch_set(apps_to_cache);
         }
 
         // Add executables from PATH if requested
-        if list_executables {
-            if let Ok(path_var) = env::var("PATH") {
-                let mut seen_executables = std::collections::HashSet::new();
+        if list_executables && let Ok(path_var) = env::var("PATH") {
+            let mut seen_executables = std::collections::HashSet::new();
 
-                for path_dir in path_var.split(':') {
-                    let entries_result = fs::read_dir(path_dir);
-                    if let Ok(entries) = entries_result {
-                        for entry in entries.filter_map(Result::ok) {
-                            let path = entry.path();
+            for path_dir in path_var.split(':') {
+                let entries_result = fs::read_dir(path_dir);
+                if let Ok(entries) = entries_result {
+                    for entry in entries.filter_map(Result::ok) {
+                        let path = entry.path();
 
-                            // Check if it's an executable file
-                            if path.is_file() {
-                                #[cfg(unix)]
-                                {
-                                    use std::os::unix::fs::PermissionsExt;
-                                    if let Ok(metadata) = fs::metadata(&path) {
-                                        let permissions = metadata.permissions();
-                                        // Check if executable bit is set
-                                        if permissions.mode() & 0o111 != 0 {
-                                            if let Some(file_name) =
-                                                path.file_name().and_then(|n| n.to_str())
-                                            {
-                                                // Avoid duplicates
-                                                if seen_executables.insert(file_name.to_string()) {
-                                                    let app = App {
-                                                        name: file_name.to_string(),
-                                                        command: path.to_string_lossy().to_string(),
-                                                        description: format!(
-                                                            "Executable: {}",
-                                                            file_name
-                                                        ),
-                                                        generic_name: None,
-                                                        keywords: vec![],
-                                                        categories: vec!["Executable".to_string()],
-                                                        mime_types: vec![],
-                                                        icon: None,
-                                                        is_terminal: false,
-                                                        path: None,
-                                                        only_show_in: vec![],
-                                                        not_show_in: vec![],
-                                                        hidden: false,
-                                                        startup_notify: false,
-                                                        startup_wm_class: None,
-                                                        try_exec: None,
-                                                        entry_type: "Application".to_string(),
-                                                        actions: None,
-                                                        desktop_id: None,
-                                                        history: 0,
-                                                        score: 0,
-                                                        pinned: false,
-                                                        last_access: None,
-                                                        breakdown: None,
-                                                    };
+                        // Check if it's an executable file
+                        if path.is_file() {
+                            #[cfg(unix)]
+                            {
+                                use std::os::unix::fs::PermissionsExt;
+                                if let Ok(metadata) = fs::metadata(&path) {
+                                    let permissions = metadata.permissions();
+                                    // Check if executable bit is set
+                                    if permissions.mode() & 0o111 != 0
+                                        && let Some(file_name) =
+                                            path.file_name().and_then(|n| n.to_str())
+                                    {
+                                        // Avoid duplicates
+                                        if seen_executables.insert(file_name.to_string()) {
+                                            let app = App {
+                                                name: file_name.to_string(),
+                                                command: path.to_string_lossy().to_string(),
+                                                description: format!("Executable: {}", file_name),
+                                                generic_name: None,
+                                                keywords: vec![],
+                                                categories: vec!["Executable".to_string()],
+                                                mime_types: vec![],
+                                                icon: None,
+                                                is_terminal: false,
+                                                path: None,
+                                                only_show_in: vec![],
+                                                not_show_in: vec![],
+                                                hidden: false,
+                                                startup_notify: false,
+                                                startup_wm_class: None,
+                                                try_exec: None,
+                                                entry_type: "Application".to_string(),
+                                                actions: None,
+                                                desktop_id: None,
+                                                history: 0,
+                                                score: 0,
+                                                pinned: false,
+                                                last_access: None,
+                                                breakdown: None,
+                                            };
 
-                                                    let app_with_history =
-                                                        history_cache.apply_to_app(app);
-                                                    if sender.send(app_with_history).is_err() {
-                                                        return;
-                                                    }
-                                                }
+                                            let app_with_history = history_cache.apply_to_app(app);
+                                            if sender.send(app_with_history).is_err() {
+                                                return;
                                             }
                                         }
                                     }
@@ -585,116 +578,110 @@ impl App {
                 continue;
             }
 
-            if search {
-                if let Some((key, value)) = line.split_once('=') {
-                    let key = key.trim();
-                    let value = value.trim();
+            if search && let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
 
-                    // Handle both localized and non-localized keys
-                    let base_key = key.split('[').next().unwrap_or(key);
+                // Handle both localized and non-localized keys
+                let base_key = key.split('[').next().unwrap_or(key);
 
-                    match base_key {
-                        "Type" => {
-                            entry_type = Some(value.to_string());
-                        }
-                        "Name" => {
-                            if let Some(val) = get_localized_value(key, value, &name, locales) {
-                                name = Some(if let Some(a) = &action {
-                                    format!("{} ({})", &a.from, val)
-                                } else {
-                                    val
-                                });
-                            }
-                        }
-                        "GenericName" => {
-                            if let Some(val) =
-                                get_localized_value(key, value, &generic_name, locales)
-                            {
-                                generic_name = Some(val);
-                            }
-                        }
-                        "Comment" => {
-                            if let Some(val) =
-                                get_localized_value(key, value, &description, locales)
-                            {
-                                description = Some(val);
-                            }
-                        }
-                        "Keywords" => {
-                            if keywords.is_empty() {
-                                keywords = parse_semicolon_list(value);
-                            }
-                        }
-                        "Categories" => {
-                            if categories.is_empty() {
-                                categories = parse_semicolon_list(value);
-                            }
-                        }
-                        "MimeType" => {
-                            if mime_types.is_empty() {
-                                mime_types = parse_semicolon_list(value);
-                            }
-                        }
-                        "Icon" => {
-                            if icon.is_none() {
-                                icon = Some(value.to_string());
-                            }
-                        }
-                        "Terminal" => {
-                            terminal_exec = value.eq_ignore_ascii_case("true");
-                        }
-                        "Exec" => {
-                            if exec.is_none() {
-                                // Remove XDG field codes (%f, %F, %u, %U, etc.)
-                                let cleaned = value
-                                    .split_whitespace()
-                                    .filter(|part| !part.starts_with('%'))
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-                                exec = Some(cleaned);
-                            }
-                        }
-                        "Path" => {
-                            if path.is_none() {
-                                path = Some(value.to_string());
-                            }
-                        }
-                        "TryExec" => {
-                            if try_exec.is_none() {
-                                try_exec = Some(value.to_string());
-                            }
-                        }
-                        "OnlyShowIn" => {
-                            if only_show_in.is_empty() {
-                                only_show_in = parse_semicolon_list(value);
-                            }
-                        }
-                        "NotShowIn" => {
-                            if not_show_in.is_empty() {
-                                not_show_in = parse_semicolon_list(value);
-                            }
-                        }
-                        "Hidden" => {
-                            hidden = value.eq_ignore_ascii_case("true");
-                        }
-                        "NoDisplay" => {
-                            no_display = value.eq_ignore_ascii_case("true");
-                        }
-                        "StartupNotify" => {
-                            startup_notify = value.eq_ignore_ascii_case("true");
-                        }
-                        "StartupWMClass" => {
-                            if startup_wm_class.is_none() {
-                                startup_wm_class = Some(value.to_string());
-                            }
-                        }
-                        "Actions" => {
-                            if actions.is_none() && action.is_none() {
-                                actions = Some(parse_semicolon_list(value));
-                            }
-                        }
-                        _ => {} // Ignore unknown keys
+                match base_key {
+                    "Type" => {
+                        entry_type = Some(value.to_string());
                     }
+                    "Name" => {
+                        if let Some(val) = get_localized_value(key, value, &name, locales) {
+                            name = Some(if let Some(a) = &action {
+                                format!("{} ({})", &a.from, val)
+                            } else {
+                                val
+                            });
+                        }
+                    }
+                    "GenericName" => {
+                        if let Some(val) = get_localized_value(key, value, &generic_name, locales) {
+                            generic_name = Some(val);
+                        }
+                    }
+                    "Comment" => {
+                        if let Some(val) = get_localized_value(key, value, &description, locales) {
+                            description = Some(val);
+                        }
+                    }
+                    "Keywords" => {
+                        if keywords.is_empty() {
+                            keywords = parse_semicolon_list(value);
+                        }
+                    }
+                    "Categories" => {
+                        if categories.is_empty() {
+                            categories = parse_semicolon_list(value);
+                        }
+                    }
+                    "MimeType" => {
+                        if mime_types.is_empty() {
+                            mime_types = parse_semicolon_list(value);
+                        }
+                    }
+                    "Icon" => {
+                        if icon.is_none() {
+                            icon = Some(value.to_string());
+                        }
+                    }
+                    "Terminal" => {
+                        terminal_exec = value.eq_ignore_ascii_case("true");
+                    }
+                    "Exec" => {
+                        if exec.is_none() {
+                            // Remove XDG field codes (%f, %F, %u, %U, etc.)
+                            let cleaned = value
+                                .split_whitespace()
+                                .filter(|part| !part.starts_with('%'))
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            exec = Some(cleaned);
+                        }
+                    }
+                    "Path" => {
+                        if path.is_none() {
+                            path = Some(value.to_string());
+                        }
+                    }
+                    "TryExec" => {
+                        if try_exec.is_none() {
+                            try_exec = Some(value.to_string());
+                        }
+                    }
+                    "OnlyShowIn" => {
+                        if only_show_in.is_empty() {
+                            only_show_in = parse_semicolon_list(value);
+                        }
+                    }
+                    "NotShowIn" => {
+                        if not_show_in.is_empty() {
+                            not_show_in = parse_semicolon_list(value);
+                        }
+                    }
+                    "Hidden" => {
+                        hidden = value.eq_ignore_ascii_case("true");
+                    }
+                    "NoDisplay" => {
+                        no_display = value.eq_ignore_ascii_case("true");
+                    }
+                    "StartupNotify" => {
+                        startup_notify = value.eq_ignore_ascii_case("true");
+                    }
+                    "StartupWMClass" => {
+                        if startup_wm_class.is_none() {
+                            startup_wm_class = Some(value.to_string());
+                        }
+                    }
+                    "Actions" => {
+                        if actions.is_none() && action.is_none() {
+                            actions = Some(parse_semicolon_list(value));
+                        }
+                    }
+                    _ => {} // Ignore unknown keys
                 }
             }
         }

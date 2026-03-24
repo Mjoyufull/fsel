@@ -109,10 +109,10 @@ impl<'a> DmenuUI<'a> {
 
     /// Clear temporary message if expired (2 seconds) or on selection change
     pub fn clear_expired_message(&mut self) {
-        if let Some((_, timestamp)) = &self.temp_message {
-            if timestamp.elapsed() > std::time::Duration::from_secs(2) {
-                self.temp_message = None;
-            }
+        if let Some((_, timestamp)) = &self.temp_message
+            && timestamp.elapsed() > std::time::Duration::from_secs(2)
+        {
+            self.temp_message = None;
         }
     }
 
@@ -141,10 +141,10 @@ impl<'a> DmenuUI<'a> {
             *selected = Some(next as usize);
 
             // Update input with selected tag
-            if let Some(idx) = *selected {
-                if idx < tags.len() {
-                    *input = tags[idx].clone();
-                }
+            if let Some(idx) = *selected
+                && idx < tags.len()
+            {
+                *input = tags[idx].clone();
             }
         }
     }
@@ -168,16 +168,16 @@ impl<'a> DmenuUI<'a> {
             *selected_tag = Some(next as usize);
 
             // Update input with selected tag name only (not full display)
-            if let Some(idx) = *selected_tag {
-                if idx < available_tags.len() {
-                    // Extract just the tag name without color/emoji formatting
-                    let tag = &available_tags[idx];
-                    // Remove any formatting like (color) or emoji prefix
-                    let clean_tag = tag.split('(').next().unwrap_or(tag).trim();
-                    let clean_tag = clean_tag
-                        .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
-                    *input = clean_tag.to_string();
-                }
+            if let Some(idx) = *selected_tag
+                && idx < available_tags.len()
+            {
+                // Extract just the tag name without color/emoji formatting
+                let tag = &available_tags[idx];
+                // Remove any formatting like (color) or emoji prefix
+                let clean_tag = tag.split('(').next().unwrap_or(tag).trim();
+                let clean_tag = clean_tag
+                    .trim_start_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-');
+                *input = clean_tag.to_string();
             }
         }
     }
@@ -664,16 +664,14 @@ impl<'a> DmenuUI<'a> {
             if let Ok(output) = std::process::Command::new("cclip")
                 .args(["get", rowid])
                 .output()
+                && output.status.success()
+                && let Ok(content) = String::from_utf8(output.stdout)
             {
-                if output.status.success() {
-                    if let Ok(content) = String::from_utf8(output.stdout) {
-                        // Don't cache empty content
-                        if !content.trim().is_empty() {
-                            self.content_cache
-                                .insert(rowid.to_string(), content.clone());
-                            return content;
-                        }
-                    }
+                // Don't cache empty content
+                if !content.trim().is_empty() {
+                    self.content_cache
+                        .insert(rowid.to_string(), content.clone());
+                    return content;
                 }
             }
 

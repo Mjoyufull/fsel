@@ -68,42 +68,42 @@ impl DesktopCache {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(FILE_LIST_TABLE)?;
 
-        if let Some(data) = table.get("paths")? {
-            if let Ok(cache) = postcard::from_bytes::<FileListCache>(data.value()) {
-                // Check if any directory has been modified since we cached it
-                for dir in dirs {
-                    if let Some(cached_mtime) = cache.dir_mtimes.get(dir) {
-                        // Check current mtime
-                        if let Ok(metadata) = fs::metadata(dir) {
-                            if let Ok(current_mtime) = metadata.modified() {
-                                // If directory modified time is different, cache is stale
-                                // Note: We use != because mtime could be newer OR older (if restored from backup etc)
-                                // But usually it's newer.
-                                if current_mtime != *cached_mtime {
-                                    return Ok(None);
-                                }
-                            } else {
-                                // Can't read mtime, assume stale
+        if let Some(data) = table.get("paths")?
+            && let Ok(cache) = postcard::from_bytes::<FileListCache>(data.value())
+        {
+            // Check if any directory has been modified since we cached it
+            for dir in dirs {
+                if let Some(cached_mtime) = cache.dir_mtimes.get(dir) {
+                    // Check current mtime
+                    if let Ok(metadata) = fs::metadata(dir) {
+                        if let Ok(current_mtime) = metadata.modified() {
+                            // If directory modified time is different, cache is stale
+                            // Note: We use != because mtime could be newer OR older (if restored from backup etc)
+                            // But usually it's newer.
+                            if current_mtime != *cached_mtime {
                                 return Ok(None);
                             }
                         } else {
-                            // Directory might not exist anymore, assume stale
+                            // Can't read mtime, assume stale
                             return Ok(None);
                         }
                     } else {
-                        // Directory wasn't in our cache (new dir added to config?), assume stale
+                        // Directory might not exist anymore, assume stale
                         return Ok(None);
                     }
-                }
-
-                // Also check if we have extra directories in cache that are no longer requested
-                if cache.dir_mtimes.len() != dirs.len() {
+                } else {
+                    // Directory wasn't in our cache (new dir added to config?), assume stale
                     return Ok(None);
                 }
-
-                // All directories match and are unmodified!
-                return Ok(Some(cache.paths));
             }
+
+            // Also check if we have extra directories in cache that are no longer requested
+            if cache.dir_mtimes.len() != dirs.len() {
+                return Ok(None);
+            }
+
+            // All directories match and are unmodified!
+            return Ok(Some(cache.paths));
         }
         Ok(None)
     }
@@ -118,16 +118,15 @@ impl DesktopCache {
 
         for path in paths {
             let path_key = path.to_string_lossy();
-            if let Some(data) = table.get(path_key.as_ref())? {
-                if let Ok(entry) = postcard::from_bytes::<CacheEntry>(data.value()) {
-                    // Check if file has been modified
-                    if let Ok(metadata) = fs::metadata(path) {
-                        if let Ok(mtime) = metadata.modified() {
-                            if mtime == entry.mtime {
-                                result.insert(path.clone(), entry.app);
-                            }
-                        }
-                    }
+            if let Some(data) = table.get(path_key.as_ref())?
+                && let Ok(entry) = postcard::from_bytes::<CacheEntry>(data.value())
+            {
+                // Check if file has been modified
+                if let Ok(metadata) = fs::metadata(path)
+                    && let Ok(mtime) = metadata.modified()
+                    && mtime == entry.mtime
+                {
+                    result.insert(path.clone(), entry.app);
                 }
             }
         }
@@ -145,22 +144,22 @@ impl DesktopCache {
             let mut index_table = write_txn.open_table(NAME_INDEX_TABLE)?;
 
             for (path, app) in apps {
-                if let Ok(metadata) = fs::metadata(&path) {
-                    if let Ok(mtime) = metadata.modified() {
-                        let entry = CacheEntry {
-                            app: app.clone(),
-                            mtime,
-                            path: path.clone(),
-                        };
+                if let Ok(metadata) = fs::metadata(&path)
+                    && let Ok(mtime) = metadata.modified()
+                {
+                    let entry = CacheEntry {
+                        app: app.clone(),
+                        mtime,
+                        path: path.clone(),
+                    };
 
-                        let path_key = path.to_string_lossy();
-                        let data = postcard::to_allocvec(&entry)?;
-                        cache_table.insert(path_key.as_ref(), data.as_slice())?;
+                    let path_key = path.to_string_lossy();
+                    let data = postcard::to_allocvec(&entry)?;
+                    cache_table.insert(path_key.as_ref(), data.as_slice())?;
 
-                        // Update name index
-                        let path_str = path.to_string_lossy();
-                        index_table.insert(app.name.as_str(), path_str.as_bytes())?;
-                    }
+                    // Update name index
+                    let path_str = path.to_string_lossy();
+                    index_table.insert(app.name.as_str(), path_str.as_bytes())?;
                 }
             }
         }
@@ -173,10 +172,10 @@ impl DesktopCache {
     pub fn set_file_list(&self, paths: Vec<PathBuf>, scanned_dirs: &[PathBuf]) -> Result<()> {
         let mut dir_mtimes = HashMap::new();
         for dir in scanned_dirs {
-            if let Ok(metadata) = fs::metadata(dir) {
-                if let Ok(mtime) = metadata.modified() {
-                    dir_mtimes.insert(dir.clone(), mtime);
-                }
+            if let Ok(metadata) = fs::metadata(dir)
+                && let Ok(mtime) = metadata.modified()
+            {
+                dir_mtimes.insert(dir.clone(), mtime);
             }
         }
 
@@ -216,16 +215,15 @@ impl DesktopCache {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(DESKTOP_CACHE_TABLE)?;
 
-        if let Some(data) = table.get(path_key.as_ref())? {
-            if let Ok(entry) = postcard::from_bytes::<CacheEntry>(data.value()) {
-                // Check if file has been modified
-                if let Ok(metadata) = fs::metadata(path) {
-                    if let Ok(mtime) = metadata.modified() {
-                        if mtime == entry.mtime {
-                            return Ok(Some(entry.app));
-                        }
-                    }
-                }
+        if let Some(data) = table.get(path_key.as_ref())?
+            && let Ok(entry) = postcard::from_bytes::<CacheEntry>(data.value())
+        {
+            // Check if file has been modified
+            if let Ok(metadata) = fs::metadata(path)
+                && let Ok(mtime) = metadata.modified()
+                && mtime == entry.mtime
+            {
+                return Ok(Some(entry.app));
             }
         }
 
@@ -234,30 +232,30 @@ impl DesktopCache {
 
     /// Store app in cache with current mtime and update name index
     pub fn set(&self, path: &Path, app: App) -> Result<()> {
-        if let Ok(metadata) = fs::metadata(path) {
-            if let Ok(mtime) = metadata.modified() {
-                let entry = CacheEntry {
-                    app: app.clone(),
-                    mtime,
-                    path: path.to_path_buf(),
-                };
+        if let Ok(metadata) = fs::metadata(path)
+            && let Ok(mtime) = metadata.modified()
+        {
+            let entry = CacheEntry {
+                app: app.clone(),
+                mtime,
+                path: path.to_path_buf(),
+            };
 
-                let path_key = path.to_string_lossy();
-                let data = postcard::to_allocvec(&entry)?;
+            let path_key = path.to_string_lossy();
+            let data = postcard::to_allocvec(&entry)?;
 
-                let write_txn = self.db.begin_write()?;
-                {
-                    let mut cache_table = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
-                    let mut index_table = write_txn.open_table(NAME_INDEX_TABLE)?;
+            let write_txn = self.db.begin_write()?;
+            {
+                let mut cache_table = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
+                let mut index_table = write_txn.open_table(NAME_INDEX_TABLE)?;
 
-                    cache_table.insert(path_key.as_ref(), data.as_slice())?;
+                cache_table.insert(path_key.as_ref(), data.as_slice())?;
 
-                    // Update name index for fast lookup
-                    let path_str = path.to_string_lossy();
-                    index_table.insert(app.name.as_str(), path_str.as_bytes())?;
-                }
-                write_txn.commit()?;
+                // Update name index for fast lookup
+                let path_str = path.to_string_lossy();
+                index_table.insert(app.name.as_str(), path_str.as_bytes())?;
             }
+            write_txn.commit()?;
         }
 
         Ok(())
@@ -341,12 +339,11 @@ impl HistoryCache {
         }
 
         // Load pinned apps (table might not exist yet)
-        if let Ok(pinned_table) = read_txn.open_table(PINNED_TABLE) {
-            if let Some(data) = pinned_table.get("pinned_apps")? {
-                if let Ok(apps) = postcard::from_bytes::<Vec<String>>(data.value()) {
-                    pinned.extend(apps);
-                }
-            }
+        if let Ok(pinned_table) = read_txn.open_table(PINNED_TABLE)
+            && let Some(data) = pinned_table.get("pinned_apps")?
+            && let Ok(apps) = postcard::from_bytes::<Vec<String>>(data.value())
+        {
+            pinned.extend(apps);
         }
 
         Ok(Self { history, pinned })

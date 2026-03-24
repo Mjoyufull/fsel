@@ -450,10 +450,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     let mut config_path_cli: Option<path::PathBuf> = None;
     let mut args_for_config_check = env::args().skip(1);
     while let Some(arg) = args_for_config_check.next() {
-        if arg == "-c" || arg == "--config" {
-            if let Some(val) = args_for_config_check.next() {
-                config_path_cli = Some(path::PathBuf::from(val));
-            }
+        if (arg == "-c" || arg == "--config")
+            && let Some(val) = args_for_config_check.next()
+        {
+            config_path_cli = Some(path::PathBuf::from(val));
         }
     }
 
@@ -622,45 +622,45 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     if let Some(cursor) = fsel_config.dmenu.cursor {
         default.dmenu_cursor = Some(cursor);
     }
-    if let Some(color_str) = fsel_config.dmenu.highlight_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_highlight_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.highlight_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_highlight_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.dmenu.main_border_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_main_border_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.main_border_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_main_border_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.dmenu.items_border_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_items_border_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.items_border_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_items_border_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.dmenu.input_border_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_input_border_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.input_border_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_input_border_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.dmenu.main_text_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_main_text_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.main_text_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_main_text_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.dmenu.items_text_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_items_text_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.items_text_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_items_text_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.dmenu.input_text_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_input_text_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.input_text_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_input_text_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.dmenu.header_title_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.dmenu_header_title_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.dmenu.header_title_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.dmenu_header_title_color = Some(c);
     }
     if let Some(height) = fsel_config.dmenu.title_panel_height_percent {
         default.dmenu_title_panel_height_percent = Some(height);
@@ -703,45 +703,45 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     if let Some(cursor) = fsel_config.cclip.cursor {
         default.cclip_cursor = Some(cursor);
     }
-    if let Some(color_str) = fsel_config.cclip.highlight_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_highlight_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.highlight_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_highlight_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.cclip.main_border_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_main_border_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.main_border_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_main_border_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.cclip.items_border_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_items_border_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.items_border_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_items_border_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.cclip.input_border_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_input_border_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.input_border_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_input_border_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.cclip.main_text_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_main_text_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.main_text_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_main_text_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.cclip.items_text_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_items_text_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.items_text_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_items_text_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.cclip.input_text_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_input_text_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.input_text_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_input_text_color = Some(c);
     }
-    if let Some(color_str) = fsel_config.cclip.header_title_color {
-        if let Ok(c) = string_to_color(&color_str) {
-            default.cclip_header_title_color = Some(c);
-        }
+    if let Some(color_str) = fsel_config.cclip.header_title_color
+        && let Ok(c) = string_to_color(&color_str)
+    {
+        default.cclip_header_title_color = Some(c);
     }
     if let Some(height) = fsel_config.cclip.title_panel_height_percent {
         default.cclip_title_panel_height_percent = Some(height);
@@ -782,10 +782,10 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
 
     // Check if invoked as dmenu (this should override config if present)
-    if let Some(arg0) = env::args().next() {
-        if arg0.ends_with("dmenu") {
-            default.dmenu_mode = true;
-        }
+    if let Some(arg0) = env::args().next()
+        && arg0.ends_with("dmenu")
+    {
+        default.dmenu_mode = true;
     }
 
     while let Some(arg) = parser.next()? {
@@ -985,9 +985,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                     .split(',')
                     .map(|s| s.trim().parse::<usize>())
                     .collect();
-                default.dmenu_with_nth = Some(cols.map_err(|_| {
-                    "Invalid column specification. Use comma-separated numbers like: 1,2,4"
-                })?);
+                default.dmenu_with_nth = Some(cols.map_err(
+                    |_| "Invalid column specification. Use comma-separated numbers like: 1,2,4",
+                )?);
             }
             Long("delimiter") => {
                 default.dmenu_delimiter = parser
@@ -1061,7 +1061,9 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                     "  --no-exec              Print the selected item instead of launching it"
                 );
                 eprintln!("  -r, --replace          Replace an existing fsel/cclip instance");
-                eprintln!("  -d, --detach           Start launched apps without keeping the terminal attached");
+                eprintln!(
+                    "  -d, --detach           Start launched apps without keeping the terminal attached"
+                );
                 eprintln!("  -v, --verbose          Print more diagnostics; repeat as -vv or -vvv");
                 eprintln!("  -h                     Show the short summary");
                 eprintln!("  -H, --help             Show the full option tree");
@@ -1210,7 +1212,7 @@ fn parse_launch_prefix(value: &str) -> Result<Vec<String>, &'static str> {
 /// Case-insensitive
 ///
 /// [String]: std::string::String
-/// [color]: tui::style::Color
+/// [color]: ratatui::style::Color
 pub fn string_to_color<T: Into<String>>(val: T) -> Result<ratatui::style::Color, &'static str> {
     let color_str = val.into();
     let color_lower = color_str.to_lowercase();
@@ -1257,7 +1259,9 @@ pub fn string_to_color<T: Into<String>>(val: T) -> Result<ratatui::style::Color,
         "maroon" => Ok(ratatui::style::Color::Indexed(88)),
         "olive" => Ok(ratatui::style::Color::Indexed(58)),
         "silver" => Ok(ratatui::style::Color::Indexed(7)),
-        _ => Err("unknown color format. Use: named colors (red, blue, etc.), hex (#ff0000), RGB (rgb(255,0,0)), or 8-bit index (0-255)"),
+        _ => Err(
+            "unknown color format. Use: named colors (red, blue, etc.), hex (#ff0000), RGB (rgb(255,0,0)), or 8-bit index (0-255)",
+        ),
     }
 }
 
@@ -1265,25 +1269,27 @@ pub fn string_to_color<T: Into<String>>(val: T) -> Result<ratatui::style::Color,
 fn parse_hex_color(color_str: &str) -> Option<ratatui::style::Color> {
     let hex = color_str.strip_prefix('#').unwrap_or(color_str);
 
-    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        if let (Ok(r), Ok(g), Ok(b)) = (
+    if hex.len() == 6
+        && hex.chars().all(|c| c.is_ascii_hexdigit())
+        && let (Ok(r), Ok(g), Ok(b)) = (
             u8::from_str_radix(&hex[0..2], 16),
             u8::from_str_radix(&hex[2..4], 16),
             u8::from_str_radix(&hex[4..6], 16),
-        ) {
-            return Some(ratatui::style::Color::Rgb(r, g, b));
-        }
+        )
+    {
+        return Some(ratatui::style::Color::Rgb(r, g, b));
     }
 
     // Support 3-digit hex (#RGB -> #RRGGBB)
-    if hex.len() == 3 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        if let (Ok(r), Ok(g), Ok(b)) = (
+    if hex.len() == 3
+        && hex.chars().all(|c| c.is_ascii_hexdigit())
+        && let (Ok(r), Ok(g), Ok(b)) = (
             u8::from_str_radix(&format!("{}{}", &hex[0..1], &hex[0..1]), 16),
             u8::from_str_radix(&format!("{}{}", &hex[1..2], &hex[1..2]), 16),
             u8::from_str_radix(&format!("{}{}", &hex[2..3], &hex[2..3]), 16),
-        ) {
-            return Some(ratatui::style::Color::Rgb(r, g, b));
-        }
+        )
+    {
+        return Some(ratatui::style::Color::Rgb(r, g, b));
     }
 
     None
@@ -1311,14 +1317,14 @@ fn parse_rgb_color(color_str: &str) -> Option<ratatui::style::Color> {
 /// Parse RGB values from comma-separated string
 fn parse_rgb_values(values: &str) -> Option<ratatui::style::Color> {
     let parts: Vec<&str> = values.split(',').map(|s| s.trim()).collect();
-    if parts.len() == 3 {
-        if let (Ok(r), Ok(g), Ok(b)) = (
+    if parts.len() == 3
+        && let (Ok(r), Ok(g), Ok(b)) = (
             parts[0].parse::<u8>(),
             parts[1].parse::<u8>(),
             parts[2].parse::<u8>(),
-        ) {
-            return Some(ratatui::style::Color::Rgb(r, g, b));
-        }
+        )
+    {
+        return Some(ratatui::style::Color::Rgb(r, g, b));
     }
     None
 }
@@ -1345,7 +1351,7 @@ fn parse_pinned_order_mode(value: &str) -> Option<PinnedOrderMode> {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_launch_method_count, parse_launch_prefix, set_launch_prefix, set_systemd_run, Opts,
+        Opts, active_launch_method_count, parse_launch_prefix, set_launch_prefix, set_systemd_run,
     };
 
     #[test]

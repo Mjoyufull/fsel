@@ -6,7 +6,7 @@ pub mod scan;
 pub mod select;
 
 use crate::common::Item;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use ratatui::style::Color;
 use std::collections::HashMap;
 
@@ -186,12 +186,10 @@ impl TagMetadataFormatter {
                         display.push(' ');
                     }
                     display.push_str(tag);
-                    if include_color_names {
-                        if let Some(color) = &meta.color {
-                            display.push('(');
-                            display.push_str(color);
-                            display.push(')');
-                        }
+                    if include_color_names && let Some(color) = &meta.color {
+                        display.push('(');
+                        display.push_str(color);
+                        display.push(')');
                     }
                     display
                 } else {
@@ -263,15 +261,13 @@ pub fn load_tag_metadata(
     use redb::ReadableDatabase;
     let mut tags = std::collections::HashMap::new();
 
-    if let Ok(read_txn) = db.begin_read() {
-        if let Ok(table) = read_txn.open_table(TAG_METADATA_TABLE) {
-            if let Ok(Some(data)) = table.get("tag_metadata") {
-                if let Ok(metadata) = postcard::from_bytes::<Vec<TagMetadata>>(data.value()) {
-                    for tag in metadata {
-                        tags.insert(tag.name.clone(), tag);
-                    }
-                }
-            }
+    if let Ok(read_txn) = db.begin_read()
+        && let Ok(table) = read_txn.open_table(TAG_METADATA_TABLE)
+        && let Ok(Some(data)) = table.get("tag_metadata")
+        && let Ok(metadata) = postcard::from_bytes::<Vec<TagMetadata>>(data.value())
+    {
+        for tag in metadata {
+            tags.insert(tag.name.clone(), tag);
         }
     }
 

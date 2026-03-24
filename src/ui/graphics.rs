@@ -1,6 +1,6 @@
-use eyre::{eyre, Result};
-use ratatui::layout::Rect;
+use eyre::{Result, eyre};
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
@@ -137,10 +137,10 @@ impl ImageManager {
         self.update_lru(rowid);
 
         // Enforce cache capacity
-        if self.cache_order.len() > self.cache_capacity {
-            if let Some(old_rowid) = self.cache_order.pop_front() {
-                self.cache.remove(&old_rowid);
-            }
+        if self.cache_order.len() > self.cache_capacity
+            && let Some(old_rowid) = self.cache_order.pop_front()
+        {
+            self.cache.remove(&old_rowid);
         }
 
         self.current_rowid = Some(rowid.to_string());
@@ -153,18 +153,18 @@ impl ImageManager {
 
     /// Render the current image into the given area
     pub fn render(&mut self, f: &mut Frame, area: Rect) -> Result<()> {
-        if let Some(rowid) = &self.current_rowid {
-            if let Some(protocol) = self.cache.get_mut(rowid) {
-                f.render_stateful_widget(
-                    StatefulImage::default().resize(Resize::Fit(None)),
-                    area,
-                    protocol,
-                );
+        if let Some(rowid) = &self.current_rowid
+            && let Some(protocol) = self.cache.get_mut(rowid)
+        {
+            f.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Fit(None)),
+                area,
+                protocol,
+            );
 
-                // Propagate encoding/resize errors
-                if let Some(Err(e)) = protocol.last_encoding_result() {
-                    return Err(eyre!("Image encoding failed: {}", e));
-                }
+            // Propagate encoding/resize errors
+            if let Some(Err(e)) = protocol.last_encoding_result() {
+                return Err(eyre!("Image encoding failed: {}", e));
             }
         }
         Ok(())

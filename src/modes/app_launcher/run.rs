@@ -1,14 +1,14 @@
 //! Application launcher mode
 
 use crate::cli::Opts;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr, eyre};
 
 use crate::ui::{InputConfig, InputEvent as Event, UI};
 
-use crate::core::state::{sort_by_ranking, Message, State};
+use crate::core::state::{Message, State, sort_by_ranking};
 use directories::ProjectDirs;
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use redb::ReadableTable;
 use scopeguard::defer;
 use std::collections::BTreeSet;
@@ -23,12 +23,12 @@ pub async fn run(cli: Opts) -> Result<()> {
 
     // Handle direct launch mode (bypass TUI)
     // Require at least 2 characters, otherwise just launch TUI
-    if let Some(ref program_name) = cli.program {
-        if program_name.len() >= 2 {
-            return super::search::launch_program_directly(&cli, program_name);
-        }
-        // Less than 2 characters, ignore and continue to TUI
+    if let Some(ref program_name) = cli.program
+        && program_name.len() >= 2
+    {
+        return super::search::launch_program_directly(&cli, program_name);
     }
+    // Less than 2 characters, ignore and continue to TUI
 
     crate::setup_terminal(cli.disable_mouse)?;
     defer! {
@@ -74,11 +74,11 @@ pub async fn run(cli: Opts) -> Result<()> {
                     }
 
                     for pid in target_pids.clone() {
-                        if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
-                            if e.raw_os_error() != Some(libc::ESRCH) {
-                                return Err(eyre!("Failed to kill process {}: {}", pid, e));
-                                // Log or handle error, but don't necessarily exit
-                            }
+                        if let Err(e) = crate::process::kill_process_sigterm_result(pid)
+                            && e.raw_os_error() != Some(libc::ESRCH)
+                        {
+                            return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                            // Log or handle error, but don't necessarily exit
                         }
 
                         const CHECK_INTERVAL_MS: u64 = 5;
@@ -126,68 +126,64 @@ pub async fn run(cli: Opts) -> Result<()> {
                 } else {
                     return Err(eyre!("Fsel is already running"));
                 }
-            } else if cli.replace {
-                if let Ok(holders) = crate::find_processes_holding_file(&hist_db_file) {
-                    if !holders.is_empty() {
-                        for pid in holders.clone() {
-                            if let Err(e) = crate::process::kill_process_sigterm_result(pid) {
-                                if e.raw_os_error() != Some(libc::ESRCH) {
-                                    return Err(eyre!("Failed to kill process {}: {}", pid, e));
-                                    // Log or handle error, but don't necessarily exit
-                                }
-                            }
-
-                            const CHECK_INTERVAL_MS: u64 = 5;
-                            const TOTAL_WAIT_MS: u64 = 30;
-                            let mut waited_ms = 0u64;
-                            let mut escalated = false;
-
-                            loop {
-                                #[allow(unsafe_code)]
-                                let still_running = unsafe { libc::kill(pid, 0) == 0 };
-
-                                if !still_running {
-                                    break;
-                                }
-
-                                if !escalated {
-                                    #[allow(unsafe_code)]
-                                    unsafe {
-                                        let _ = libc::kill(pid, libc::SIGKILL);
-                                    }
-                                    escalated = true;
-                                }
-
-                                if waited_ms >= TOTAL_WAIT_MS {
-                                    return Err(eyre::eyre!(
-                                        "Existing fsel instance (pid {pid}) refused to exit"
-                                    ));
-                                }
-
-                                std::thread::sleep(std::time::Duration::from_millis(
-                                    CHECK_INTERVAL_MS,
-                                ));
-                                waited_ms += CHECK_INTERVAL_MS;
-                            }
-                        }
-
-                        if let Ok(final_holders) = crate::find_processes_holding_file(&hist_db_file)
-                        {
-                            if !final_holders.is_empty() {
-                                return Err(eyre::eyre!(
-                                    "Existing fsel instance (pid(s) {:?}) refused to exit",
-                                    final_holders
-                                ));
-                            }
-                        }
+            } else if cli.replace
+                && let Ok(holders) = crate::find_processes_holding_file(&hist_db_file)
+                && !holders.is_empty()
+            {
+                for pid in holders.clone() {
+                    if let Err(e) = crate::process::kill_process_sigterm_result(pid)
+                        && e.raw_os_error() != Some(libc::ESRCH)
+                    {
+                        return Err(eyre!("Failed to kill process {}: {}", pid, e));
+                        // Log or handle error, but don't necessarily exit
                     }
+
+                    const CHECK_INTERVAL_MS: u64 = 5;
+                    const TOTAL_WAIT_MS: u64 = 30;
+                    let mut waited_ms = 0u64;
+                    let mut escalated = false;
+
+                    loop {
+                        #[allow(unsafe_code)]
+                        let still_running = unsafe { libc::kill(pid, 0) == 0 };
+
+                        if !still_running {
+                            break;
+                        }
+
+                        if !escalated {
+                            #[allow(unsafe_code)]
+                            unsafe {
+                                let _ = libc::kill(pid, libc::SIGKILL);
+                            }
+                            escalated = true;
+                        }
+
+                        if waited_ms >= TOTAL_WAIT_MS {
+                            return Err(eyre::eyre!(
+                                "Existing fsel instance (pid {pid}) refused to exit"
+                            ));
+                        }
+
+                        std::thread::sleep(std::time::Duration::from_millis(CHECK_INTERVAL_MS));
+                        waited_ms += CHECK_INTERVAL_MS;
+                    }
+                }
+
+                if let Ok(final_holders) = crate::find_processes_holding_file(&hist_db_file)
+                    && !final_holders.is_empty()
+                {
+                    return Err(eyre::eyre!(
+                        "Existing fsel instance (pid(s) {:?}) refused to exit",
+                        final_holders
+                    ));
                 }
             }
 
-            if let Err(err) = fs::remove_file(&lock_path) {
-                if err.kind() != io::ErrorKind::NotFound {
-                    return Err(err).wrap_err("Failed to remove existing lockfile");
-                }
+            if let Err(err) = fs::remove_file(&lock_path)
+                && err.kind() != io::ErrorKind::NotFound
+            {
+                return Err(err).wrap_err("Failed to remove existing lockfile");
             }
 
             let mut lock_file = fs::File::create(&lock_path)?;
@@ -210,11 +206,12 @@ pub async fn run(cli: Opts) -> Result<()> {
         let _lock_guard = LockGuard(lock_path.clone());
 
         let mut db_instance = redb::Database::create(&hist_db_file);
-        if let Err(err) = &db_instance {
-            if cli.replace && err.to_string().contains("Cannot acquire lock") {
-                std::thread::sleep(std::time::Duration::from_millis(15));
-                db_instance = redb::Database::create(&hist_db_file);
-            }
+        if let Err(err) = &db_instance
+            && cli.replace
+            && err.to_string().contains("Cannot acquire lock")
+        {
+            std::thread::sleep(std::time::Duration::from_millis(15));
+            db_instance = redb::Database::create(&hist_db_file);
         }
 
         let db_instance = db_instance
@@ -457,8 +454,8 @@ pub async fn run(cli: Opts) -> Result<()> {
                              // Actually, State update doesn't have DB access.
                              // So we handle it here and return Tick.
                              // Check if we need to manually toggle logic here.
-                             if let Some(idx) = state.selected {
-                                 if let Some(app) = state.shown.get(idx).cloned() {
+                             if let Some(idx) = state.selected
+                                 && let Some(app) = state.shown.get(idx).cloned() {
                                      let toggle_pin_result =
                                          crate::core::database::toggle_pin(&db, &app.name);
                                      if let Ok(is_pinned) = toggle_pin_result {
@@ -481,7 +478,6 @@ pub async fn run(cli: Opts) -> Result<()> {
                                         state.filter();
                                      }
                                  }
-                             }
                              Message::Tick
                          } else {
                              match key.code {
@@ -634,24 +630,24 @@ pub async fn run(cli: Opts) -> Result<()> {
         }
 
         if state.should_launch {
-            if let Some(selected_idx) = state.selected {
-                if let Some(app) = state.shown.get(selected_idx) {
-                    // Record access in frecency
-                    if let Err(e) = crate::core::database::record_access(&db, &app.name) {
-                        eprintln!("Failed to record access: {}", e);
-                    }
-
-                    crate::shutdown_terminal(cli.disable_mouse)?;
-
-                    // Launch
-                    // Handle --no-exec
-                    if cli.no_exec {
-                        println!("{}", app.command);
-                        return Ok(());
-                    }
-
-                    super::launch::launch_app(app, &cli, &db)?;
+            if let Some(selected_idx) = state.selected
+                && let Some(app) = state.shown.get(selected_idx)
+            {
+                // Record access in frecency
+                if let Err(e) = crate::core::database::record_access(&db, &app.name) {
+                    eprintln!("Failed to record access: {}", e);
                 }
+
+                crate::shutdown_terminal(cli.disable_mouse)?;
+
+                // Launch
+                // Handle --no-exec
+                if cli.no_exec {
+                    println!("{}", app.command);
+                    return Ok(());
+                }
+
+                super::launch::launch_app(app, &cli, &db)?;
             }
             break;
         }
