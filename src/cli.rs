@@ -851,7 +851,8 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
                 if tag_arg == "list" {
                     default.cclip_tag_list = true;
                     // Check if there's another argument for specific tag
-                    if let Ok(val) = parser.value() {
+                    let next_tag_value = parser.value();
+                    if let Ok(val) = next_tag_value {
                         default.cclip_tag = Some(
                             val.into_string()
                                 .map_err(|_| "Tag name must be valid UTF-8")?,

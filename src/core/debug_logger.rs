@@ -97,15 +97,15 @@ pub fn log_startup_info(cli: &crate::cli::Opts, app_count: usize, frecency_count
 
 pub fn log_event(event: &str) {
     if let Some(path) = LOG_FILE.get() {
-        if let Ok(mut file) = OpenOptions::new().append(true).open(path) {
+        match OpenOptions::new().append(true).open(path) { Ok(mut file) => {
             let elapsed = SESSION_START
                 .get()
                 .map(|start| start.elapsed().as_millis())
                 .unwrap_or(0);
             let _ = writeln!(file, "[{:>6}ms] EVENT: {}", elapsed, event);
-        } else {
+        } _ => {
             eprintln!("Warning: Failed to write to log file: {:?}", path);
-        }
+        }}
     }
 }
 

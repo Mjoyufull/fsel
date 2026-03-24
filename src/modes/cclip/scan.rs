@@ -42,7 +42,8 @@ pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
 
     for line in stdout.lines() {
         if !line.trim().is_empty() {
-            match CclipItem::from_line(line.to_string()) {
+            let parsed_item = CclipItem::from_line(line.to_string());
+            match parsed_item {
                 Ok(item) => items.push(item),
                 Err(e) => eprintln!("Warning: Failed to parse cclip line: {}", e),
             }

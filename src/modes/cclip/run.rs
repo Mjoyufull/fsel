@@ -363,7 +363,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         let mut already_loaded = false;
                         let mut is_loading = false;
 
-                        if let Ok(mut manager_lock) = manager.try_lock() {
+                        let manager_try_lock = manager.try_lock();
+                        if let Ok(mut manager_lock) = manager_try_lock {
                             if manager_lock.is_cached(rowid) {
                                 manager_lock.set_image(rowid);
                                 already_loaded = true;
@@ -387,7 +388,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                         if !already_loaded && !is_loading {
                             let failed_lock = failed_rowids.clone();
-                            let is_failed = failed_lock.lock().await.contains(rowid);
+                            let failed_guard = failed_lock.lock().await;
+                            let is_failed = failed_guard.contains(rowid);
+                            drop(failed_guard);
 
                             if !is_failed {
                                 // Set state to loading
@@ -405,7 +408,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 tokio::spawn(async move {
                                     let result = AssertUnwindSafe(async {
                                         let mut manager_lock = manager_clone.lock().await;
-                                        manager_lock.load_cclip_image(&rowid_clone).await
+                                        let load_result =
+                                            manager_lock.load_cclip_image(&rowid_clone).await;
+                                        drop(manager_lock);
+                                        load_result
                                     })
                                     .catch_unwind()
                                     .await;
@@ -421,7 +427,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         }
                                         Ok(Err(e)) => {
                                             failed_lock.lock().await.insert(rowid_clone.clone());
-                                            if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                            let manager_try_lock = manager_clone.try_lock();
+                                            if let Ok(mut manager_lock) = manager_try_lock {
                                                 manager_lock.clear();
                                             }
                                             let mut state = crate::ui::DISPLAY_STATE
@@ -431,7 +438,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                         }
                                         Err(_) => {
                                             failed_lock.lock().await.insert(rowid_clone.clone());
-                                            if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                                            let manager_try_lock = manager_clone.try_lock();
+                                            if let Ok(mut manager_lock) = manager_try_lock {
                                                 manager_lock.clear();
                                             }
                                             let mut state = crate::ui::DISPLAY_STATE
@@ -450,11 +458,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 } else if previous_was_image {
                     // Clear the image manager if we transitioned away from an image
                     if let Some(manager) = &mut image_manager {
-                        if let Ok(mut manager_lock) = manager.try_lock() {
+                        let manager_try_lock = manager.try_lock();
+                        if let Ok(mut manager_lock) = manager_try_lock {
                             manager_lock.clear();
                         }
                     }
-                    if let Ok(mut failed) = failed_rowids.try_lock() {
+                    let failed_try_lock = failed_rowids.try_lock();
+                    if let Ok(mut failed) = failed_try_lock {
                         failed.clear();
                     }
                 }
@@ -827,7 +837,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 let mut image_rendered = false;
                 if show_content_panel && image_preview_enabled && current_is_image {
                     if let Some(manager) = &mut image_manager {
-                        if let Ok(mut manager_lock) = manager.try_lock() {
+                        let manager_try_lock = manager.try_lock();
+                        if let Ok(mut manager_lock) = manager_try_lock {
                             // Calculate image area INSIDE the content panel borders
                             let content_chunk = chunks[content_panel_index];
                             let image_area = ratatui::layout::Rect {
@@ -902,7 +913,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     loop {
                                         let mut render_err = Ok(());
                                         terminal.draw(|f| {
-                                            if let Ok(mut manager_lock) = manager.try_lock() {
+                                            let manager_try_lock = manager.try_lock();
+                                            if let Ok(mut manager_lock) = manager_try_lock {
                                                 if let Err(e) = manager_lock.render(f, f.area()) {
                                                     render_err = Err(e);
                                                 }
@@ -946,7 +958,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                         (code, mods) if cli.keybinds.matches_tag(code, mods) => {
                             // Clear any displayed image when entering tag mode
                             if let Some(manager) = &mut image_manager {
-                                if let Ok(mut manager_lock) = manager.try_lock() {
+                                let manager_try_lock = manager.try_lock();
+                                if let Ok(mut manager_lock) = manager_try_lock {
                                     manager_lock.clear();
                                 }
                             }
@@ -974,7 +987,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 if selected_idx < ui.shown.len() {
                                     let item = &ui.shown[selected_idx];
                                     let selected_item = Some(item.original_line.clone());
-                                    match super::CclipItem::from_line(item.original_line.clone()) {
+                                    let parsed_item =
+                                        super::CclipItem::from_line(item.original_line.clone());
+                                    match parsed_item {
                                         Ok(cclip_item) => {
                                             if !cclip_item.tags.is_empty() {
                                                 let first_tag = cclip_item.tags[0].clone();
@@ -1013,7 +1028,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     if selected < ui.shown.len() {
                                         let item = &ui.shown[selected];
                                         if let Some(rowid) = ui.get_cclip_rowid(item) {
-                                            match super::select::delete_item(&rowid) {
+                                            let delete_result = super::select::delete_item(&rowid);
+                                            match delete_result {
                                                 Ok(()) => {
                                                     ui.set_temp_message(format!(
                                                         "Deleted entry {}",
@@ -1089,13 +1105,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                                     // Check if tag already exists on this item - if so, enter editing mode
                                     let is_editing = if let Some(ref item_line) = selected_item {
-                                        if let Ok(cclip_item) =
-                                            super::CclipItem::from_line(item_line.clone())
-                                        {
+                                        let parsed_item =
+                                            super::CclipItem::from_line(item_line.clone());
+                                        match parsed_item {
+                                        Ok(cclip_item) => {
                                             cclip_item.tags.contains(&tag_name)
-                                        } else {
+                                        } _ => {
                                             false
-                                        }
+                                        }}
                                     } else {
                                         false
                                     };
@@ -1182,13 +1199,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                                     // Check if this is editing an existing tag (already on item)
                                     let is_editing = if let Some(ref item_line) = selected_item {
-                                        if let Ok(cclip_item) =
-                                            super::CclipItem::from_line(item_line.clone())
-                                        {
+                                        let parsed_item =
+                                            super::CclipItem::from_line(item_line.clone());
+                                        match parsed_item {
+                                        Ok(cclip_item) => {
                                             cclip_item.tags.contains(&tag_name)
-                                        } else {
+                                        } _ => {
                                             false
-                                        }
+                                        }}
                                     } else {
                                         false
                                     };
@@ -1202,9 +1220,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                                             // Only call tag_item if not editing (would fail if tag already exists)
                                             if !is_editing {
-                                                if let Err(e) =
-                                                    super::select::tag_item(rowid, &tag_name)
-                                                {
+                                                let tag_result =
+                                                    super::select::tag_item(rowid, &tag_name);
+                                                if let Err(e) = tag_result {
                                                     ui.set_temp_message(format!(
                                                         "Failed to tag item: {}",
                                                         e
@@ -1223,7 +1241,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     emoji,
                                                 },
                                             );
-                                            let _ = super::save_tag_metadata(&db, &tag_metadata_map);
+                                            let save_tag_metadata_result =
+                                                super::save_tag_metadata(&db, &tag_metadata_map);
+                                            let _ = save_tag_metadata_result;
                                             tag_metadata_formatter = super::TagMetadataFormatter::new(
                                                 tag_metadata_map.clone(),
                                             );
@@ -1269,14 +1289,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                 Some(input.trim())
                                             };
 
-                                            if let Err(e) =
-                                                super::select::untag_item(rowid, tag_to_remove)
-                                            {
+                                            let untag_result =
+                                                super::select::untag_item(rowid, tag_to_remove);
+                                            match untag_result {
+                                            Err(e) => {
                                                 ui.set_temp_message(format!(
                                                     "Failed to remove tag: {}",
                                                     e
                                                 ));
-                                            } else {
+                                            } _ => {
                                                 // Reload clipboard history to get updated tags
                                                 let updated_items_res = if let Some(ref tag_name) =
                                                     cli.cclip_tag
@@ -1296,7 +1317,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                         max_visible,
                                                     );
                                                 }
-                                            }
+                                            }}
                                         }
                                     }
 
@@ -1308,9 +1329,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     if let Some(selected) = ui.selected {
                                         if selected < ui.shown.len() {
                                             let original_line = &ui.shown[selected].original_line;
-                                            match super::CclipItem::from_line(original_line.clone()) {
+                                            let parsed_item =
+                                                super::CclipItem::from_line(original_line.clone());
+                                            match parsed_item {
                                                 Ok(cclip_item) => {
-                                                    if let Err(e) = cclip_item.copy_to_clipboard() {
+                                                    let copy_result =
+                                                        cclip_item.copy_to_clipboard();
+                                                    if let Err(e) = copy_result {
                                                         ui.set_temp_message(format!(
                                                             "Copy failed: {}",
                                                             e
@@ -1319,9 +1344,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     }
 
                                                     // clean up terminal completely and exit
-                                                    terminal
+                                                    let show_cursor_result = terminal
                                                         .show_cursor()
-                                                        .wrap_err("Failed to show cursor")?;
+                                                        .wrap_err("Failed to show cursor");
+                                                    show_cursor_result?;
                                                     drop(terminal);
                                                     if !disable_mouse {
                                                         let _ =
@@ -1667,15 +1693,20 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                                 if clicked_item_index < ui.shown.len() {
                                     let original_line = &ui.shown[clicked_item_index].original_line;
-                                    match super::CclipItem::from_line(original_line.clone()) {
+                                    let parsed_item =
+                                        super::CclipItem::from_line(original_line.clone());
+                                    match parsed_item {
                                         Ok(cclip_item) => {
-                                            if let Err(e) = cclip_item.copy_to_clipboard() {
+                                            let copy_result = cclip_item.copy_to_clipboard();
+                                            if let Err(e) = copy_result {
                                                 ui.set_temp_message(format!("Copy failed: {}", e));
                                                 continue;
                                             }
 
                                             // clean up terminal completely and exit
-                                            terminal.show_cursor().wrap_err("Failed to show cursor")?;
+                                            let show_cursor_result =
+                                                terminal.show_cursor().wrap_err("Failed to show cursor");
+                                            show_cursor_result?;
                                             drop(terminal);
                                             if !disable_mouse {
                                                 let _ = io::stderr().execute(DisableMouseCapture);

@@ -459,7 +459,9 @@ pub async fn run(cli: Opts) -> Result<()> {
                              // Check if we need to manually toggle logic here.
                              if let Some(idx) = state.selected {
                                  if let Some(app) = state.shown.get(idx).cloned() {
-                                     if let Ok(is_pinned) = crate::core::database::toggle_pin(&db, &app.name) {
+                                     let toggle_pin_result =
+                                         crate::core::database::toggle_pin(&db, &app.name);
+                                     if let Ok(is_pinned) = toggle_pin_result {
                                         // Update app in lists
                                         for a in &mut state.apps {
                                             if a.name == app.name {

@@ -116,10 +116,10 @@ pub fn find_app_by_name_fast(
             let file_path = entry.path();
 
             // Try cache first
-            let app_result: Result<desktop::App, eyre::Report> =
-                if let Ok(Some(cached_app)) = desktop_cache.get(&file_path) {
-                    Ok(cached_app)
-                } else {
+            let app_result: Result<desktop::App, eyre::Report> = match desktop_cache.get(&file_path)
+            {
+                Ok(Some(cached_app)) => Ok(cached_app),
+                _ => {
                     // Parse the file
                     match fs::read_to_string(&file_path) {
                         Ok(contents) => {
@@ -127,7 +127,9 @@ pub fn find_app_by_name_fast(
                                 continue;
                             }
 
-                            match desktop::App::parse(&contents, None, cli.filter_desktop) {
+                            let parsed_app =
+                                desktop::App::parse(&contents, None, cli.filter_desktop);
+                            match parsed_app {
                                 Ok(mut app) => {
                                     if let Some(file_name) =
                                         file_path.file_name().and_then(|n| n.to_str())
@@ -142,7 +144,8 @@ pub fn find_app_by_name_fast(
                         }
                         Err(_) => continue,
                     }
-                };
+                }
+            };
 
             if let Ok(app) = app_result {
                 // Check if this is the app we're looking for

@@ -136,30 +136,31 @@ pub fn read_with_options(
 
         // Try to get cached file list first (instant on subsequent runs)
         let desktop_files = if let Some(ref cache) = desktop_cache {
-            if let Ok(Some(cached_paths)) = cache.get_file_list(&dirs) {
-                cached_paths
-            } else {
-                // Cache miss - walk directories using jwalk (parallel)
-                let mut desktop_files = Vec::new();
-                for dir in &dirs {
-                    for entry in WalkDir::new(dir)
-                        .skip_hidden(false)
-                        .min_depth(1)
-                        .max_depth(5)
-                        .into_iter()
-                        .filter_map(Result::ok)
-                        .filter(|entry| {
-                            !entry.file_type().is_dir()
-                                && entry.path().extension().and_then(|s| s.to_str())
-                                    == Some("desktop")
-                        })
-                    {
-                        desktop_files.push(entry.path().to_path_buf());
+            match cache.get_file_list(&dirs) {
+                Ok(Some(cached_paths)) => cached_paths,
+                _ => {
+                    // Cache miss - walk directories using jwalk (parallel)
+                    let mut desktop_files = Vec::new();
+                    for dir in &dirs {
+                        for entry in WalkDir::new(dir)
+                            .skip_hidden(false)
+                            .min_depth(1)
+                            .max_depth(5)
+                            .into_iter()
+                            .filter_map(Result::ok)
+                            .filter(|entry| {
+                                !entry.file_type().is_dir()
+                                    && entry.path().extension().and_then(|s| s.to_str())
+                                        == Some("desktop")
+                            })
+                        {
+                            desktop_files.push(entry.path().to_path_buf());
+                        }
                     }
+                    // Cache file list for next time (include dirs for mtime tracking)
+                    let _ = cache.set_file_list(desktop_files.clone(), &dirs);
+                    desktop_files
                 }
-                // Cache file list for next time (include dirs for mtime tracking)
-                let _ = cache.set_file_list(desktop_files.clone(), &dirs);
-                desktop_files
             }
         } else {
             // No cache - walk directories
@@ -197,30 +198,31 @@ pub fn read_with_options(
 
                 // Try cache first
                 let (app, file_contents) = if let Some(cache) = desktop_cache_ref {
-                    if let Ok(Some(cached_app)) = cache.get(file_path_ref) {
-                        (cached_app, None)
-                    } else {
-                        // Cache miss - read and parse
-                        match fs::read_to_string(file_path_ref) {
-                            Ok(contents) => {
-                                if !contents.contains("[Desktop Entry]") {
-                                    return None;
-                                }
-
-                                match App::parse(&contents, None, filter_desktop) {
-                                    Ok(mut app) => {
-                                        if let Some(file_name) =
-                                            file_path_ref.file_name().and_then(|n| n.to_str())
-                                        {
-                                            app.desktop_id = Some(file_name.to_string());
-                                        }
-                                        // Return this for caching later
-                                        (app, Some(contents))
+                    match cache.get(file_path_ref) {
+                        Ok(Some(cached_app)) => (cached_app, None),
+                        _ => {
+                            // Cache miss - read and parse
+                            match fs::read_to_string(file_path_ref) {
+                                Ok(contents) => {
+                                    if !contents.contains("[Desktop Entry]") {
+                                        return None;
                                     }
-                                    Err(_) => return None,
+
+                                    match App::parse(&contents, None, filter_desktop) {
+                                        Ok(mut app) => {
+                                            if let Some(file_name) =
+                                                file_path_ref.file_name().and_then(|n| n.to_str())
+                                            {
+                                                app.desktop_id = Some(file_name.to_string());
+                                            }
+                                            // Return this for caching later
+                                            (app, Some(contents))
+                                        }
+                                        Err(_) => return None,
+                                    }
                                 }
+                                Err(_) => return None,
                             }
-                            Err(_) => return None,
                         }
                     }
                 } else {
@@ -324,7 +326,8 @@ pub fn read_with_options(
                 let mut seen_executables = std::collections::HashSet::new();
 
                 for path_dir in path_var.split(':') {
-                    if let Ok(entries) = fs::read_dir(path_dir) {
+                    let entries_result = fs::read_dir(path_dir);
+                    if let Ok(entries) = entries_result {
                         for entry in entries.filter_map(Result::ok) {
                             let path = entry.path();
 
@@ -439,7 +442,7 @@ pub struct App {
     /// Not part of the specification
     pub score: i64,
     /// Number of times this app was run
-    /// Not part of the specification  
+    /// Not part of the specification
     pub history: u64,
     /// Whether this app is pinned/favorited
     /// Not part of the specification
