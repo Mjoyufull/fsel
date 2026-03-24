@@ -2,7 +2,7 @@
 
 > A Manual for Writing Rust That Ages Well Instead of Exploding Into 1,000-Line Files
 
-**Document Version:** 1.3.1  
+**Document Version:** 1.4.0  
 **Last Updated:** 2026-03-24  
 **Audience:** Future me, collaborators, contributors, and any poor bastard touching my code later  
 **Scope:** Cross-project standards for Rust-first codebases, with some general engineering rules that apply anywhere
@@ -654,6 +654,21 @@ Prefer:
 
 Example: `UserId(String)` is often better than "the first string argument is the user id."
 
+### Type-State and Phase-Aware APIs
+
+When an API has distinct phases, encode them in the type system when doing so keeps the API honest.
+
+Good candidates:
+
+- builders with required fields
+- validated vs unvalidated configuration
+- connected vs disconnected clients
+- open vs closed resources
+- state machines with legal transition rules
+
+Use the type-state pattern when it removes whole classes of runtime misuse.
+Do not force it onto tiny APIs where a simpler constructor or enum is clearer.
+
 ### Global State Policy
 
 - Module-level mutable global state is banned by default.
@@ -676,6 +691,18 @@ Types should eagerly implement the common traits that make sense:
 
 Do not derive or implement traits blindly.
 Each trait should be semantically correct, not just convenient.
+
+### Public API Evolution
+
+If a crate is shared, published, or treated as a stable internal dependency:
+
+- document the MSRV and bump it intentionally
+- treat public APIs and feature flags as compatibility contracts
+- use `#[must_use]` when dropping a return value is likely a bug
+- consider `#[non_exhaustive]` for public enums and structs that are likely to grow
+- run semver checks in CI for published crates or other semver-sensitive libraries
+
+Do not make accidental breaking changes because "it was easy to refactor locally."
 
 ### Trait Bounds
 
@@ -806,6 +833,13 @@ Public error types should:
 
 Do not collapse everything into `String` at public boundaries unless the crate is intentionally tiny and private.
 
+For error helpers:
+
+- typed errors are preferred at library boundaries
+- `thiserror` is a good fit for library/app error enums
+- `anyhow`/`eyre`-style opaque errors are acceptable in top-level binary orchestration and one-off tools
+- do not expose opaque catch-all error types as a public library contract unless that tradeoff is intentional
+
 ### Validate Early
 
 Validate arguments and state as close to the boundary as possible.
@@ -859,6 +893,20 @@ Rust has three useful test layers. Use all three when appropriate.
 - Fallible examples should use `?`, not `unwrap`.
 - Use hidden lines in doc tests when setup is necessary but not relevant.
 
+### Advanced Test Techniques
+
+Use stronger tools when the surface area justifies them:
+
+- property testing for invariants, parser round-trips, and algorithmic edge cases
+- snapshot testing for CLI output, diagnostics, rendered text, or other stable human-facing output
+- fuzzing for parsers, protocol handlers, file formats, and untrusted-input boundaries
+
+Rules:
+
+- review snapshots like code, not as magic blessed files
+- keep property tests targeted enough to debug failures
+- start fuzzing anywhere malformed input could become a crash, hang, or memory issue
+
 ### Test Structure
 
 Use `Result`-returning tests when setup is fallible and `?` improves readability.
@@ -897,6 +945,7 @@ Do not over-invest in tests that pin trivial implementation details with no beha
 - Put reusable fixtures under `tests/fixtures/`.
 - Name fixtures after what they model, not where they came from.
 - Use builders/helpers in tests when setup repetition obscures intent.
+- Treat tests as executable behavior docs, not just breakage alarms.
 
 ---
 
@@ -1165,6 +1214,19 @@ Recommended tools:
 Treat "unmaintained" as a real engineering signal, not trivia.
 If the standard library or a healthier crate now covers the same use case, prefer migrating.
 
+### Maintenance Cadence
+
+For maintained projects, run a regular hygiene pass rather than waiting for rot:
+
+- update dependencies in a controlled branch
+- review advisories and unmaintained notices
+- inspect duplicate transitive versions
+- prune dependencies and stale features
+- re-check binary size when the project ships binaries
+
+Quarterly is a good default for active projects.
+More often is reasonable for security-sensitive or fast-moving repos.
+
 ### Feature Flag Policy
 
 Cargo features should be:
@@ -1186,6 +1248,19 @@ Bad:
 - `use-serde`
 - `with-cli`
 - `no-std-support`
+
+Features are for real optional capability, platform support, or expensive dependencies.
+They are not a bandage for API instability.
+
+### Published Crate Policy
+
+For published crates or semver-sensitive internal libraries:
+
+- document MSRV in the README and `Cargo.toml`
+- bump MSRV intentionally and mention it in release notes when it changes
+- check semver compatibility before release
+- prefer additive evolution over surprise breakage
+- do not expose dependencies in the public API unless you are willing to version with them
 
 ### Workspace Policy
 
@@ -1237,6 +1312,23 @@ That said, some bad patterns are obvious and should be avoided by default:
 - Never hold a lock across code that can block or across `.await`.
 - Concurrency is not a substitute for better structure.
 
+### Async and Blocking Policy
+
+Async should be a small delta on top of otherwise normal Rust.
+
+Rules:
+
+- keep core business logic synchronous unless concurrency or I/O is the point
+- use async primarily at I/O, protocol, and service boundaries
+- do not perform blocking I/O or heavy CPU work on an async executor thread
+- use `spawn_blocking`, dedicated worker threads, or separate processes when blocking work is unavoidable
+- prefer bounded queues/channels and explicit backpressure over unbounded accumulation
+- cancellation should leave state consistent and resources releasable
+- test async code with the real runtime you expect to ship, not only mocked helpers
+
+Choose runtime shape deliberately.
+Do not add executor complexity or cross-runtime abstractions without a real need.
+
 ### Perf Review Trigger
 
 If code is on a hot path and not obviously cheap:
@@ -1253,6 +1345,7 @@ When performance matters:
 - benchmark representative workloads, not toy inputs only
 - use release builds for meaningful measurements
 - track tail behavior, not just averages, when latency matters
+- use profilers when timing alone does not explain the result
 - measure at the right layer:
   - microbenchmarks for local algorithm changes
   - integration/load tests for system behavior
@@ -1287,6 +1380,7 @@ If a project ships binaries, periodically inspect:
 - whether features can be disabled
 
 Use `cargo bloat` to learn where size is actually coming from before guessing.
+Use `cargo flamegraph` or an equivalent profiler when CPU cost needs attribution rather than intuition.
 
 ---
 
@@ -1553,6 +1647,7 @@ Before merging, ask:
 - Is the function length sane?
 - Is the abstraction level consistent?
 - Is there a missing module split?
+- Does async code avoid holding locks, guards, or broad mutable state across `.await`?
 
 ### API Quality
 
@@ -1612,6 +1707,7 @@ Before merging, ask:
 - blanket `allow` attributes to quiet code smells
 - leaving failing or stale doc examples
 - leaking unsafe/FFI concerns into normal business logic
+- holding locks or guards across `.await` in maintained async code
 
 **Strongly Discouraged**
 
@@ -1661,6 +1757,12 @@ If the repo cares about licenses, sources, duplicate crates, or advisory policy:
 cargo deny check
 ```
 
+For maintained shared crates, also consider:
+
+```bash
+cargo semver-checks check-release
+```
+
 ### Locked Verification
 
 If the repo commits `Cargo.lock`, use locked resolution for CI and release verification:
@@ -1686,6 +1788,20 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo fix
 cargo fix --edition
 ```
+
+### Advanced Inspection
+
+Use these when the problem deserves deeper tooling:
+
+```bash
+cargo flamegraph
+cargo expand
+cargo +nightly miri test
+```
+
+- `cargo flamegraph` for real CPU hotspots
+- `cargo expand` for macro expansion inspection
+- Miri for unsafe, aliasing, and low-level undefined-behavior checks
 
 ### Example `rustfmt.toml`
 
@@ -1744,11 +1860,15 @@ This standard boils down to this:
 - split by responsibility, not by accident
 - prefer explicit inputs over ambient magic
 - encode invariants in types
+- use typestate when it removes real misuse
 - keep names honest about ownership, allocation, and mutation cost
 - return errors, do not panic casually
 - make exits and failure modes intentional
+- keep async at the boundary unless concurrency is the point
 - test at unit, integration, and doc levels
+- reach for property tests, snapshots, and fuzzing when the surface demands them
 - document public behavior
+- treat MSRV and public APIs as compatibility contracts
 - record important technical decisions
 - keep warnings at zero
 - keep dependencies healthy
@@ -1859,6 +1979,22 @@ Primary references used to shape this document:
   https://github.com/kbknapp/cargo-outdated
 - cargo-bloat  
   https://github.com/RazrFalcon/cargo-bloat
+- Tokio tutorial: shared state  
+  https://tokio.rs/tokio/tutorial/shared-state
+- cargo-semver-checks  
+  https://github.com/obi1kenobi/cargo-semver-checks
+- flamegraph / cargo flamegraph  
+  https://github.com/flamegraph-rs/flamegraph
+- cargo-fuzz  
+  https://github.com/rust-fuzz/cargo-fuzz
+- cargo-expand  
+  https://github.com/dtolnay/cargo-expand
+- Miri  
+  https://github.com/rust-lang/miri
+- proptest  
+  https://github.com/proptest-rs/proptest
+- insta  
+  https://github.com/mitsuhiko/insta
 
 ---
 
