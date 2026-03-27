@@ -130,8 +130,8 @@ Need install variants, launch methods, or mode-specific examples? See [USAGE.md]
 
 * Install fsel on void
     ```sh
-echo repository=https://raw.githubusercontent.com/Event-Horizon-VL/blackhole-vl/repository-x86_64 | sudo tee /etc/xbps.d/20-repository-extra.conf
-sudo xbps-install -S fsel
+    echo repository=https://raw.githubusercontent.com/Event-Horizon-VL/blackhole-vl/repository-x86_64 | sudo tee /etc/xbps.d/20-repository-extra.conf
+    sudo xbps-install -S fsel
     ```
 #### Option 5: Build from source
 
