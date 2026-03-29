@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 static ICON_THEME: OnceLock<String> = OnceLock::new();
-static PATH_CACHE: OnceLock<Mutex<HashMap<(String, u16), Option<PathBuf>>>> = OnceLock::new();
+type IconPathCache = Mutex<HashMap<(String, u16), Option<PathBuf>>>;
+static PATH_CACHE: OnceLock<IconPathCache> = OnceLock::new();
 
 fn cached_theme() -> &'static str {
     ICON_THEME.get_or_init(|| {
