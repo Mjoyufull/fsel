@@ -8,6 +8,18 @@ use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEventKind};
 use scopeguard::defer;
 use std::io;
 
+fn effective_content_height(total_height: u16, content_panel_percent: u16) -> u16 {
+    if content_panel_percent == 0 {
+        0
+    } else {
+        ((total_height as f32 * content_panel_percent as f32 / 100.0).round() as u16).max(3)
+    }
+}
+
+fn items_panel_height(total_height: u16, content_height: u16, input_panel_height: u16) -> u16 {
+    total_height.saturating_sub(content_height.saturating_add(input_panel_height))
+}
+
 /// Run dmenu mode
 pub fn run(cli: &Opts) -> Result<()> {
     use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
@@ -185,8 +197,8 @@ pub fn run(cli: &Opts) -> Result<()> {
 
             // Layout calculation
             let total_height = f.area().height;
-            let content_height =
-                (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
+            let content_height = effective_content_height(total_height, content_panel_height);
+            let show_content_panel = content_height > 0;
 
             // Get content panel position (defaults to Top if not set)
             let content_panel_position = get_dmenu_panel_position(
@@ -203,7 +215,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
                             .constraints([
-                                Constraint::Length(content_height.max(3)),
+                                Constraint::Length(content_height),
                                 Constraint::Min(1),
                                 Constraint::Length(input_panel_height),
                             ])
@@ -216,7 +228,7 @@ pub fn run(cli: &Opts) -> Result<()> {
                             .direction(Direction::Vertical)
                             .constraints([
                                 Constraint::Min(1),
-                                Constraint::Length(content_height.max(3)),
+                                Constraint::Length(content_height),
                                 Constraint::Length(input_panel_height),
                             ])
                             .split(f.area());
@@ -227,9 +239,9 @@ pub fn run(cli: &Opts) -> Result<()> {
                         let layout = Layout::default()
                             .direction(Direction::Vertical)
                             .constraints([
-                                Constraint::Min(1),                        // Items panel (remaining space)
-                                Constraint::Length(input_panel_height),    // Input panel
-                                Constraint::Length(content_height.max(3)), // Content panel at bottom
+                                Constraint::Min(1),                     // Items panel (remaining space)
+                                Constraint::Length(input_panel_height), // Input panel
+                                Constraint::Length(content_height),     // Content panel at bottom
                             ])
                             .split(f.area());
                         (layout, 2, 0, 1)
@@ -361,7 +373,7 @@ pub fn run(cli: &Opts) -> Result<()> {
 
             // NOW render all components in their dynamic positions
             // Only render content panel if not hide_before_typing or query is not empty
-            if !cli.dmenu_hide_before_typing || !ui.query.is_empty() {
+            if show_content_panel && (!cli.dmenu_hide_before_typing || !ui.query.is_empty()) {
                 f.render_widget(content_paragraph, chunks[content_panel_index]);
             }
             // Only render items list if not in prompt-only mode and (not hide_before_typing or query is not empty)
@@ -485,12 +497,13 @@ pub fn run(cli: &Opts) -> Result<()> {
                                 get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
 
                             // Use same calculation as rendering code
-                            let content_height = (total_height as f32 * content_panel_height as f32
-                                / 100.0)
-                                .round() as u16;
-                            let content_height = content_height.max(3);
-                            let items_panel_height =
-                                total_height - content_height - input_panel_height;
+                            let content_height =
+                                effective_content_height(total_height, content_panel_height);
+                            let items_panel_height = items_panel_height(
+                                total_height,
+                                content_height,
+                                input_panel_height,
+                            );
                             let max_visible = items_panel_height.saturating_sub(2) as usize;
 
                             if max_visible > 0 && ui.shown.len() > max_visible {
@@ -525,20 +538,26 @@ pub fn run(cli: &Opts) -> Result<()> {
 
                                 // Use same calculation as rendering code
                                 let content_height =
-                                    (total_height as f32 * content_panel_height as f32 / 100.0)
-                                        .round() as u16;
-                                let content_height = content_height.max(3);
-                                let items_panel_height =
-                                    total_height - content_height - input_panel_height;
+                                    effective_content_height(total_height, content_panel_height);
+                                let items_panel_height = items_panel_height(
+                                    total_height,
+                                    content_height,
+                                    input_panel_height,
+                                );
                                 let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
 
-                                // Scroll down if selection is below visible area
-                                if new_selected >= ui.scroll_offset + max_visible {
-                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-                                }
-                                // Scroll up if selection is above visible area (happens when wrapping to top)
-                                else if new_selected < ui.scroll_offset {
-                                    ui.scroll_offset = new_selected;
+                                if max_visible == 0 {
+                                    ui.scroll_offset = 0;
+                                } else {
+                                    // Scroll down if selection is below visible area
+                                    if new_selected >= ui.scroll_offset + max_visible {
+                                        ui.scroll_offset =
+                                            new_selected.saturating_sub(max_visible - 1);
+                                    }
+                                    // Scroll up if selection is above visible area (happens when wrapping to top)
+                                    else if new_selected < ui.scroll_offset {
+                                        ui.scroll_offset = new_selected;
+                                    }
                                 }
                             }
                         }
@@ -568,20 +587,26 @@ pub fn run(cli: &Opts) -> Result<()> {
 
                                 // Use same calculation as rendering code
                                 let content_height =
-                                    (total_height as f32 * content_panel_height as f32 / 100.0)
-                                        .round() as u16;
-                                let content_height = content_height.max(3);
-                                let items_panel_height =
-                                    total_height - content_height - input_panel_height;
+                                    effective_content_height(total_height, content_panel_height);
+                                let items_panel_height = items_panel_height(
+                                    total_height,
+                                    content_height,
+                                    input_panel_height,
+                                );
                                 let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
 
-                                // Scroll up if selection is above visible area
-                                if new_selected < ui.scroll_offset {
-                                    ui.scroll_offset = new_selected;
-                                }
-                                // Scroll down if selection is below visible area (happens when wrapping to bottom)
-                                else if new_selected >= ui.scroll_offset + max_visible {
-                                    ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
+                                if max_visible == 0 {
+                                    ui.scroll_offset = 0;
+                                } else {
+                                    // Scroll up if selection is above visible area
+                                    if new_selected < ui.scroll_offset {
+                                        ui.scroll_offset = new_selected;
+                                    }
+                                    // Scroll down if selection is below visible area (happens when wrapping to bottom)
+                                    else if new_selected >= ui.scroll_offset + max_visible {
+                                        ui.scroll_offset =
+                                            new_selected.saturating_sub(max_visible - 1);
+                                    }
                                 }
                             }
                         }
@@ -607,10 +632,9 @@ pub fn run(cli: &Opts) -> Result<()> {
                     get_dmenu_u16(cli.dmenu_input_panel_height, cli.input_panel_height);
 
                 // Use same calculation as rendering code
-                let content_height =
-                    (total_height as f32 * content_panel_height as f32 / 100.0).round() as u16;
-                let content_height = content_height.max(3);
-                let items_panel_height = total_height - content_height - input_panel_height;
+                let content_height = effective_content_height(total_height, content_panel_height);
+                let items_panel_height =
+                    items_panel_height(total_height, content_height, input_panel_height);
 
                 // Get content panel position to calculate items panel position
                 let content_panel_position = get_dmenu_panel_position(
@@ -713,5 +737,31 @@ pub fn run(cli: &Opts) -> Result<()> {
             Event::Tick => {}
             Event::Render => {} // Handled by draw loop
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_content_height;
+    use super::items_panel_height;
+
+    #[test]
+    fn effective_content_height_allows_zero() {
+        assert_eq!(effective_content_height(40, 0), 0);
+    }
+
+    #[test]
+    fn effective_content_height_keeps_visible_panels_usable() {
+        assert_eq!(effective_content_height(20, 1), 3);
+    }
+
+    #[test]
+    fn items_panel_height_saturates_when_panels_exceed_total_height() {
+        assert_eq!(items_panel_height(10, u16::MAX, u16::MAX), 0);
+    }
+
+    #[test]
+    fn items_panel_height_matches_normal_layout_math() {
+        assert_eq!(items_panel_height(30, 10, 3), 17);
     }
 }

@@ -583,7 +583,7 @@ dependencies = [
 
 [[package]]
 name = "fsel"
-version = "3.3.0-kiwicrab"
+version = "3.3.1-kiwicrab"
 dependencies = [
  "crossterm",
  "directories",

@@ -563,9 +563,10 @@ pub async fn run(cli: Opts) -> Result<()> {
 
                         // Calculate panel positions based on title_panel_position
                         let total_height = terminal.size()?.height;
-                        let title_height = (total_height as f32 * cli.title_panel_height_percent as f32
-                            / 100.0)
-                            .round() as u16;
+                        let title_height = crate::ui::effective_title_height(
+                            total_height,
+                            cli.title_panel_height_percent,
+                        );
                         let input_height = cli.input_panel_height;
                         let title_panel_position = cli
                             .title_panel_position
@@ -634,7 +635,9 @@ pub async fn run(cli: Opts) -> Result<()> {
                                             state.update_info(cli.highlight_color, cli.fancy_mode, cli.verbose.unwrap_or(0));
                                         }
                                     }
-                                }
+i
+                              
+                              }
                                 Message::Tick
                             },
                             MouseEventKind::ScrollUp => {

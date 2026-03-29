@@ -4,6 +4,14 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
+pub(crate) fn effective_title_height(total_height: u16, title_panel_height_percent: u16) -> u16 {
+    if title_panel_height_percent == 0 {
+        0
+    } else {
+        (total_height as f32 * title_panel_height_percent as f32 / 100.0).round() as u16
+    }
+}
+
 /// App filtering and sorting UI (Stateless Renderer)
 pub struct UI;
 
@@ -22,47 +30,36 @@ impl UI {
         image_manager: &mut crate::ui::graphics::ImageManager,
     ) {
         let size = f.area();
-
-        let should_render_border = cli.title_panel_height_percent > 0;
+        let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
+        let should_render_border = title_height > 0;
 
         // Layout calculations
-        let chunks = if should_render_border {
-            match cli.title_panel_position {
-                Some(crate::ui::PanelPosition::Bottom) => Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Min(0),
-                        Constraint::Length(cli.input_panel_height),
-                        Constraint::Percentage(cli.title_panel_height_percent),
-                    ])
-                    .split(size),
-                Some(crate::ui::PanelPosition::Middle) => Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Min(0),
-                        Constraint::Percentage(cli.title_panel_height_percent),
-                        Constraint::Length(cli.input_panel_height),
-                        Constraint::Min(0),
-                    ])
-                    .split(size),
-                _ => Layout::default() // Top default
-                    .direction(Direction::Vertical)
-                    .constraints([
-                        Constraint::Percentage(cli.title_panel_height_percent),
-                        Constraint::Min(0), // Apps panel
-                        Constraint::Length(cli.input_panel_height),
-                    ])
-                    .split(size),
-            }
-        } else {
-            Layout::default()
+        let chunks = match cli.title_panel_position {
+            Some(crate::ui::PanelPosition::Bottom) => Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(3),
                     Constraint::Min(0),
                     Constraint::Length(cli.input_panel_height),
+                    Constraint::Length(title_height),
                 ])
-                .split(size)
+                .split(size),
+            Some(crate::ui::PanelPosition::Middle) => Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(0),
+                    Constraint::Length(title_height),
+                    Constraint::Length(cli.input_panel_height),
+                    Constraint::Min(0),
+                ])
+                .split(size),
+            _ => Layout::default() // Top default
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(title_height),
+                    Constraint::Min(0), // Apps panel
+                    Constraint::Length(cli.input_panel_height),
+                ])
+                .split(size),
         };
 
         let (title_area, input_area, apps_area) = match cli.title_panel_position {
@@ -237,5 +234,20 @@ impl UI {
             };
             f.render_widget(Paragraph::new(app.name.as_str()).style(style), name_area);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_title_height;
+
+    #[test]
+    fn effective_title_height_allows_zero() {
+        assert_eq!(effective_title_height(40, 0), 0);
+    }
+
+    #[test]
+    fn effective_title_height_matches_percentage_rounding() {
+        assert_eq!(effective_title_height(21, 10), 2);
     }
 }

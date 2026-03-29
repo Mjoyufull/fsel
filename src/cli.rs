@@ -58,32 +58,46 @@ fn usage() -> ! {
 Usage:
   {cmd} [OPTIONS]
 
-Core Modes:
-  -p, --program <NAME>   Launch program directly (bypass TUI)
-      --cclip            Clipboard history mode
-      --dmenu            Dmenu-compatible mode
-
-Control Flags:
-  -r, --replace          Replace running fsel/cclip instance
-  -d, --detach           Detach launched applications (GUI-safe)
-  -v, --verbose          Increase verbosity (repeatable)
-      --launch-prefix <CMD>
-                          Launch apps through a custom command prefix
-      --systemd-run      Launch via systemd-run --user --scope
-      --uwsm             Launch via uwsm app
-
-Quick Extras:
-      --clear-cache      Clear app cache
-      --refresh-cache    Rescan desktop entries
-      --filter-desktop[=no] Respect OnlyShowIn/NotShowIn (default: yes)
-      --prefix-depth <N> Character depth for prefix matching priority (default: 3)
-      -T, --test         Enable debug/test mode with detailed logging
-
-Help:
-  -H, --help             Show detailed option tree
-  -h                     Show this overview
-  -V, --version          Show version info
-  -t, --tty              Launch terminal apps in current terminal
+├─ Core Modes
+│  ├─ -p, --program <NAME>         Launch one app immediately and skip the TUI
+│  ├─ --dmenu                      Read choices from stdin and print the selection
+│  └─ --cclip                      Browse clipboard history and copy the selection
+│
+├─ Common Flags
+│  ├─ -c, --config <FILE>          Read config from FILE instead of ~/.config/fsel/config.toml
+│  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
+│  ├─ -d, --detach                 Start launched apps without keeping this terminal attached
+│  ├─ -t, --tty                    Run terminal apps in this TTY instead of a terminal launcher
+│  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
+│  ├─ -T, --test                   Enable debug logging and imply maximum verbosity
+│  └─ -ss <SEARCH>                 Pre-fill the search box; place this last on the command line
+│
+├─ Launch Methods
+│  ├─ --no-exec                    Print the selected item instead of launching it
+│  ├─ --launch-prefix <CMD>        Prefix launches with a custom command such as 'runapp --'
+│  ├─ --systemd-run                Launch through systemd-run --user --scope
+│  └─ --uwsm                       Launch through uwsm app --
+│
+├─ App Launcher Extras
+│  ├─ --clear-history              Delete launch history, then exit
+│  ├─ --clear-cache                Delete the desktop entry cache, then exit
+│  ├─ --refresh-cache              Rescan desktop entries before showing results
+│  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn; pass =no to ignore them
+│  ├─ --hide-before-typing         Keep the list hidden until you type the first character
+│  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
+│  ├─ --match-mode <MODE>          Choose fuzzy or exact matching
+│  └─ --prefix-depth <N>           Tune how long prefix matches outrank fuzzy matches
+│
+├─ Mode-Specific Flags
+│  ├─ Dmenu: --dmenu0 --password[=CHAR] --index --with-nth --accept-nth
+│  ├─        --match-nth --delimiter --only-match --exit-if-empty
+│  ├─        --select --select-index --auto-select --prompt-only
+│  └─ Cclip: --tag <NAME|list|clear|wipe> --cclip-show-tag-color-names
+│
+└─ Help
+   ├─ -h                           Show this summary
+   ├─ -H, --help                   Show the full option tree with notes
+   └─ -V, --version                Print the version and exit
 ",
         cmd = cmd
     );
@@ -99,61 +113,68 @@ Usage:
   {cmd} [OPTIONS]
 
 ├─ Core Modes
-│  ├─ -p, --program <NAME>         Launch program directly (bypass TUI)
-│  ├─ --cclip                      Clipboard history mode
-│  └─ --dmenu                      Dmenu-compatible mode
+│  ├─ -p, --program <NAME>         Launch one app immediately and skip the TUI
+│  ├─ --cclip                      Browse clipboard history and copy the selected item
+│  └─ --dmenu                      Read choices from stdin and print the selection to stdout
 │
-├─ Control Flags
-│  ├─ -r, --replace                Replace running fsel/cclip instance
-│  ├─ -d, --detach                 Detach launched applications (GUI-safe)
-│  ├─ -v, --verbose                Increase verbosity (repeatable)
-│  ├─ --launch-prefix <CMD>        Launch apps through a custom command prefix
-│  ├─ --systemd-run                Launch via systemd-run --user --scope
-│  ├─ --uwsm                       Launch via uwsm app
-│  ├─ --no-exec                    Print selection to stdout instead of launching
-│  └─ -ss <SEARCH>                 Pre-fill TUI search (must be last option)
+├─ Startup and Output
+│  ├─ -c, --config <FILE>          Read config from FILE before applying CLI overrides
+│  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
+│  ├─ -d, --detach                 Start launched GUI apps without keeping this terminal attached
+│  ├─ -t, --tty                    Run terminal apps in this TTY and replace the fsel process
+│  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
+│  ├─ -T, --test                   Enable debug logging, write logs under ~/.config/fsel/logs/, and imply -vvv
+│  ├─ --no-exec                    Print the selected item instead of launching it
+│  └─ -ss <SEARCH>                 Pre-fill the search box; place this last so it captures the rest
 │
-├─ Quick Extras
-│  ├─ --clear-history              Clear launch history
-│  ├─ --clear-cache                Clear app cache
-│  ├─ --refresh-cache              Rescan desktop entries
-│  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn (default: yes)
-│  ├─ --hide-before-typing         Hide list until first character typed
-│  ├─ --list-executables-in-path   Include executables from $PATH
-│  ├─ --match-mode <MODE>          fuzzy | exact (default: fuzzy)
-│  ├─ --prefix-depth <N>           Character depth for prefix matching priority (default: 3)
-│  └─ -T, --test                   Enable debug/test mode with detailed logging
+├─ Launch Methods
+│  ├─ --launch-prefix <CMD>        Prefix launches with a custom command such as 'runapp --'
+│  ├─ --systemd-run                Launch through systemd-run --user --scope
+│  └─ --uwsm                       Launch through uwsm app --
+│
+├─ App Launcher Tuning
+│  ├─ --clear-history              Delete launch history, then exit
+│  ├─ --clear-cache                Delete the desktop entry cache, then exit
+│  ├─ --refresh-cache              Rescan desktop entries before showing results
+│  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn; pass =no to ignore them
+│  ├─ --hide-before-typing         Keep the list hidden until you type the first character
+│  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
+│  ├─ --match-mode <MODE>          Choose fuzzy or exact matching (default: fuzzy)
+│  └─ --prefix-depth <N>           Set how long prefix matches outrank fuzzy matches (default: 3)
 │
 ├─ Dmenu Mode Options
-│  ├─ --dmenu0                     Like --dmenu but null-separated input
-│  ├─ --password[=CHAR]            Password mode (mask input)
-│  ├─ --index                      Output index instead of text
-│  ├─ --with-nth <COLS>            Display only specific columns (e.g. 1,3)
-│  ├─ --accept-nth <COLS>          Output only specified columns
-│  ├─ --match-nth <COLS>           Match only specified columns
-│  ├─ --delimiter <CHAR>           Column delimiter (default: space)
-│  ├─ --only-match                 Disallow custom input
-│  ├─ --exit-if-empty              Exit if stdin is empty
-│  ├─ --select <STRING>            Preselect matching entry
-│  ├─ --select-index <N>           Preselect entry by index
-│  ├─ --auto-select                Auto-select when one match remains
-│  └─ --prompt-only                Input-only mode (no list)
+│  ├─ --dmenu0                     Read NUL-separated input instead of newline-separated input
+│  ├─ --password[=CHAR]            Mask typed input; optionally choose the mask character
+│  ├─ --index                      Print the selected row index instead of the row text
+│  ├─ --with-nth <COLS>            Show only these 1-based columns (example: 1,3)
+│  ├─ --accept-nth <COLS>          Print only these columns after selection
+│  ├─ --match-nth <COLS>           Search only within these columns
+│  ├─ --delimiter <CHAR>           Split columns on CHAR instead of spaces
+│  ├─ --only-match                 Reject custom text and require a selection from stdin
+│  ├─ --exit-if-empty              Quit immediately when stdin provides no items
+│  ├─ --select <STRING>            Start with the first matching row preselected
+│  ├─ --select-index <N>           Start with row N preselected
+│  ├─ --auto-select                Accept automatically when the filtered list reaches one row
+│  └─ --prompt-only                Show only the input prompt and hide the list pane
 │
 ├─ Clipboard Mode Options
-│  ├─ --cclip                      Clipboard history viewer with previews
-│  ├─ --tag <NAME>                 Filter clipboard items by tag
-│  ├─ --tag list                   List all tags
-│  ├─ --tag list <NAME>            List items with specific tag
-│  ├─ --tag clear                  Clear tag metadata from fsel database
-│  ├─ --tag wipe                   Wipe ALL tags from cclip entries (cclip 3.2+)
-│  └─ --cclip-show-tag-color-names Show tag color names in display
+│  ├─ --tag <NAME>                 Show only clipboard entries tagged NAME
+│  ├─ --tag list                   List known tags, then exit
+│  ├─ --tag list <NAME>            List clipboard entries carrying NAME, then exit
+│  ├─ --tag clear                  Remove stored tag metadata
+│  ├─ --tag wipe                   Remove all tags from every clipboard entry
+│  └─ --cclip-show-tag-color-names Show tag color names next to tags in cclip mode
 │
-└─ General
-   ├─ -h                           Show short help
-   ├─ -H, --help                   Show detailed help
-   ├─ -T, --test                   Enable debug/test mode (logs to ~/.config/fsel/logs/)
-   ├─ -V, --version                Show version info
-   └─ -t, --tty                    Launch in current terminal (TTY mode)
+├─ General
+│  ├─ -h                           Show the short summary
+│  ├─ -H, --help                   Show this full option tree
+│  └─ -V, --version                Print the version and exit
+│
+└─ Notes
+   ├─ Pick only one launch method: --launch-prefix, --systemd-run, or --uwsm
+   ├─ --dmenu and --cclip both imply --no-exec
+   ├─ --select and --select-index cannot be combined
+   └─ Default config path: ~/.config/fsel/config.toml
 ",
         cmd = cmd
     );
@@ -1025,23 +1046,27 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
 
                 eprintln!("Error: {}", error_msg);
                 eprintln!();
-                eprintln!("Available options:");
-                eprintln!("  -c, --config <file>    Specify config file");
-                eprintln!("  -r, --replace          Replace existing instance (fsel/cclip only)");
-                eprintln!("  -p, --program [name]   Launch program directly (optional)");
-                eprintln!("  -ss <search>           Pre-fill search (must be last)");
-                eprintln!("  -v, --verbose          Increase verbosity");
-                eprintln!("  -h, --help             Show help");
-                eprintln!("  -V, --version          Show version");
-                eprintln!("      --dmenu            Dmenu mode");
-                eprintln!("      --cclip            Clipboard history mode");
-                eprintln!("      --no-exec          Print command instead of running");
-                eprintln!("      --launch-prefix    Use a custom launch prefix");
-                eprintln!("      --systemd-run      Use systemd-run");
-                eprintln!("      --uwsm             Use uwsm");
-                eprintln!("  -d, --detach           Detach from terminal");
+                eprintln!("Quick help:");
+                eprintln!("  -c, --config <FILE>    Read config from FILE");
+                eprintln!("  -p, --program <NAME>   Launch one app immediately and skip the TUI");
+                eprintln!("  -ss <SEARCH>           Pre-fill the search box; place this last");
+                eprintln!(
+                    "  --dmenu                Read choices from stdin and print the selection"
+                );
+                eprintln!(
+                    "  --cclip                Browse clipboard history and copy the selection"
+                );
+                eprintln!(
+                    "  --no-exec              Print the selected item instead of launching it"
+                );
+                eprintln!("  -r, --replace          Replace an existing fsel/cclip instance");
+                eprintln!("  -d, --detach           Start launched apps without keeping the terminal attached");
+                eprintln!("  -v, --verbose          Print more diagnostics; repeat as -vv or -vvv");
+                eprintln!("  -h                     Show the short summary");
+                eprintln!("  -H, --help             Show the full option tree");
+                eprintln!("  -V, --version          Print the version and exit");
                 eprintln!();
-                eprintln!("For more details, use: fsel --help");
+                eprintln!("Run 'fsel -h' for a summary or 'fsel --help' for the full option tree.");
                 std::process::exit(1);
             }
         }
@@ -1088,13 +1113,19 @@ pub fn parse() -> Result<Opts, lexopt::Error> {
     }
 
     // Validate tag options require cclip mode
-    if (default.cclip_tag.is_some() || default.cclip_tag_list || default.cclip_clear_tags)
+    if (default.cclip_tag.is_some()
+        || default.cclip_tag_list
+        || default.cclip_clear_tags
+        || default.cclip_wipe_tags)
         && !default.cclip_mode
     {
         eprintln!("Error: --tag requires --cclip mode");
-        eprintln!("Usage: fsel --cclip --tag <name>");
-        eprintln!("       fsel --cclip --tag list");
-        eprintln!("       fsel --cclip --tag clear");
+        eprintln!("Use one of these forms:");
+        eprintln!("  fsel --cclip --tag <name>");
+        eprintln!("  fsel --cclip --tag list");
+        eprintln!("  fsel --cclip --tag list <name>");
+        eprintln!("  fsel --cclip --tag clear");
+        eprintln!("  fsel --cclip --tag wipe");
         std::process::exit(1);
     }
 
