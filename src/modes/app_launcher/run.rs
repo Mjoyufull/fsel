@@ -11,7 +11,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use redb::ReadableTable;
 use scopeguard::defer;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::time::Duration;
 use std::{env, fs, io, path};
 
@@ -372,6 +372,12 @@ pub async fn run(cli: Opts) -> Result<()> {
         crate::core::debug_logger::log_startup_info(&cli, all_apps.len(), frecency_data.len());
     }
 
+    // Initialize graphics picker and ImageManager for icons
+    let picker = ratatui_image::picker::Picker::from_query_stdio()
+        .ok()
+        .unwrap_or_else(ratatui_image::picker::Picker::halfblocks);
+    let mut image_manager = crate::ui::ImageManager::new(picker);
+
     // Initialize the terminal with crossterm backend using stderr
     let backend = CrosstermBackend::new(io::stderr());
     let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
@@ -412,26 +418,78 @@ pub async fn run(cli: Opts) -> Result<()> {
     .init_async();
 
     // App Loop
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(String, Result<ratatui_image::protocol::StatefulProtocol, eyre::Report>)>();
+    let mut pending_loads = HashSet::new();
+    let mut needs_draw = true;
     loop {
+        let total_height = terminal.size()?.height;
+        let title_height =
+            (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
+        let input_height = cli.input_panel_height;
+        let apps_panel_height = total_height.saturating_sub(title_height + input_height);
+        let max_visible = apps_panel_height.saturating_sub(2) as usize / 2;
         // Render
-        terminal.draw(|f| {
-            let ui = UI::new();
-            ui.render(f, &state, &cli);
-        })?;
+        if needs_draw {
+            terminal.draw(|f| {
+                let ui = UI::new();
+                ui.render(f, &state, &cli, &mut image_manager);
+            })?;
+            needs_draw = false;
+        }
 
         // Handle Events
+        // Collect visible icons that need loading
+        if image_manager.supports_graphics() {
+            let visible_icons: Vec<(&str, &str)> = state
+                .shown
+                .iter()
+                .skip(state.scroll_offset)
+                .take(max_visible)
+                .filter_map(|app| {
+                    app.icon.as_deref().map(|icon_name| (icon_name, icon_name))
+                })
+                .collect();
+
+            let to_load = image_manager.uncached(&visible_icons);
+
+            for (id, name) in to_load {
+                if !pending_loads.contains(id) {
+                    pending_loads.insert(id.to_string());
+                    let tx = tx.clone();
+                    let picker = image_manager.picker();
+                    let id_s = id.to_string();
+                    let name_s = name.to_string();
+                    tokio::spawn(async move {
+                        let res = crate::ui::ImageManager::load_icon_as_protocol(picker, name_s, 32, (4, 2)).await;
+                        let _ = tx.send((id_s, res));
+                    });
+                }
+            }
+        }
+
         tokio::select! {
+            // Background icon loading results
+            Some((id, result)) = rx.recv() => {
+                pending_loads.remove(&id);
+                if let Ok(protocol) = result {
+                    image_manager.insert_protocol(id, protocol);
+                    needs_draw = true;
+                }
+            },
+
+
             // Input Event
             Some(event) = input.next() => {
                 match event {
+                    Event::Tick => {
+                        // Just trigger a re-render if needed
+                    }
+                    Event::Render => {
+                        needs_draw = true;
+                        // Force a re-render on resize
+                    }
                     Event::Input(key) => {
-                         // figure out how many items actually fit on screen
-                         let total_height = terminal.size()?.height;
-                         let title_height = (total_height as f32 * cli.title_panel_height_percent as f32 / 100.0).round() as u16;
-                         let input_height = cli.input_panel_height;
-                         let apps_panel_height = total_height.saturating_sub(title_height + input_height);
-                         let max_visible = apps_panel_height.saturating_sub(2) as usize; // -2 for borders
-
+                         needs_draw = true;
                          // Map cursor/keys to Message using configured keybinds
                          let msg = if cli.keybinds.matches_exit(key.code, key.modifiers) {
                              Message::Exit
@@ -500,13 +558,6 @@ pub async fn run(cli: Opts) -> Result<()> {
                          let fancy = cli.fancy_mode;
                          state.update_info(cli.highlight_color, fancy, cli.verbose.unwrap_or(0));
                     }
-                    Event::Tick => {
-                        // Animation frame
-                    }
-                    Event::Render => {
-                        // Trigger redraw
-                        // Handled by loop start
-                    }
                     Event::Mouse(mouse_event) => {
                         let mouse_row = mouse_event.row;
 
@@ -545,7 +596,7 @@ pub async fn run(cli: Opts) -> Result<()> {
                         let get_app_index = |row: u16| -> Option<usize> {
                             if row >= list_content_start && row < list_content_end {
                                 let row_in_content = row - list_content_start;
-                                let index = state.scroll_offset + row_in_content as usize;
+                                let index = state.scroll_offset + (row_in_content / 2) as usize;
                                 if index < state.shown.len() {
                                     return Some(index);
                                 }
@@ -605,6 +656,7 @@ pub async fn run(cli: Opts) -> Result<()> {
                         if let Message::Tick = msg {
                             // Don't update for ignored mouse events
                         } else {
+                            needs_draw = true;
                             if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
                                 crate::core::debug_logger::log_event(&format!("State update via Mouse: {:?}", msg));
                             }

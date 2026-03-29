@@ -45,12 +45,24 @@ which = "8.0"
 is-terminal = "0.4"
 strip-ansi-escapes = "0.2"
 tokio = { version = "1.49", features = ["rt-multi-thread", "process", "sync", "time", "macros", "io-util"] }
+freedesktop-icons = "0.2"
 ratatui-image = { version = "10.0", default-features = false, features = ["crossterm", "tokio"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "webp"] }
+resvg = "0.47"
+usvg = "0.47"
+tiny-skia = "0.12"
 futures = "0.3"
 unicode-width = "0.2.2"
+<<<<<<< HEAD
 freedesktop-icons = "0.2"
 linicon-theme = "1.2"
+=======
+linicon-theme = "1.2"
+fontdb = "0.22"
+>>>>>>> 10356ad (feat: implement asynchronous icon loading and rendering in app launcher using freedesktop-icons and ratatui-image)
 
 jwalk = "0.8.1"
 rayon = "1.11.0"
+
+[profile.dev.package."*"]
+opt-level = 3

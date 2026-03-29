@@ -1,4 +1,5 @@
 mod app;
+pub mod icons;
 
 pub mod icons;
 

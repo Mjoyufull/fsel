@@ -1,10 +1,13 @@
-use eyre::{eyre, Result};
+use crate::desktop::icons;
+use eyre::{eyre, Report, Result};
+use image::{DynamicImage, ImageReader, RgbaImage};
 use ratatui::layout::Rect;
 use ratatui::Frame;
 use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
 use std::collections::{HashMap, VecDeque};
+use std::fs;
 use std::process::Stdio;
 use std::sync::Mutex;
 
@@ -42,7 +45,7 @@ impl ImageManager {
             current_rowid: None,
             cache: HashMap::new(),
             cache_order: VecDeque::new(),
-            cache_capacity: 50,
+            cache_capacity: 2000,
         }
     }
 
@@ -60,12 +63,173 @@ impl ImageManager {
         !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
     }
 
+    /// Returns icon names from `candidates` that are not yet in cache
+    pub fn uncached<'a>(&self, candidates: &[(&'a str, &'a str)]) -> Vec<(&'a str, &'a str)> {
+        candidates
+            .iter()
+            .filter(|(id, _)| !self.cache.contains_key(*id))
+            .copied()
+            .collect()
+    }
+
+    pub fn insert_protocol(&mut self, id: String, protocol: StatefulProtocol) {
+        self.cache.insert(id.clone(), protocol);
+        self.update_lru(&id);
+        if self.cache_order.len() > self.cache_capacity {
+            if let Some(old) = self.cache_order.pop_front() {
+                self.cache.remove(&old);
+            }
+        }
+    }
+
+    pub fn picker(&self) -> Picker {
+        self.picker.clone()
+    }
+
     /// Set current image to display (must be in cache)
     pub fn set_image(&mut self, rowid: &str) {
         if self.cache.contains_key(rowid) {
             self.current_rowid = Some(rowid.to_string());
             self.update_lru(rowid);
             self.update_display_state(DisplayState::Image(rowid.to_string()));
+        }
+    }
+
+    /// High-level wrapper with default cell dimensions (4x2).
+    #[allow(dead_code)]
+    pub async fn loadicons(&mut self, id: String, name: String, size: u16) -> Result<()> {
+        self.load_desktop_icon(id, name, size, (4, 2)).await
+    }
+
+    /// Unified logic for resolving, loading, and caching desktop icons.
+    #[allow(dead_code)]
+    pub async fn load_desktop_icon(
+        &mut self,
+        id: String,
+        name: String,
+        size: u16,
+        cells: (u32, u32),
+    ) -> Result<()> {
+        // 1. Unified Cache/State Check
+        if self.cache.contains_key(&id) {
+            self.current_rowid = Some(id.clone());
+            self.update_lru(&id);
+            self.update_display_state(DisplayState::Image(id));
+            return Ok(());
+        }
+
+        self.update_display_state(DisplayState::Loading(id.clone()));
+
+        // 2 & 3. Process Image and Path (Async Blocking)
+        let picker = self.picker.clone();
+        let name_clone = name.clone();
+        let protocol_res = tokio::task::spawn_blocking(move || {
+            let path = icons::lookup(&name_clone, size).ok_or_else(|| {
+                eyre!("Icon '{}' not found", name_clone)
+            })?;
+
+            let (fw, fh) = picker.font_size();
+            let (tw, th) = (cells.0 * fw as u32, cells.1 * fh as u32);
+
+            let img = if path.extension().and_then(|s| s.to_str()) == Some("svg") {
+                let tree = usvg::Tree::from_data(&fs::read(&path)?, &usvg::Options::default())?;
+                let mut pixmap = tiny_skia::Pixmap::new(tw, th).ok_or_else(|| eyre!("Pixmap"))?;
+                let s = tree.size();
+                let scale = (tw as f32 / s.width()).min(th as f32 / s.height());
+                resvg::render(
+                    &tree,
+                    tiny_skia::Transform::from_scale(scale, scale),
+                    &mut pixmap.as_mut(),
+                );
+                DynamicImage::ImageRgba8(
+                    RgbaImage::from_raw(tw, th, pixmap.take()).ok_or_else(|| eyre!("Buffer"))?,
+                )
+            } else {
+                ImageReader::open(&path)?.decode()?
+            };
+
+            Ok::<_, Report>(picker.new_resize_protocol(img))
+        })
+        .await;
+
+        let protocol = match protocol_res {
+            Ok(Ok(p)) => p,
+            Ok(Err(e)) => {
+                let err_msg = format!("Failed to process icon '{}': {}", name, e);
+                self.update_display_state(DisplayState::Failed(err_msg));
+                return Err(e);
+            }
+            Err(e) => {
+                let err = eyre!("Task join error for '{}': {}", name, e);
+                self.update_display_state(DisplayState::Failed(err.to_string()));
+                return Err(err);
+            }
+        };
+
+        // 4. Update Cache and State
+        self.cache.insert(id.clone(), protocol);
+        self.update_lru(&id);
+        if self.cache_order.len() > self.cache_capacity {
+            if let Some(old) = self.cache_order.pop_front() {
+                self.cache.remove(&old);
+            }
+        }
+        self.current_rowid = Some(id.clone());
+        self.update_display_state(DisplayState::Image(id));
+
+        Ok(())
+    }
+
+    /// Static async helper: resolve + encode icon without needing &mut self.
+    /// Called from background tasks where we don't have access to the manager.
+    pub async fn load_icon_as_protocol(
+        picker: Picker,
+        name: String,
+        size: u16,
+        cells: (u32, u32),
+    ) -> Result<StatefulProtocol> {
+        let name_clone = name.clone();
+        let protocol_res = tokio::task::spawn_blocking(move || {
+            let path = icons::lookup(&name_clone, size)
+                .ok_or_else(|| eyre!("Icon '{}' not found", name_clone))?;
+
+            let (fw, fh) = picker.font_size();
+            let (tw, th) = (cells.0 * fw as u32, cells.1 * fh as u32);
+
+            let img = if path.extension().and_then(|s| s.to_str()) == Some("svg") {
+                let tree = usvg::Tree::from_data(&fs::read(&path)?, &usvg::Options::default())?;
+                let mut pixmap = tiny_skia::Pixmap::new(tw, th)
+                    .ok_or_else(|| eyre!("Pixmap allocation failed"))?;
+                let s = tree.size();
+                let scale = (tw as f32 / s.width()).min(th as f32 / s.height());
+                resvg::render(
+                    &tree,
+                    tiny_skia::Transform::from_scale(scale, scale),
+                    &mut pixmap.as_mut(),
+                );
+                DynamicImage::ImageRgba8(
+                    RgbaImage::from_raw(tw, th, pixmap.take())
+                        .ok_or_else(|| eyre!("Buffer conversion failed"))?,
+                )
+            } else {
+                ImageReader::open(&path)?.decode()?
+            };
+
+            Ok::<_, Report>(picker.new_resize_protocol(img))
+        })
+        .await;
+
+        match protocol_res {
+            Ok(Ok(p)) => Ok(p),
+            Ok(Err(e)) => Err(e),
+            Err(e) => Err(eyre!("Task join error for '{}': {}", name, e)),
+        }
+    }
+
+
+    pub fn render_at(&mut self, f: &mut Frame, id: &str, area: Rect) {
+        if let Some(protocol) = self.cache.get_mut(id) {
+            f.render_stateful_widget(StatefulImage::default(), area, protocol);
         }
     }
 

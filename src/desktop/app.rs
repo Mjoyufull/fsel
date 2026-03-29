@@ -284,6 +284,11 @@ pub fn read_with_options(
                         for action in actions {
                             let ac = Action::default().name(action).from(app.name.clone());
                             if let Ok(mut a) = App::parse(&contents, Some(&ac), filter_desktop) {
+                                // Inherit icon from main entry if action doesn't define one
+                                if a.icon.is_none() {
+                                    a.icon = app.icon.clone();
+                                }
+
                                 if let Some(file_name) =
                                     file_path_ref.file_name().and_then(|n| n.to_str())
                                 {
