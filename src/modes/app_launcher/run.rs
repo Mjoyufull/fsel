@@ -635,7 +635,7 @@ pub async fn run(cli: Opts) -> Result<()> {
                                             state.update_info(cli.highlight_color, cli.fancy_mode, cli.verbose.unwrap_or(0));
                                         }
                                     }
-i
+
                               
                               }
                                 Message::Tick
