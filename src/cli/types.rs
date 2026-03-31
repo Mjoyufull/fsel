@@ -1,0 +1,300 @@
+use crate::ui::PanelPosition;
+use std::str::FromStr;
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum MatchMode {
+    Exact,
+    #[default]
+    Fuzzy,
+}
+
+impl FromStr for MatchMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_lowercase().as_str() {
+            "exact" => Ok(Self::Exact),
+            "fuzzy" => Ok(Self::Fuzzy),
+            _ => Err(format!("Invalid match mode: '{value}'")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RankingMode {
+    #[default]
+    Frecency,
+    Recency,
+    Frequency,
+}
+
+impl RankingMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Frecency => "frecency",
+            Self::Recency => "recency",
+            Self::Frequency => "frequency",
+        }
+    }
+}
+
+impl FromStr for RankingMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_lowercase().as_str() {
+            "frecency" => Ok(Self::Frecency),
+            "recency" => Ok(Self::Recency),
+            "frequency" => Ok(Self::Frequency),
+            _ => Err(format!("Invalid ranking mode: '{value}'")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PinnedOrderMode {
+    #[default]
+    Ranking,
+    Alphabetical,
+    OldestPinned,
+    NewestPinned,
+}
+
+impl PinnedOrderMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ranking => "ranking",
+            Self::Alphabetical => "alphabetical",
+            Self::OldestPinned => "oldest_pinned",
+            Self::NewestPinned => "newest_pinned",
+        }
+    }
+}
+
+impl FromStr for PinnedOrderMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_lowercase().as_str() {
+            "ranking" => Ok(Self::Ranking),
+            "alphabetical" => Ok(Self::Alphabetical),
+            "oldest_pinned" | "oldest" => Ok(Self::OldestPinned),
+            "newest_pinned" | "newest" | "last_pinned" => Ok(Self::NewestPinned),
+            _ => Err(format!("Invalid pinned order mode: '{value}'")),
+        }
+    }
+}
+
+/// Command line interface.
+#[derive(Debug)]
+pub struct Opts {
+    pub highlight_color: ratatui::style::Color,
+    pub clear_history: bool,
+    pub clear_cache: bool,
+    pub refresh_cache: bool,
+    pub terminal_launcher: String,
+    pub replace: bool,
+    pub cursor: String,
+    pub verbose: Option<u64>,
+    pub hard_stop: bool,
+    pub disable_mouse: bool,
+    pub no_exec: bool,
+    pub launch_prefix: Vec<String>,
+    pub launch_prefix_set: bool,
+    pub systemd_run: bool,
+    pub uwsm: bool,
+    pub detach: bool,
+    pub rounded_borders: bool,
+    pub main_border_color: ratatui::style::Color,
+    pub apps_border_color: ratatui::style::Color,
+    pub input_border_color: ratatui::style::Color,
+    pub main_text_color: ratatui::style::Color,
+    pub apps_text_color: ratatui::style::Color,
+    pub input_text_color: ratatui::style::Color,
+    pub fancy_mode: bool,
+    pub header_title_color: ratatui::style::Color,
+    pub pin_color: ratatui::style::Color,
+    pub pin_icon: String,
+    pub keybinds: crate::ui::Keybinds,
+    pub title_panel_height_percent: u16,
+    pub input_panel_height: u16,
+    pub title_panel_position: Option<PanelPosition>,
+    pub program: Option<String>,
+    pub search_string: Option<String>,
+    pub confirm_first_launch: bool,
+    pub dmenu_mode: bool,
+    pub dmenu_with_nth: Option<Vec<usize>>,
+    pub dmenu_delimiter: String,
+    pub dmenu_show_line_numbers: bool,
+    pub dmenu_wrap_long_lines: bool,
+    pub dmenu_null_separated: bool,
+    pub dmenu_password_mode: bool,
+    pub dmenu_password_character: String,
+    pub dmenu_index_mode: bool,
+    pub dmenu_accept_nth: Option<Vec<usize>>,
+    pub dmenu_match_nth: Option<Vec<usize>>,
+    pub dmenu_only_match: bool,
+    pub dmenu_exit_if_empty: bool,
+    pub dmenu_select: Option<String>,
+    pub dmenu_select_index: Option<usize>,
+    pub dmenu_auto_select: bool,
+    pub dmenu_prompt_only: bool,
+    pub dmenu_hide_before_typing: bool,
+    pub cclip_mode: bool,
+    pub cclip_tag: Option<String>,
+    pub cclip_tag_list: bool,
+    pub cclip_clear_tags: bool,
+    pub cclip_wipe_tags: bool,
+    pub filter_desktop: bool,
+    pub list_executables_in_path: bool,
+    pub hide_before_typing: bool,
+    pub match_mode: MatchMode,
+    pub ranking_mode: RankingMode,
+    pub pinned_order_mode: PinnedOrderMode,
+    pub dmenu_highlight_color: Option<ratatui::style::Color>,
+    pub dmenu_cursor: Option<String>,
+    pub dmenu_hard_stop: Option<bool>,
+    pub dmenu_rounded_borders: Option<bool>,
+    pub dmenu_main_border_color: Option<ratatui::style::Color>,
+    pub dmenu_items_border_color: Option<ratatui::style::Color>,
+    pub dmenu_input_border_color: Option<ratatui::style::Color>,
+    pub dmenu_main_text_color: Option<ratatui::style::Color>,
+    pub dmenu_items_text_color: Option<ratatui::style::Color>,
+    pub dmenu_input_text_color: Option<ratatui::style::Color>,
+    pub dmenu_header_title_color: Option<ratatui::style::Color>,
+    pub dmenu_title_panel_height_percent: Option<u16>,
+    pub dmenu_input_panel_height: Option<u16>,
+    pub dmenu_title_panel_position: Option<PanelPosition>,
+    pub cclip_highlight_color: Option<ratatui::style::Color>,
+    pub cclip_cursor: Option<String>,
+    pub cclip_hard_stop: Option<bool>,
+    pub cclip_rounded_borders: Option<bool>,
+    pub cclip_main_border_color: Option<ratatui::style::Color>,
+    pub cclip_items_border_color: Option<ratatui::style::Color>,
+    pub cclip_input_border_color: Option<ratatui::style::Color>,
+    pub cclip_main_text_color: Option<ratatui::style::Color>,
+    pub cclip_items_text_color: Option<ratatui::style::Color>,
+    pub cclip_input_text_color: Option<ratatui::style::Color>,
+    pub cclip_header_title_color: Option<ratatui::style::Color>,
+    pub cclip_title_panel_height_percent: Option<u16>,
+    pub cclip_input_panel_height: Option<u16>,
+    pub cclip_title_panel_position: Option<PanelPosition>,
+    pub cclip_show_line_numbers: Option<bool>,
+    pub cclip_wrap_long_lines: Option<bool>,
+    pub cclip_image_preview: Option<bool>,
+    pub cclip_hide_inline_image_message: Option<bool>,
+    pub cclip_show_tag_color_names: Option<bool>,
+    pub dmenu_disable_mouse: Option<bool>,
+    pub cclip_disable_mouse: Option<bool>,
+    pub prefix_depth: usize,
+    pub test_mode: bool,
+    pub tty: bool,
+}
+
+impl Default for Opts {
+    fn default() -> Self {
+        Self {
+            highlight_color: ratatui::style::Color::LightBlue,
+            clear_history: false,
+            clear_cache: false,
+            refresh_cache: false,
+            terminal_launcher: "alacritty -e".to_string(),
+            replace: false,
+            cursor: "█".to_string(),
+            verbose: None,
+            hard_stop: false,
+            disable_mouse: false,
+            no_exec: false,
+            launch_prefix: Vec::new(),
+            launch_prefix_set: false,
+            systemd_run: false,
+            uwsm: false,
+            detach: false,
+            rounded_borders: true,
+            main_border_color: ratatui::style::Color::White,
+            apps_border_color: ratatui::style::Color::White,
+            input_border_color: ratatui::style::Color::White,
+            main_text_color: ratatui::style::Color::White,
+            apps_text_color: ratatui::style::Color::White,
+            input_text_color: ratatui::style::Color::White,
+            fancy_mode: false,
+            header_title_color: ratatui::style::Color::White,
+            pin_color: ratatui::style::Color::Rgb(255, 165, 0),
+            pin_icon: "📌".to_string(),
+            keybinds: crate::ui::Keybinds::default(),
+            title_panel_height_percent: 30,
+            input_panel_height: 3,
+            title_panel_position: None,
+            program: None,
+            search_string: None,
+            confirm_first_launch: false,
+            dmenu_mode: false,
+            dmenu_with_nth: None,
+            dmenu_delimiter: " ".to_string(),
+            dmenu_show_line_numbers: false,
+            dmenu_wrap_long_lines: true,
+            dmenu_null_separated: false,
+            dmenu_password_mode: false,
+            dmenu_password_character: "*".to_string(),
+            dmenu_index_mode: false,
+            dmenu_accept_nth: None,
+            dmenu_match_nth: None,
+            dmenu_only_match: false,
+            dmenu_exit_if_empty: false,
+            dmenu_select: None,
+            dmenu_select_index: None,
+            dmenu_auto_select: false,
+            dmenu_prompt_only: false,
+            dmenu_hide_before_typing: false,
+            cclip_mode: false,
+            cclip_tag: None,
+            cclip_tag_list: false,
+            cclip_clear_tags: false,
+            cclip_wipe_tags: false,
+            filter_desktop: true,
+            list_executables_in_path: false,
+            hide_before_typing: false,
+            match_mode: MatchMode::Fuzzy,
+            ranking_mode: RankingMode::Frecency,
+            pinned_order_mode: PinnedOrderMode::Ranking,
+            dmenu_highlight_color: None,
+            dmenu_cursor: None,
+            dmenu_hard_stop: None,
+            dmenu_rounded_borders: None,
+            dmenu_main_border_color: None,
+            dmenu_items_border_color: None,
+            dmenu_input_border_color: None,
+            dmenu_main_text_color: None,
+            dmenu_items_text_color: None,
+            dmenu_input_text_color: None,
+            dmenu_header_title_color: None,
+            dmenu_title_panel_height_percent: None,
+            dmenu_input_panel_height: None,
+            dmenu_title_panel_position: None,
+            cclip_highlight_color: None,
+            cclip_cursor: None,
+            cclip_hard_stop: None,
+            cclip_rounded_borders: None,
+            cclip_main_border_color: None,
+            cclip_items_border_color: None,
+            cclip_input_border_color: None,
+            cclip_main_text_color: None,
+            cclip_items_text_color: None,
+            cclip_input_text_color: None,
+            cclip_header_title_color: None,
+            cclip_title_panel_height_percent: None,
+            cclip_input_panel_height: None,
+            cclip_title_panel_position: None,
+            cclip_show_line_numbers: None,
+            cclip_wrap_long_lines: None,
+            cclip_image_preview: None,
+            cclip_hide_inline_image_message: None,
+            cclip_show_tag_color_names: None,
+            dmenu_disable_mouse: None,
+            cclip_disable_mouse: None,
+            prefix_depth: 3,
+            test_mode: false,
+            tty: false,
+        }
+    }
+}
