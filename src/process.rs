@@ -29,6 +29,18 @@ pub fn kill_process_sigterm_result(pid: i32) -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+
+/// Send SIGKILL to a process and return any OS error to the caller.
+#[allow(unsafe_code)]
+pub fn kill_process_sigkill_result(pid: i32) -> io::Result<()> {
+    let ret = unsafe { libc::kill(pid, libc::SIGKILL) };
+    if ret == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 /// Check if a process exists
 #[allow(unsafe_code)]
 pub fn process_exists(pid: i32) -> bool {

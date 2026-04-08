@@ -198,7 +198,7 @@ pub fn toggle_pin(db: &std::sync::Arc<redb::Database>, app_name: &str) -> Result
 // FRECENCY STORAGE
 // =============================================================================
 
-use crate::core::state::FrecencyEntry;
+use crate::core::ranking::FrecencyEntry;
 
 /// Load frecency data from database
 pub fn load_frecency(db: &std::sync::Arc<redb::Database>) -> HashMap<String, FrecencyEntry> {
@@ -257,7 +257,7 @@ pub fn record_access(db: &std::sync::Arc<redb::Database>, app_name: &str) -> Res
         .or_default();
 
     // Age entries if total exceeds max (10000 by default, like zoxide)
-    crate::core::state::age_entries(&mut frecency, 10000);
+    crate::core::ranking::age_entries(&mut frecency, 10000);
 
     save_frecency(db, &frecency)?;
     Ok(())

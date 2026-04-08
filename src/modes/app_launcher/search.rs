@@ -126,8 +126,7 @@ pub fn find_app_by_name_fast(
                                 continue;
                             }
 
-                            let parsed_app =
-                                desktop::App::parse(&contents, None, cli.filter_desktop);
+                            let parsed_app = desktop::App::parse(&contents, cli.filter_desktop);
                             match parsed_app {
                                 Ok(mut app) => {
                                     if let Some(file_name) =
@@ -383,12 +382,12 @@ pub fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> Result<()
         if response == "n" || response == "no" {
             // user said no, drop into TUI with search pre-filled
             // we need to return an error that signals to continue to TUI
-            // but we can't easily do that from here, so just exit
+            // for now, return cleanly from direct-launch mode
             eprintln!(
                 "Cancelled. Use 'fsel -ss {}' to search in TUI.",
                 program_name
             );
-            std::process::exit(0);
+            return Ok(());
         }
     }
 

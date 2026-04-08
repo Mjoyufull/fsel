@@ -1,9 +1,13 @@
 // Cclip mode - clipboard history browser
 
+mod commands;
+mod items;
 pub mod preview;
 pub mod run;
 pub mod scan;
 pub mod select;
+mod session;
+mod state;
 
 use crate::common::Item;
 use eyre::{Result, eyre};
@@ -12,6 +16,7 @@ use std::collections::HashMap;
 
 // Re-export main entry point
 pub use run::run;
+pub(crate) use session::CclipSession;
 
 // Re-export commonly used scan functions
 pub use scan::{check_cclip_available, check_cclip_database};

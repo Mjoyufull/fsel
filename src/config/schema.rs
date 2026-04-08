@@ -1,5 +1,8 @@
 use serde::Deserialize;
 
+use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
+use crate::ui::PanelPosition;
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct FselConfig {
     #[serde(flatten)]
@@ -23,9 +26,9 @@ pub struct AppLauncherConfig {
     pub list_executables_in_path: Option<bool>,
     pub hide_before_typing: Option<bool>,
     pub launch_prefix: Option<Vec<String>>,
-    pub match_mode: Option<String>,
-    pub ranking_mode: Option<String>,
-    pub pinned_order: Option<String>,
+    pub match_mode: Option<MatchMode>,
+    pub ranking_mode: Option<RankingMode>,
+    pub pinned_order: Option<PinnedOrderMode>,
     pub confirm_first_launch: Option<bool>,
     pub prefix_depth: Option<usize>,
 }
@@ -41,11 +44,11 @@ pub struct GeneralConfig {
     #[serde(default)]
     pub hide_before_typing: bool,
     #[serde(default = "super::defaults::default_match_mode")]
-    pub match_mode: String,
+    pub match_mode: MatchMode,
     #[serde(default = "super::defaults::default_ranking_mode")]
-    pub ranking_mode: String,
+    pub ranking_mode: RankingMode,
     #[serde(default = "super::defaults::default_pinned_order")]
-    pub pinned_order: String,
+    pub pinned_order: PinnedOrderMode,
     #[serde(default)]
     pub systemd_run: bool,
     #[serde(default)]
@@ -103,7 +106,7 @@ pub struct LayoutConfig {
     #[serde(default = "super::defaults::default_input_panel_height")]
     pub input_panel_height: u16,
     #[serde(default = "super::defaults::default_title_panel_position")]
-    pub title_panel_position: String,
+    pub title_panel_position: PanelPosition,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -127,7 +130,7 @@ pub struct DmenuConfig {
     pub header_title_color: Option<String>,
     pub title_panel_height_percent: Option<u16>,
     pub input_panel_height: Option<u16>,
-    pub title_panel_position: Option<String>,
+    pub title_panel_position: Option<PanelPosition>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
@@ -151,5 +154,5 @@ pub struct CclipConfig {
     pub header_title_color: Option<String>,
     pub title_panel_height_percent: Option<u16>,
     pub input_panel_height: Option<u16>,
-    pub title_panel_position: Option<String>,
+    pub title_panel_position: Option<PanelPosition>,
 }

@@ -1,36 +1,61 @@
-use super::from_config::{ConfigDefaultsError, apply_config_defaults};
-use super::help::{detailed_usage, usage};
+use super::error::CliError;
+use super::help::unknown_argument_help;
 use super::launch::{parse_launch_prefix, set_launch_prefix, set_systemd_run, set_uwsm};
 use super::types::{MatchMode, Opts};
-use super::validate;
+use super::{CliCommand, validate};
+use crate::config::FselConfig;
 use lexopt::prelude::*;
 use std::env;
 use std::path::PathBuf;
 
-pub fn parse() -> Result<Opts, lexopt::Error> {
-    let args: Vec<String> = env::args().collect();
-    let config_path_cli = find_config_path(&args);
-    let fsel_config = match crate::config::FselConfig::new(config_path_cli) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("Error loading configuration: {error}");
-            std::process::exit(1);
-        }
-    };
+enum OverridesResult {
+    Continue(usize),
+    Command(Box<CliCommand>),
+}
 
+pub fn parse() -> Result<CliCommand, CliError> {
+    parse_from(env::args())
+}
+
+pub(crate) fn parse_from<I, S>(args: I) -> Result<CliCommand, CliError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let args = collect_args(args);
+    let config = FselConfig::new(find_config_path(&args))?;
+    parse_with_config(&args, config)
+}
+
+fn parse_with_config(args: &[String], config: FselConfig) -> Result<CliCommand, CliError> {
+    let program_name = args.first().cloned().unwrap_or_else(|| "fsel".to_string());
     let mut default = Opts::default();
-    if let Err(error) = apply_config_defaults(&mut default, &fsel_config) {
-        report_config_defaults_error(error);
-    }
+    super::from_config::apply_config_defaults(&mut default, &config);
 
-    if args.first().is_some_and(|arg0| arg0.ends_with("dmenu")) {
+    if program_name.ends_with("dmenu") {
         default.dmenu_mode = true;
     }
 
-    let mut parser = build_parser(&args, &mut default);
-    let cli_launch_methods = parse_cli_overrides(&mut parser, &mut default)?;
-    validate::validate(&mut default, cli_launch_methods);
-    Ok(default)
+    let mut parser = build_parser(args, &mut default);
+    let cli_launch_methods = match parse_cli_overrides(&mut parser, &mut default, &program_name)? {
+        OverridesResult::Continue(count) => count,
+        OverridesResult::Command(command) => return Ok(*command),
+    };
+
+    validate::validate(&mut default, cli_launch_methods)?;
+    Ok(CliCommand::Run(Box::new(default)))
+}
+
+fn collect_args<I, S>(args: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let mut args: Vec<String> = args.into_iter().map(Into::into).collect();
+    if args.is_empty() {
+        args.push("fsel".to_string());
+    }
+    args
 }
 
 fn find_config_path(args: &[String]) -> Option<PathBuf> {
@@ -45,9 +70,9 @@ fn find_config_path(args: &[String]) -> Option<PathBuf> {
 }
 
 fn build_parser(args: &[String], default: &mut Opts) -> lexopt::Parser {
-    if let Some(ss_pos) = args.iter().position(|arg| arg == "-ss") {
-        default.search_string = Some(args[ss_pos + 1..].join(" "));
-        return lexopt::Parser::from_args(args[..ss_pos].iter().skip(1).cloned());
+    if let Some(search_pos) = args.iter().position(|arg| arg == "-ss") {
+        default.search_string = Some(args[search_pos + 1..].join(" "));
+        return lexopt::Parser::from_args(args[..search_pos].iter().skip(1).cloned());
     }
 
     lexopt::Parser::from_args(args.iter().skip(1).cloned())
@@ -56,7 +81,8 @@ fn build_parser(args: &[String], default: &mut Opts) -> lexopt::Parser {
 fn parse_cli_overrides(
     parser: &mut lexopt::Parser,
     default: &mut Opts,
-) -> Result<usize, lexopt::Error> {
+    program_name: &str,
+) -> Result<OverridesResult, CliError> {
     let mut cli_launch_methods = 0;
 
     while let Some(arg) = parser.next()? {
@@ -88,7 +114,7 @@ fn parse_cli_overrides(
                 let prefix = value_as_string(parser, "Launch prefix must be valid UTF-8")?;
                 set_launch_prefix(
                     default,
-                    parse_launch_prefix(&prefix).map_err(lexopt::Error::from)?,
+                    parse_launch_prefix(&prefix).map_err(CliError::message)?,
                 );
             }
             Long("systemd-run") => {
@@ -108,30 +134,7 @@ fn parse_cli_overrides(
             Long("cclip") => {
                 default.cclip_mode = true;
             }
-            Long("tag") => {
-                let tag_arg = value_as_string(parser, "Tag argument must be valid UTF-8")?;
-                match tag_arg.as_str() {
-                    "list" => {
-                        default.cclip_tag_list = true;
-                        if let Ok(value) = parser.value() {
-                            default.cclip_tag = Some(
-                                value
-                                    .into_string()
-                                    .map_err(|_| "Tag name must be valid UTF-8")?,
-                            );
-                        }
-                    }
-                    "clear" => {
-                        default.cclip_clear_tags = true;
-                    }
-                    "wipe" => {
-                        default.cclip_wipe_tags = true;
-                    }
-                    _ => {
-                        default.cclip_tag = Some(tag_arg);
-                    }
-                }
-            }
+            Long("tag") => parse_tag(parser, default)?,
             Long("cclip-show-tag-color-names") => {
                 default.cclip_show_tag_color_names = Some(true);
             }
@@ -144,7 +147,7 @@ fn parse_cli_overrides(
                 if let Some(value) = parser.optional_value() {
                     default.dmenu_password_character = value
                         .into_string()
-                        .map_err(|_| "Password character must be valid UTF-8")?;
+                        .map_err(|_| CliError::message("Password character must be valid UTF-8"))?;
                 }
             }
             Long("index") => {
@@ -172,8 +175,11 @@ fn parse_cli_overrides(
             }
             Long("select-index") => {
                 let index = value_as_string(parser, "Index must be valid UTF-8")?;
-                default.dmenu_select_index =
-                    Some(index.parse::<usize>().map_err(|_| "Invalid index")?);
+                default.dmenu_select_index = Some(
+                    index
+                        .parse::<usize>()
+                        .map_err(|_| CliError::message("Invalid index"))?,
+                );
             }
             Long("auto-select") => {
                 default.dmenu_auto_select = true;
@@ -186,9 +192,9 @@ fn parse_cli_overrides(
             }
             Long("filter-desktop") => {
                 if let Some(value) = parser.optional_value() {
-                    let value = value
-                        .into_string()
-                        .map_err(|_| "filter-desktop value must be valid UTF-8")?;
+                    let value = value.into_string().map_err(|_| {
+                        CliError::message("filter-desktop value must be valid UTF-8")
+                    })?;
                     default.filter_desktop = value != "no";
                 } else {
                     default.filter_desktop = true;
@@ -201,12 +207,13 @@ fn parse_cli_overrides(
                 let mode = value_as_string(parser, "Match mode must be valid UTF-8")?;
                 default.match_mode = mode
                     .parse::<MatchMode>()
-                    .map_err(|_| "Invalid match mode. Use 'exact' or 'fuzzy'")?;
+                    .map_err(|_| CliError::message("Invalid match mode. Use 'exact' or 'fuzzy'"))?;
             }
             Long("prefix-depth") => {
                 let depth = value_as_string(parser, "Prefix depth must be valid UTF-8")?;
-                default.prefix_depth =
-                    depth.parse::<usize>().map_err(|_| "Invalid prefix depth")?;
+                default.prefix_depth = depth
+                    .parse::<usize>()
+                    .map_err(|_| CliError::message("Invalid prefix depth"))?;
             }
             Short('T') | Long("test") => {
                 default.test_mode = true;
@@ -229,56 +236,80 @@ fn parse_cli_overrides(
                 default.verbose = Some(default.verbose.unwrap_or(0) + 1);
             }
             Short('h') => {
-                usage();
+                return Ok(OverridesResult::Command(Box::new(
+                    CliCommand::PrintShortHelp {
+                        program_name: program_name.to_string(),
+                    },
+                )));
             }
             Short('H') | Long("help") => {
-                detailed_usage();
+                return Ok(OverridesResult::Command(Box::new(
+                    CliCommand::PrintLongHelp {
+                        program_name: program_name.to_string(),
+                    },
+                )));
             }
             Short('V') | Long("version") => {
-                println!("{}", env!("CARGO_PKG_VERSION"));
-                std::process::exit(0);
+                return Ok(OverridesResult::Command(Box::new(CliCommand::PrintVersion)));
             }
-            Value(_) => {
-                return Err(arg.unexpected());
-            }
-            _ => report_unknown_argument(arg),
+            Value(_) => return Err(arg.unexpected().into()),
+            _ => return Err(report_unknown_argument(arg)),
         }
     }
 
-    Ok(cli_launch_methods)
+    Ok(OverridesResult::Continue(cli_launch_methods))
+}
+
+fn parse_tag(parser: &mut lexopt::Parser, default: &mut Opts) -> Result<(), CliError> {
+    let tag_arg = value_as_string(parser, "Tag argument must be valid UTF-8")?;
+    match tag_arg.as_str() {
+        "list" => {
+            default.cclip_tag_list = true;
+            if let Ok(value) = parser.value() {
+                default.cclip_tag = Some(
+                    value
+                        .into_string()
+                        .map_err(|_| CliError::message("Tag name must be valid UTF-8"))?,
+                );
+            }
+        }
+        "clear" => {
+            default.cclip_clear_tags = true;
+        }
+        "wipe" => {
+            default.cclip_wipe_tags = true;
+        }
+        _ => {
+            default.cclip_tag = Some(tag_arg);
+        }
+    }
+
+    Ok(())
 }
 
 fn value_as_string(
     parser: &mut lexopt::Parser,
     error_message: &'static str,
-) -> Result<String, lexopt::Error> {
+) -> Result<String, CliError> {
     parser
         .value()?
         .into_string()
-        .map_err(|_| lexopt::Error::from(error_message))
+        .map_err(|_| CliError::message(error_message))
 }
 
 fn parse_column_list(
     parser: &mut lexopt::Parser,
     error_message: &'static str,
-) -> Result<Vec<usize>, lexopt::Error> {
+) -> Result<Vec<usize>, CliError> {
     let columns = value_as_string(parser, "Column specification must be valid UTF-8")?;
     columns
         .split(',')
         .map(|part| part.trim().parse::<usize>())
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| error_message.into())
+        .map_err(|_| CliError::message(error_message))
 }
 
-fn report_config_defaults_error(error: ConfigDefaultsError) -> ! {
-    eprintln!("Error: {error}");
-    if matches!(error, ConfigDefaultsError::MultipleLaunchMethods) {
-        eprintln!("Available methods: --systemd-run, --uwsm");
-    }
-    std::process::exit(1);
-}
-
-fn report_unknown_argument(arg: lexopt::Arg<'_>) -> ! {
+fn report_unknown_argument(arg: lexopt::Arg<'_>) -> CliError {
     let error_msg = match arg {
         Long(name) => match name {
             "clip" => "Unknown option '--clip'. Did you mean '--cclip'?",
@@ -297,22 +328,37 @@ fn report_unknown_argument(arg: lexopt::Arg<'_>) -> ! {
         Value(_) => unreachable!(),
     };
 
-    eprintln!("Error: {error_msg}");
-    eprintln!();
-    eprintln!("Quick help:");
-    eprintln!("  -c, --config <FILE>    Read config from FILE");
-    eprintln!("  -p, --program <NAME>   Launch one app immediately and skip the TUI");
-    eprintln!("  -ss <SEARCH>           Pre-fill the search box; place this last");
-    eprintln!("  --dmenu                Read choices from stdin and print the selection");
-    eprintln!("  --cclip                Browse clipboard history and copy the selection");
-    eprintln!("  --no-exec              Print the selected item instead of launching it");
-    eprintln!("  -r, --replace          Replace an existing fsel/cclip instance");
-    eprintln!("  -d, --detach           Start launched apps without keeping the terminal attached");
-    eprintln!("  -v, --verbose          Print more diagnostics; repeat as -vv or -vvv");
-    eprintln!("  -h                     Show the short summary");
-    eprintln!("  -H, --help             Show the full option tree");
-    eprintln!("  -V, --version          Print the version and exit");
-    eprintln!();
-    eprintln!("Run 'fsel -h' for a summary or 'fsel --help' for the full option tree.");
-    std::process::exit(1);
+    CliError::message(unknown_argument_help(error_msg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CliCommand, CliError, parse_with_config};
+    use crate::config::FselConfig;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn short_help_returns_command_without_exiting() {
+        let command = parse_with_config(&args(&["fsel", "-h"]), FselConfig::default()).unwrap();
+        assert!(matches!(command, CliCommand::PrintShortHelp { .. }));
+    }
+
+    #[test]
+    fn version_returns_command_without_exiting() {
+        let command =
+            parse_with_config(&args(&["fsel", "--version"]), FselConfig::default()).unwrap();
+        assert!(matches!(command, CliCommand::PrintVersion));
+    }
+
+    #[test]
+    fn invalid_tag_mode_returns_typed_error() {
+        let error = parse_with_config(&args(&["fsel", "--tag", "list"]), FselConfig::default())
+            .unwrap_err();
+        assert!(
+            matches!(error, CliError::Message(message) if message.contains("--tag requires --cclip mode"))
+        );
+    }
 }

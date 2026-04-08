@@ -1,7 +1,9 @@
 use crate::ui::PanelPosition;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum MatchMode {
     Exact,
     #[default]
@@ -20,7 +22,8 @@ impl FromStr for MatchMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum RankingMode {
     #[default]
     Frecency,
@@ -51,12 +54,15 @@ impl FromStr for RankingMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum PinnedOrderMode {
     #[default]
     Ranking,
     Alphabetical,
+    #[serde(alias = "oldest")]
     OldestPinned,
+    #[serde(alias = "newest", alias = "last_pinned")]
     NewestPinned,
 }
 

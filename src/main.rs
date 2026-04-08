@@ -1,9 +1,12 @@
 //! Binary entrypoint for `fsel`.
 
-fn main() {
-    if let Err(error) = fsel::run() {
-        fsel::cleanup_after_error();
-        eprintln!("{error:?}");
-        std::process::exit(1);
+fn main() -> std::process::ExitCode {
+    match fsel::run() {
+        Ok(code) => code,
+        Err(error) => {
+            fsel::cleanup_after_error();
+            eprintln!("{error:?}");
+            std::process::ExitCode::from(1)
+        }
     }
 }

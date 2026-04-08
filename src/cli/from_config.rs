@@ -4,38 +4,16 @@ use super::types::Opts;
 use crate::config::FselConfig;
 use crate::ui::PanelPosition;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ConfigDefaultsError {
-    MultipleLaunchMethods,
-}
-
-impl std::fmt::Display for ConfigDefaultsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::MultipleLaunchMethods => {
-                write!(f, "Only one launch method can be specified at a time")
-            }
-        }
-    }
-}
-
-pub(super) fn apply_config_defaults(
-    default: &mut Opts,
-    fsel_config: &FselConfig,
-) -> Result<(), ConfigDefaultsError> {
-    apply_general_config(default, fsel_config)?;
+pub(super) fn apply_config_defaults(default: &mut Opts, fsel_config: &FselConfig) {
+    apply_general_config(default, fsel_config);
     apply_app_launcher_overrides(default, fsel_config);
     apply_ui_config(default, fsel_config);
     apply_layout_config(default, fsel_config);
     apply_dmenu_config(default, fsel_config);
     apply_cclip_config(default, fsel_config);
-    Ok(())
 }
 
-fn apply_general_config(
-    default: &mut Opts,
-    fsel_config: &FselConfig,
-) -> Result<(), ConfigDefaultsError> {
+fn apply_general_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.terminal_launcher = fsel_config.general.terminal_launcher.clone();
     if default.terminal_launcher == "tty" {
         default.tty = true;
@@ -44,9 +22,9 @@ fn apply_general_config(
     default.filter_desktop = fsel_config.general.filter_desktop;
     default.list_executables_in_path = fsel_config.general.list_executables_in_path;
     default.hide_before_typing = fsel_config.general.hide_before_typing;
-    default.match_mode = fsel_config.general.match_mode.parse().unwrap_or_default();
-    default.ranking_mode = fsel_config.general.ranking_mode.parse().unwrap_or_default();
-    default.pinned_order_mode = fsel_config.general.pinned_order.parse().unwrap_or_default();
+    default.match_mode = fsel_config.general.match_mode;
+    default.ranking_mode = fsel_config.general.ranking_mode;
+    default.pinned_order_mode = fsel_config.general.pinned_order;
     default.systemd_run = fsel_config.general.systemd_run;
     default.uwsm = fsel_config.general.uwsm;
     default.detach = fsel_config.general.detach;
@@ -54,23 +32,12 @@ fn apply_general_config(
     default.confirm_first_launch = fsel_config.general.confirm_first_launch;
     default.prefix_depth = fsel_config.general.prefix_depth;
 
-    if [default.systemd_run, default.uwsm]
-        .iter()
-        .filter(|&&enabled| enabled)
-        .count()
-        > 1
-    {
-        return Err(ConfigDefaultsError::MultipleLaunchMethods);
-    }
-
     if default.systemd_run {
         set_systemd_run(default);
     }
     if default.uwsm {
         set_uwsm(default);
     }
-
-    Ok(())
 }
 
 fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
@@ -86,8 +53,8 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(prefix) = fsel_config.app_launcher.launch_prefix.clone() {
         set_launch_prefix(default, prefix);
     }
-    if let Some(mode) = fsel_config.app_launcher.match_mode.as_deref() {
-        default.match_mode = mode.parse().unwrap_or(default.match_mode);
+    if let Some(mode) = fsel_config.app_launcher.match_mode {
+        default.match_mode = mode;
     }
     if let Some(confirm) = fsel_config.app_launcher.confirm_first_launch {
         default.confirm_first_launch = confirm;
@@ -95,13 +62,11 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(depth) = fsel_config.app_launcher.prefix_depth {
         default.prefix_depth = depth;
     }
-    if let Some(ranking_mode) = fsel_config.app_launcher.ranking_mode.as_deref() {
-        default.ranking_mode = ranking_mode.parse().unwrap_or(default.ranking_mode);
+    if let Some(ranking_mode) = fsel_config.app_launcher.ranking_mode {
+        default.ranking_mode = ranking_mode;
     }
-    if let Some(pinned_order_mode) = fsel_config.app_launcher.pinned_order.as_deref() {
-        default.pinned_order_mode = pinned_order_mode
-            .parse()
-            .unwrap_or(default.pinned_order_mode);
+    if let Some(pinned_order_mode) = fsel_config.app_launcher.pinned_order {
+        default.pinned_order_mode = pinned_order_mode;
     }
 }
 
@@ -145,7 +110,7 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
 fn apply_layout_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.title_panel_height_percent = fsel_config.layout.title_panel_height_percent;
     default.input_panel_height = fsel_config.layout.input_panel_height;
-    default.title_panel_position = fsel_config.layout.title_panel_position.parse().ok();
+    default.title_panel_position = Some(fsel_config.layout.title_panel_position);
 }
 
 fn apply_dmenu_config(default: &mut Opts, fsel_config: &FselConfig) {
@@ -195,7 +160,7 @@ fn apply_dmenu_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.dmenu_title_panel_height_percent = fsel_config.dmenu.title_panel_height_percent;
     default.dmenu_input_panel_height = fsel_config.dmenu.input_panel_height;
     default.dmenu_title_panel_position =
-        parse_mode_panel_position(fsel_config.dmenu.title_panel_position.as_deref());
+        parse_mode_panel_position(fsel_config.dmenu.title_panel_position);
 }
 
 fn apply_cclip_config(default: &mut Opts, fsel_config: &FselConfig) {
@@ -229,7 +194,7 @@ fn apply_cclip_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.cclip_title_panel_height_percent = fsel_config.cclip.title_panel_height_percent;
     default.cclip_input_panel_height = fsel_config.cclip.input_panel_height;
     default.cclip_title_panel_position =
-        parse_mode_panel_position(fsel_config.cclip.title_panel_position.as_deref());
+        parse_mode_panel_position(fsel_config.cclip.title_panel_position);
 }
 
 fn parse_optional_color(value: Option<&str>) -> Option<ratatui::style::Color> {
@@ -238,9 +203,9 @@ fn parse_optional_color(value: Option<&str>) -> Option<ratatui::style::Color> {
 
 // Preserve the historical mode-specific override behavior: only `bottom` is
 // accepted for dmenu/cclip-specific layout overrides today.
-fn parse_mode_panel_position(value: Option<&str>) -> Option<PanelPosition> {
+fn parse_mode_panel_position(value: Option<PanelPosition>) -> Option<PanelPosition> {
     match value {
-        Some("bottom") => Some(PanelPosition::Bottom),
+        Some(PanelPosition::Bottom) => Some(PanelPosition::Bottom),
         _ => None,
     }
 }

@@ -16,7 +16,7 @@ mod strings;
 mod ui;
 
 /// Runs the application entrypoint and dispatches to the selected mode.
-pub fn run() -> eyre::Result<()> {
+pub fn run() -> eyre::Result<std::process::ExitCode> {
     app::run()
 }
 

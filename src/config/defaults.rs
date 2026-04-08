@@ -1,6 +1,8 @@
 use super::schema::{
     AppLauncherConfig, CclipConfig, DmenuConfig, FselConfig, GeneralConfig, LayoutConfig, UiConfig,
 };
+use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
+use crate::ui::PanelPosition;
 
 pub(super) fn default_terminal_launcher() -> String {
     "alacritty -e".to_string()
@@ -10,16 +12,16 @@ pub(super) fn default_true() -> bool {
     true
 }
 
-pub(super) fn default_match_mode() -> String {
-    "fuzzy".to_string()
+pub(super) fn default_match_mode() -> MatchMode {
+    MatchMode::Fuzzy
 }
 
-pub(super) fn default_ranking_mode() -> String {
-    "frecency".to_string()
+pub(super) fn default_ranking_mode() -> RankingMode {
+    RankingMode::Frecency
 }
 
-pub(super) fn default_pinned_order() -> String {
-    "ranking".to_string()
+pub(super) fn default_pinned_order() -> PinnedOrderMode {
+    PinnedOrderMode::Ranking
 }
 
 pub(super) fn default_highlight_color() -> String {
@@ -50,8 +52,8 @@ pub(super) fn default_input_panel_height() -> u16 {
     3
 }
 
-pub(super) fn default_title_panel_position() -> String {
-    "top".to_string()
+pub(super) fn default_title_panel_position() -> PanelPosition {
+    PanelPosition::Top
 }
 
 pub(super) fn default_prefix_depth() -> usize {

@@ -1,15 +1,13 @@
-use eyre::{WrapErr, eyre};
-use std::{fs, io, path};
+use std::process::ExitCode;
 
 use crate::cli;
 use crate::modes;
-use crate::process;
 
-pub(crate) fn run(cli: &cli::Opts) -> eyre::Result<()> {
+pub(crate) fn run(cli: &cli::Opts) -> eyre::Result<ExitCode> {
     if !modes::cclip::check_cclip_available() {
         eprintln!("error: cclip is not installed or not in PATH");
         eprintln!("install cclip from: https://github.com/heather7283/cclip");
-        std::process::exit(1);
+        return Ok(ExitCode::from(1));
     }
 
     if let Err(e) = modes::cclip::check_cclip_database() {
@@ -21,69 +19,18 @@ pub(crate) fn run(cli: &cli::Opts) -> eyre::Result<()> {
         );
         eprintln!("2. copy some stuff to build up history");
         eprintln!("\nfor more info: https://github.com/heather7283/cclip");
-        std::process::exit(1);
+        return Ok(ExitCode::from(1));
     }
 
     let lock_path = super::paths::cclip_lock_path()?;
-
-    let contents = match fs::read_to_string(&lock_path) {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-        Ok(c) => c,
-        Err(e) => {
-            return Err(e).wrap_err("Failed to read cclip lockfile");
-        }
-    };
-
     let is_non_interactive = cli.cclip_clear_tags || cli.cclip_tag_list || cli.cclip_wipe_tags;
-
-    if !contents.is_empty() && !is_non_interactive {
-        if let Ok(pid) = contents.trim().parse::<i32>() {
-            if !process::process_exists(pid) {
-                if let Err(e) = fs::remove_file(&lock_path) {
-                    eprintln!("Warning: Failed to remove stale lock file: {}", e);
-                }
-            } else if cli.replace {
-                match process::kill_process_sigterm_result(pid) {
-                    Ok(()) => {
-                        fs::remove_file(&lock_path)?;
-                    }
-                    Err(e) if e.raw_os_error() == Some(libc::ESRCH) => {
-                        fs::remove_file(&lock_path)?;
-                    }
-                    Err(e) => {
-                        return Err(eyre!(
-                            "Failed to kill existing fsel cclip process (pid {}): {}",
-                            pid,
-                            e
-                        ));
-                    }
-                }
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            } else {
-                return Err(eyre!("Fsel cclip mode is already running"));
-            }
-        } else if let Err(e) = fs::remove_file(&lock_path) {
-            eprintln!("Warning: Failed to remove corrupted lock file: {}", e);
-        }
-    }
-
-    let _cclip_lock_guard = if !is_non_interactive {
-        let mut lock_file = fs::File::create(&lock_path)?;
-        let pid = process::get_current_pid();
-        use std::io::Write;
-        lock_file.write_all(pid.to_string().as_bytes())?;
-
-        struct CclipLockGuard(path::PathBuf);
-        impl Drop for CclipLockGuard {
-            fn drop(&mut self) {
-                let _ = fs::remove_file(&self.0);
-            }
-        }
-        Some(CclipLockGuard(lock_path))
-    } else {
+    let _session = if is_non_interactive {
         None
+    } else {
+        Some(modes::cclip::CclipSession::start(&lock_path, cli.replace)?)
     };
 
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(modes::cclip::run(cli))
+    rt.block_on(modes::cclip::run(cli))?;
+    Ok(ExitCode::SUCCESS)
 }

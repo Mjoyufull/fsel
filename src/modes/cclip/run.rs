@@ -4,14 +4,13 @@
 //! history browser with TUI interface.
 
 use crate::cli::Opts;
-use crate::common::Item;
-use crate::ui::{DmenuUI, InputConfig, InputEvent as Event, TagMode};
+use crate::ui::{DmenuUI, InputEvent as Event, TagMode};
 use crossterm::event::{MouseButton, MouseEventKind};
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr};
 use futures::FutureExt;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout};
+use ratatui::layout::Alignment;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Wrap};
@@ -22,11 +21,62 @@ use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 
-fn effective_content_height(total_height: u16, content_panel_percent: u16) -> u16 {
-    if content_panel_percent == 0 {
-        0
+use super::commands::{handle_noninteractive_mode, load_history, validate_environment};
+use super::items::{build_items, reload_and_restore};
+use super::state::CclipOptions;
+
+fn copy_selected_and_exit(
+    ui: &mut DmenuUI,
+    index: usize,
+    terminal: &mut Terminal<CrosstermBackend<io::Stderr>>,
+    disable_mouse: bool,
+) -> Result<bool> {
+    if index >= ui.shown.len() {
+        return Ok(false);
+    }
+
+    let original_line = &ui.shown[index].original_line;
+    match super::CclipItem::from_line(original_line.clone()) {
+        Ok(cclip_item) => {
+            if let Err(error) = cclip_item.copy_to_clipboard() {
+                ui.set_temp_message(format!("Copy failed: {}", error));
+                return Ok(false);
+            }
+
+            terminal.show_cursor().wrap_err("Failed to show cursor")?;
+            let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
+            Ok(true)
+        }
+        Err(error) => {
+            ui.set_temp_message(format!("Parse failed: {}", error));
+            Ok(false)
+        }
+    }
+}
+
+fn reload_visible_history(
+    ui: &mut DmenuUI,
+    cli: &Opts,
+    tag_metadata_formatter: &super::TagMetadataFormatter,
+    show_line_numbers: bool,
+    show_tag_color_names: bool,
+    max_visible: usize,
+) {
+    let updated_items_res = if let Some(ref tag_name) = cli.cclip_tag {
+        super::scan::get_clipboard_history_by_tag(tag_name)
     } else {
-        ((total_height as f32 * content_panel_percent as f32 / 100.0).round() as u16).max(3)
+        super::scan::get_clipboard_history()
+    };
+
+    if let Ok(updated_items) = updated_items_res {
+        reload_and_restore(
+            ui,
+            updated_items,
+            tag_metadata_formatter,
+            show_line_numbers,
+            show_tag_color_names,
+            max_visible,
+        );
     }
 }
 
@@ -34,108 +84,12 @@ fn effective_content_height(total_height: u16, content_panel_percent: u16) -> u1
 pub async fn run(cli: &Opts) -> Result<()> {
     use crossterm::event::{KeyCode, KeyModifiers};
 
-    // Check if cclip is available
-    if !super::scan::check_cclip_available() {
-        return Err(eyre!(
-            "cclip is not available. Please install cclip and ensure it's in your PATH."
-        ));
-    }
-
-    // Check if cclip database is accessible
-    super::scan::check_cclip_database().wrap_err("cclip database check failed")?;
-
-    // Handle clear tags mode (fsel metadata only)
-    if cli.cclip_clear_tags {
-        let (db, _) = crate::core::database::open_history_db()?;
-
-        // Clear tag metadata from fsel database
-        let write_txn = db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(super::TAG_METADATA_TABLE)?;
-            let _ = table.remove("tag_metadata");
-        }
-        write_txn.commit()?;
-
-        println!("Cleared all tag metadata from fsel database");
-        println!();
-        println!("Note: To wipe tags from cclip entries too, use:");
-        println!("  fsel --cclip --tag wipe");
+    validate_environment()?;
+    if handle_noninteractive_mode(cli)? {
         return Ok(());
     }
 
-    // Handle wipe tags mode (cclip + fsel metadata)
-    if cli.cclip_wipe_tags {
-        // First wipe cclip tags
-        super::select::wipe_all_tags().wrap_err("Failed to wipe cclip tags")?;
-        println!("Wiped all tags from cclip entries");
-
-        // Also clear fsel metadata
-        let (db, _) = crate::core::database::open_history_db()?;
-        let write_txn = db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(super::TAG_METADATA_TABLE)?;
-            let _ = table.remove("tag_metadata");
-        }
-        write_txn.commit()?;
-        println!("Cleared all tag metadata from fsel database");
-
-        return Ok(());
-    }
-
-    // Handle tag list mode
-    if cli.cclip_tag_list {
-        let tags = super::scan::get_all_tags().wrap_err("Failed to get tags from cclip")?;
-
-        if tags.is_empty() {
-            println!("No tags found");
-            return Ok(());
-        }
-
-        // If specific tag requested, show items in that tag
-        if let Some(ref tag_name) = cli.cclip_tag {
-            println!("Items tagged with '{}':", tag_name);
-            let items = super::scan::get_clipboard_history_by_tag(tag_name)
-                .wrap_err("Failed to get items by tag")?;
-
-            if items.is_empty() {
-                println!("  (no items)");
-            } else {
-                for item in items {
-                    if cli.verbose.unwrap_or(0) >= 2 {
-                        // Verbose: show full details
-                        println!("  [{}] {} - {}", item.rowid, item.mime_type, item.preview);
-                    } else {
-                        // Normal: just preview
-                        println!("  {}", item.preview);
-                    }
-                }
-            }
-        } else {
-            // Just list tag names
-            println!("Available tags:");
-            for tag in tags {
-                if cli.verbose.unwrap_or(0) >= 2 {
-                    // Verbose: show item count
-                    let items = super::scan::get_clipboard_history_by_tag(&tag).unwrap_or_default();
-                    println!("  {} ({} items)", tag, items.len());
-                } else {
-                    println!("  {}", tag);
-                }
-            }
-        }
-        return Ok(());
-    }
-
-    // Get clipboard history from cclip (filtered by tag if specified)
-    let cclip_items = if let Some(ref tag_name) = cli.cclip_tag {
-        super::scan::get_clipboard_history_by_tag(tag_name).wrap_err(format!(
-            "Failed to get clipboard history for tag '{}'",
-            tag_name
-        ))?
-    } else {
-        super::scan::get_clipboard_history()
-            .wrap_err("Failed to get clipboard history from cclip")?
-    };
+    let cclip_items = load_history(cli)?;
 
     if cclip_items.is_empty() {
         if let Some(tag_name) = &cli.cclip_tag {
@@ -146,58 +100,24 @@ pub async fn run(cli: &Opts) -> Result<()> {
         return Ok(());
     }
 
-    // Get show_line_numbers setting early for item conversion
-    let show_line_numbers = cli
-        .cclip_show_line_numbers
-        .or(Some(cli.dmenu_show_line_numbers))
-        .unwrap_or(false);
+    let options = CclipOptions::from_cli(cli);
 
     // Load tag metadata for proper tag coloring
     let (db, _) = crate::core::database::open_history_db()?;
     let mut tag_metadata_map = super::load_tag_metadata(&db);
     let mut tag_metadata_formatter = super::TagMetadataFormatter::new(tag_metadata_map.clone());
 
-    // Get show_tag_color_names setting (defaults to false)
-    let show_tag_color_names = cli.cclip_show_tag_color_names.unwrap_or(false);
-
-    // Convert to DmenuItems with tag metadata formatting
-    let items: Vec<Item> = cclip_items
-        .into_iter()
-        .enumerate()
-        .map(|(idx, cclip_item)| {
-            // Use numbered display name if show_line_numbers is enabled
-            // Show color names based on CLI/config setting
-            let display_name = if show_line_numbers {
-                // Use database rowid (shows actual DB ID) with tag formatting
-                cclip_item.get_display_name_with_number_formatter_options(
-                    Some(&tag_metadata_formatter),
-                    show_tag_color_names,
-                )
-            } else {
-                cclip_item.get_display_name_with_formatter_options(
-                    Some(&tag_metadata_formatter),
-                    show_tag_color_names,
-                )
-            };
-
-            let mut item =
-                Item::new_simple(cclip_item.original_line.clone(), display_name, idx + 1);
-            item.tags = Some(cclip_item.tags.clone());
-            item
-        })
-        .collect();
-
-    // Setup terminal
-    // Get effective disable_mouse setting with cclip -> dmenu -> regular inheritance
-    let disable_mouse = cli
-        .cclip_disable_mouse
-        .or(cli.dmenu_disable_mouse)
-        .unwrap_or(cli.disable_mouse);
-    crate::ui::terminal::setup_terminal(disable_mouse)?;
+    let items = build_items(
+        cclip_items,
+        &tag_metadata_formatter,
+        options.show_line_numbers,
+        options.show_tag_color_names,
+    );
+    crate::ui::terminal::setup_terminal(options.disable_mouse)?;
 
     // Ensure cleanup on exit
     defer! {
-        let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
+        let _ = crate::ui::terminal::shutdown_terminal(options.disable_mouse);
     }
 
     // Initialize terminal using stderr to keep stdout clean
@@ -217,18 +137,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     // Cclip does not need a synthetic render stream. Redraw on real input, resize, and
     // image-loader completions so large image previews do not flood the event queue.
-    let mut input = InputConfig {
-        exit_key: KeyCode::Null,
-        disable_mouse,
-        render_rate: None,
-        ..InputConfig::default()
-    }
-    .init_async();
+    let mut input = options.input_config().init_async();
 
-    // Create dmenu UI using cclip settings with inheritance
-    // Wrapping should be enabled by default for proper text display
-    let wrap_long_lines = cli.cclip_wrap_long_lines.unwrap_or(true);
-    let mut ui = DmenuUI::new(items, wrap_long_lines, show_line_numbers);
+    let mut ui = DmenuUI::new(items, options.wrap_long_lines, options.show_line_numbers);
 
     // Pre-fill search if -ss was provided
     if let Some(ref search) = cli.search_string {
@@ -247,13 +158,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
     }
 
     // Determine image preview enablement and cache capabilities
-    let mut image_preview_enabled = cli.cclip_image_preview.unwrap_or(false);
+    let mut image_preview_enabled = false;
     let mut cached_is_sixel = false;
     if let Some(ref manager) = image_manager {
         let manager_lock = manager.lock().await;
-        if cli.cclip_image_preview.is_none() {
-            image_preview_enabled = manager_lock.supports_graphics();
-        }
+        image_preview_enabled = options.image_preview_enabled(manager_lock.supports_graphics());
         cached_is_sixel = manager_lock.is_sixel();
     }
 
@@ -264,27 +173,10 @@ pub async fn run(cli: &Opts) -> Result<()> {
         );
     }
 
-    // Get effective colors with cclip -> dmenu -> regular inheritance
-    let get_cclip_color =
-        |cclip_opt: Option<ratatui::style::Color>,
-         dmenu_opt: Option<ratatui::style::Color>,
-         default: ratatui::style::Color| { cclip_opt.or(dmenu_opt).unwrap_or(default) };
-    let get_cclip_bool = |cclip_opt: Option<bool>, dmenu_opt: Option<bool>, default: bool| {
-        cclip_opt.or(dmenu_opt).unwrap_or(default)
-    };
-    let get_cclip_u16 = |cclip_opt: Option<u16>, dmenu_opt: Option<u16>, default: u16| {
-        cclip_opt.or(dmenu_opt).unwrap_or(default)
-    };
-    let get_cclip_panel_position =
-        |cclip_opt: Option<crate::cli::PanelPosition>,
-         dmenu_opt: Option<crate::cli::PanelPosition>,
-         default: crate::cli::PanelPosition| { cclip_opt.or(dmenu_opt).unwrap_or(default) };
-
-    // Update info with image support
-    // Calculate layout to get actual chunk width
-
-    // Get hide image message setting
-    let hide_image_message = cli.cclip_hide_inline_image_message.unwrap_or(false);
+    let hide_image_message = options.hide_image_message;
+    let show_line_numbers = options.show_line_numbers;
+    let show_tag_color_names = options.show_tag_color_names;
+    let disable_mouse = options.disable_mouse;
 
     // List state for ratatui
     let mut list_state = ListState::default();
@@ -294,20 +186,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
     // Flag to force Ratatui buffer sync after clearing in tag mode
     let mut force_sixel_sync = false;
 
-    // For Foot: use DEC Private Mode 2026 (synchronized updates) to prevent mid-frame tearing
-    let term_is_foot = std::env::var("TERM")
-        .unwrap_or_default()
-        .starts_with("foot");
-
-    // Get effective cursor string with inheritance
-    let cursor = cli
-        .cclip_cursor
-        .as_ref()
-        .or(cli.dmenu_cursor.as_ref())
-        .unwrap_or(&cli.cursor);
-
-    // Pre-detect graphics adapter for performance
-    let graphics_adapter = crate::ui::GraphicsAdapter::detect(picker.as_ref());
+    let term_is_foot = options.term_is_foot;
+    let cursor = &options.cursor;
+    let graphics_adapter = options.graphics_adapter;
 
     // Track visible height for scroll management
     let mut max_visible = 0;
@@ -470,119 +351,25 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
             let mut render_error = Ok(());
             terminal.draw(|f| {
-                // Get effective colors and settings for cclip mode with inheritance
-                let highlight_color = get_cclip_color(
-                    cli.cclip_highlight_color,
-                    cli.dmenu_highlight_color,
-                    cli.highlight_color,
-                );
-                let main_border_color = get_cclip_color(
-                    cli.cclip_main_border_color,
-                    cli.dmenu_main_border_color,
-                    cli.main_border_color,
-                );
-                let items_border_color = get_cclip_color(
-                    cli.cclip_items_border_color,
-                    cli.dmenu_items_border_color,
-                    cli.apps_border_color,
-                );
-                let input_border_color = get_cclip_color(
-                    cli.cclip_input_border_color,
-                    cli.dmenu_input_border_color,
-                    cli.input_border_color,
-                );
-                let main_text_color = get_cclip_color(
-                    cli.cclip_main_text_color,
-                    cli.dmenu_main_text_color,
-                    cli.main_text_color,
-                );
-                let items_text_color = get_cclip_color(
-                    cli.cclip_items_text_color,
-                    cli.dmenu_items_text_color,
-                    cli.apps_text_color,
-                );
-                let input_text_color = get_cclip_color(
-                    cli.cclip_input_text_color,
-                    cli.dmenu_input_text_color,
-                    cli.input_text_color,
-                );
-                let header_title_color = get_cclip_color(
-                    cli.cclip_header_title_color,
-                    cli.dmenu_header_title_color,
-                    cli.header_title_color,
-                );
-                let rounded_borders = get_cclip_bool(
-                    cli.cclip_rounded_borders,
-                    cli.dmenu_rounded_borders,
-                    cli.rounded_borders,
-                );
-                let content_panel_height = get_cclip_u16(
-                    cli.cclip_title_panel_height_percent,
-                    cli.dmenu_title_panel_height_percent,
-                    cli.title_panel_height_percent,
-                );
-                let input_panel_height = get_cclip_u16(
-                    cli.cclip_input_panel_height,
-                    cli.dmenu_input_panel_height,
-                    cli.input_panel_height,
-                );
-
-                // Use pre-detected graphics adapter
+                let highlight_color = options.highlight_color;
+                let main_border_color = options.main_border_color;
+                let items_border_color = options.items_border_color;
+                let input_border_color = options.input_border_color;
+                let main_text_color = options.main_text_color;
+                let items_text_color = options.items_text_color;
+                let input_text_color = options.input_text_color;
+                let header_title_color = options.header_title_color;
+                let rounded_borders = options.rounded_borders;
                 let graphics = graphics_adapter;
 
-                // Layout calculation
                 let total_height = f.area().height;
-                let content_height = effective_content_height(total_height, content_panel_height);
+                let content_height = options.content_height(total_height);
                 let show_content_panel = content_height > 0;
-
-                // Get content panel position (defaults to Top if not set, with cclip -> dmenu -> regular inheritance)
-                let content_panel_position = get_cclip_panel_position(
-                    cli.cclip_title_panel_position,
-                    cli.dmenu_title_panel_position,
-                    cli.title_panel_position
-                        .unwrap_or(crate::cli::PanelPosition::Top),
-                );
-
-                // Split the window into three parts based on content panel position
-                let (chunks, content_panel_index, items_panel_index, input_panel_index) =
-                    match content_panel_position {
-                        crate::cli::PanelPosition::Top => {
-                            // Top: content, items, input (original layout)
-                            let layout = Layout::default()
-                                .direction(Direction::Vertical)
-                                .constraints([
-                                    Constraint::Length(content_height),
-                                    Constraint::Min(1),
-                                    Constraint::Length(input_panel_height),
-                                ])
-                                .split(f.area());
-                            (layout, 0, 1, 2)
-                        }
-                        crate::cli::PanelPosition::Middle => {
-                            // Middle: items, content, input
-                            let layout = Layout::default()
-                                .direction(Direction::Vertical)
-                                .constraints([
-                                    Constraint::Min(1),
-                                    Constraint::Length(content_height),
-                                    Constraint::Length(input_panel_height),
-                                ])
-                                .split(f.area());
-                            (layout, 1, 0, 2)
-                        }
-                        crate::cli::PanelPosition::Bottom => {
-                            // Bottom: items, input, content
-                            let layout = Layout::default()
-                                .direction(Direction::Vertical)
-                                .constraints([
-                                    Constraint::Min(1),                     // Items panel (remaining space)
-                                    Constraint::Length(input_panel_height), // Input panel
-                                    Constraint::Length(content_height), // Content panel at bottom
-                                ])
-                                .split(f.area());
-                            (layout, 2, 0, 1)
-                        }
-                    };
+                let layout = options.split_layout(f.area());
+                let chunks = layout.chunks;
+                let content_panel_index = layout.content_panel_index;
+                let items_panel_index = layout.items_panel_index;
+                let input_panel_index = layout.input_panel_index;
 
                 // NOW calculate UI content using the ACTUAL chunks that will be used for rendering
                 // This ensures wrapping calculations match the actual render area
@@ -592,11 +379,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 match &ui.tag_mode {
                     TagMode::Normal => {
                         ui.info_with_image_support(
-                            get_cclip_color(
-                                cli.cclip_highlight_color,
-                                cli.dmenu_highlight_color,
-                                cli.highlight_color,
-                            ),
+                            highlight_color,
                             image_preview_enabled,
                             hide_image_message,
                             content_panel_width,
@@ -606,11 +389,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     _ => {
                         // While in tag modes, suspend inline image preview completely
                         ui.info_with_image_support(
-                            get_cclip_color(
-                                cli.cclip_highlight_color,
-                                cli.dmenu_highlight_color,
-                                cli.highlight_color,
-                            ),
+                            highlight_color,
                             false,
                             hide_image_message,
                             content_panel_width,
@@ -1016,27 +795,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                         "Deleted entry {}",
                                                         rowid
                                                     ));
-
-                                                    // Reload clipboard history (respecting tag filter if active)
-                                                    let updated_items_res =
-                                                        if let Some(ref tag_name) = cli.cclip_tag {
-                                                            super::scan::get_clipboard_history_by_tag(
-                                                                tag_name,
-                                                            )
-                                                        } else {
-                                                            super::scan::get_clipboard_history()
-                                                        };
-
-                                                    if let Ok(updated_items) = updated_items_res {
-                                                        reload_and_restore(
-                                                            &mut ui,
-                                                            updated_items,
-                                                            &tag_metadata_formatter,
-                                                            show_line_numbers,
-                                                            show_tag_color_names,
-                                                            max_visible,
-                                                        );
-                                                    }
+                                                    reload_visible_history(
+                                                        &mut ui,
+                                                        cli,
+                                                        &tag_metadata_formatter,
+                                                        show_line_numbers,
+                                                        show_tag_color_names,
+                                                        max_visible,
+                                                    );
                                                 }
                                                 Err(e) => {
                                                     ui.set_temp_message(format!(
@@ -1227,25 +993,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                             tag_metadata_formatter = super::TagMetadataFormatter::new(
                                                 tag_metadata_map.clone(),
                                             );
-
-                                            // Reload clipboard history to get updated tags
-                                            let updated_items_res =
-                                                if let Some(ref tag_name) = cli.cclip_tag {
-                                                    super::scan::get_clipboard_history_by_tag(tag_name)
-                                                } else {
-                                                    super::scan::get_clipboard_history()
-                                                };
-
-                                            if let Ok(updated_items) = updated_items_res {
-                                                reload_and_restore(
-                                                    &mut ui,
-                                                    updated_items,
-                                                    &tag_metadata_formatter,
-                                                    show_line_numbers,
-                                                    show_tag_color_names,
-                                                    max_visible,
-                                                );
-                                            }
+                                            reload_visible_history(
+                                                &mut ui,
+                                                cli,
+                                                &tag_metadata_formatter,
+                                                show_line_numbers,
+                                                show_tag_color_names,
+                                                max_visible,
+                                            );
                                         }
                                     }
 
@@ -1278,25 +1033,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                                     e
                                                 ));
                                             } _ => {
-                                                // Reload clipboard history to get updated tags
-                                                let updated_items_res = if let Some(ref tag_name) =
-                                                    cli.cclip_tag
-                                                {
-                                                    super::scan::get_clipboard_history_by_tag(tag_name)
-                                                } else {
-                                                    super::scan::get_clipboard_history()
-                                                };
-
-                                                if let Ok(updated_items) = updated_items_res {
-                                                    reload_and_restore(
-                                                        &mut ui,
-                                                        updated_items,
-                                                        &tag_metadata_formatter,
-                                                        show_line_numbers,
-                                                        show_tag_color_names,
-                                                        max_visible,
-                                                    );
-                                                }
+                                                reload_visible_history(
+                                                    &mut ui,
+                                                    cli,
+                                                    &tag_metadata_formatter,
+                                                    show_line_numbers,
+                                                    show_tag_color_names,
+                                                    max_visible,
+                                                );
                                             }}
                                         }
                                     }
@@ -1308,37 +1052,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                     // Normal mode: copy to clipboard
                                     if let Some(selected) = ui.selected
                                         && selected < ui.shown.len() {
-                                            let original_line = &ui.shown[selected].original_line;
-                                            let parsed_item =
-                                                super::CclipItem::from_line(original_line.clone());
-                                            match parsed_item {
-                                                Ok(cclip_item) => {
-                                                    let copy_result =
-                                                        cclip_item.copy_to_clipboard();
-                                                    if let Err(e) = copy_result {
-                                                        ui.set_temp_message(format!(
-                                                            "Copy failed: {}",
-                                                            e
-                                                        ));
-                                                        continue;
-                                                    }
-
-                                                    // clean up terminal completely and exit
-                                                    let show_cursor_result = terminal
-                                                        .show_cursor()
-                                                        .wrap_err("Failed to show cursor");
-                                                    show_cursor_result?;
-                                                    drop(terminal);
-                                                    let _ = crate::ui::terminal::shutdown_terminal(
-                                                        disable_mouse,
-                                                    );
-                                                    return Ok(());
-                                                }
-                                                Err(e) => {
-                                                    ui.set_temp_message(format!("Parse failed: {}", e));
-                                                    continue;
-                                                }
+                                            if copy_selected_and_exit(
+                                                &mut ui,
+                                                selected,
+                                                &mut terminal,
+                                                disable_mouse,
+                                            )? {
+                                                return Ok(());
                                             }
+                                            continue;
                                         }
                                 }
                             }
@@ -1404,25 +1126,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 let last_index = ui.shown.len() - 1;
                                 ui.selected = Some(last_index);
 
-                                // Scroll to show last item
-                                let total_height = terminal.size()?.height;
-                                let content_panel_height = get_cclip_u16(
-                                    cli.cclip_title_panel_height_percent,
-                                    cli.dmenu_title_panel_height_percent,
-                                    cli.title_panel_height_percent,
-                                );
-                                let input_panel_height = get_cclip_u16(
-                                    cli.cclip_input_panel_height,
-                                    cli.dmenu_input_panel_height,
-                                    cli.input_panel_height,
-                                );
-
-                                // Use same calculation as rendering code
-                                let content_height =
-                                    effective_content_height(total_height, content_panel_height);
-                                let items_panel_height =
-                                    total_height.saturating_sub(content_height + input_panel_height);
-                                let max_visible = items_panel_height.saturating_sub(2) as usize;
+                                let max_visible =
+                                    options.max_visible_items(terminal.size()?.height);
 
                                 if max_visible > 0 && ui.shown.len() > max_visible {
                                     ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
@@ -1452,11 +1157,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             }
 
                             if let Some(selected) = ui.selected {
-                                let hard_stop = get_cclip_bool(
-                                    cli.cclip_hard_stop,
-                                    cli.dmenu_hard_stop,
-                                    cli.hard_stop,
-                                );
+                                let hard_stop = options.hard_stop;
                                 ui.selected = if ui.shown.is_empty() {
                                     Some(selected)
                                 } else if selected + 1 < ui.shown.len() {
@@ -1469,27 +1170,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                                 // Auto-scroll to keep selection visible
                                 if let Some(new_selected) = ui.selected {
-                                    let total_height = terminal.size()?.height;
-                                    let content_panel_height = get_cclip_u16(
-                                        cli.cclip_title_panel_height_percent,
-                                        cli.dmenu_title_panel_height_percent,
-                                        cli.title_panel_height_percent,
-                                    );
-                                    let input_panel_height = get_cclip_u16(
-                                        cli.cclip_input_panel_height,
-                                        cli.dmenu_input_panel_height,
-                                        cli.input_panel_height,
-                                    );
-
-                                    // Use same calculation as rendering code
-                                    let content_height = effective_content_height(
-                                        total_height,
-                                        content_panel_height,
-                                    );
-                                    let items_panel_height =
-                                        total_height
-                                            .saturating_sub(content_height + input_panel_height);
-                                    let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                    let max_visible =
+                                        options.max_visible_items(terminal.size()?.height);
 
                                     if max_visible == 0 {
                                         ui.scroll_offset = 0;
@@ -1528,11 +1210,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             }
 
                             if let Some(selected) = ui.selected {
-                                let hard_stop = get_cclip_bool(
-                                    cli.cclip_hard_stop,
-                                    cli.dmenu_hard_stop,
-                                    cli.hard_stop,
-                                );
+                                let hard_stop = options.hard_stop;
                                 ui.selected = if selected > 0 {
                                     Some(selected - 1)
                                 } else if !hard_stop && !ui.shown.is_empty() {
@@ -1543,27 +1221,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
                                 // Auto-scroll to keep selection visible
                                 if let Some(new_selected) = ui.selected {
-                                    let total_height = terminal.size()?.height;
-                                    let content_panel_height = get_cclip_u16(
-                                        cli.cclip_title_panel_height_percent,
-                                        cli.dmenu_title_panel_height_percent,
-                                        cli.title_panel_height_percent,
-                                    );
-                                    let input_panel_height = get_cclip_u16(
-                                        cli.cclip_input_panel_height,
-                                        cli.dmenu_input_panel_height,
-                                        cli.input_panel_height,
-                                    );
-
-                                    // Use same calculation as rendering code
-                                    let content_height = effective_content_height(
-                                        total_height,
-                                        content_panel_height,
-                                    );
-                                    let items_panel_height =
-                                        total_height
-                                            .saturating_sub(content_height + input_panel_height);
-                                    let max_visible = items_panel_height.saturating_sub(2) as usize; // -2 for borders
+                                    let max_visible =
+                                        options.max_visible_items(terminal.size()?.height);
 
                                     if max_visible == 0 {
                                         ui.scroll_offset = 0;
@@ -1588,47 +1247,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
                     needs_redraw = true;
                     // Mouse handling (similar to dmenu mode)
                     let mouse_row = mouse_event.row;
-                    let total_height = terminal.size()?.height;
-                    let content_panel_height = get_cclip_u16(
-                        cli.cclip_title_panel_height_percent,
-                        cli.dmenu_title_panel_height_percent,
-                        cli.title_panel_height_percent,
-                    );
-                    let input_panel_height = get_cclip_u16(
-                        cli.cclip_input_panel_height,
-                        cli.dmenu_input_panel_height,
-                        cli.input_panel_height,
-                    );
-
-                    // Use same calculation as rendering code
-                    let content_height =
-                        effective_content_height(total_height, content_panel_height);
-                    let items_panel_height =
-                        total_height.saturating_sub(content_height + input_panel_height);
-
-                    // Get content panel position to calculate items panel position
-                    let content_panel_position = get_cclip_panel_position(
-                        cli.cclip_title_panel_position,
-                        cli.dmenu_title_panel_position,
-                        cli.title_panel_position
-                            .unwrap_or(crate::cli::PanelPosition::Top),
-                    );
-
-                    // Calculate items panel coordinates based on layout
-                    let (items_panel_start, items_panel_height) = match content_panel_position {
-                        crate::cli::PanelPosition::Top => {
-                            // Top: content, items, input - items start after content
-                            (content_height, items_panel_height)
-                        }
-                        crate::cli::PanelPosition::Middle => {
-                            // Middle: items, content, input - items start at top
-                            (0, items_panel_height)
-                        }
-                        crate::cli::PanelPosition::Bottom => {
-                            // Bottom: items, input, content - items start at top
-                            (0, items_panel_height)
-                        }
-                    };
+                    let (items_panel_start, items_panel_height) =
+                        options.items_panel_bounds(terminal.size()?.height);
 
                     let items_content_start = items_panel_start + 1; // +1 for top border
                     let max_visible_rows = items_panel_height.saturating_sub(2); // -2 for borders
@@ -1668,31 +1288,15 @@ pub async fn run(cli: &Opts) -> Result<()> {
                                 let clicked_item_index = ui.scroll_offset + row_in_content as usize;
 
                                 if clicked_item_index < ui.shown.len() {
-                                    let original_line = &ui.shown[clicked_item_index].original_line;
-                                    let parsed_item =
-                                        super::CclipItem::from_line(original_line.clone());
-                                    match parsed_item {
-                                        Ok(cclip_item) => {
-                                            let copy_result = cclip_item.copy_to_clipboard();
-                                            if let Err(e) = copy_result {
-                                                ui.set_temp_message(format!("Copy failed: {}", e));
-                                                continue;
-                                            }
-
-                                            // clean up terminal completely and exit
-                                            let show_cursor_result =
-                                                terminal.show_cursor().wrap_err("Failed to show cursor");
-                                            show_cursor_result?;
-                                            drop(terminal);
-                                            let _ =
-                                                crate::ui::terminal::shutdown_terminal(disable_mouse);
-                                            return Ok(());
-                                        }
-                                        Err(e) => {
-                                            ui.set_temp_message(format!("Parse failed: {}", e));
-                                            continue;
-                                        }
+                                    if copy_selected_and_exit(
+                                        &mut ui,
+                                        clicked_item_index,
+                                        &mut terminal,
+                                        disable_mouse,
+                                    )? {
+                                        return Ok(());
                                     }
+                                    continue;
                                 }
                             }
                         }
@@ -1730,105 +1334,5 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 }
             }
         }
-    }
-}
-
-/// Helper to reload clipboard items and restore selection/scroll
-fn reload_and_restore(
-    ui: &mut DmenuUI,
-    updated_items: Vec<super::CclipItem>,
-    tag_metadata_formatter: &super::TagMetadataFormatter,
-    show_line_numbers: bool,
-    show_tag_color_names: bool,
-    visible_height: usize,
-) {
-    // Recreate items
-    let new_items: Vec<Item> = updated_items
-        .into_iter()
-        .enumerate()
-        .map(|(idx, cclip_item)| {
-            let display_name = if show_line_numbers {
-                cclip_item.get_display_name_with_number_formatter_options(
-                    Some(tag_metadata_formatter),
-                    show_tag_color_names,
-                )
-            } else {
-                cclip_item.get_display_name_with_formatter_options(
-                    Some(tag_metadata_formatter),
-                    show_tag_color_names,
-                )
-            };
-
-            let mut item =
-                Item::new_simple(cclip_item.original_line.clone(), display_name, idx + 1);
-            item.tags = Some(cclip_item.tags.clone());
-            item
-        })
-        .collect();
-
-    // Preserve current selection by rowid (first field in original_line)
-    let old_selection = ui.selected;
-    let selected_rowid = old_selection
-        .and_then(|idx| ui.shown.get(idx))
-        .and_then(|item| item.original_line.split('\t').next().map(|s| s.to_string()));
-
-    // Update UI with new items
-    ui.hidden = new_items;
-    ui.shown.clear();
-    ui.filter();
-
-    // Restore selection:
-    // 1. Try to find the same rowid (item was updated but not deleted)
-    // 2. If rowid not found, keep the same index (item was deleted, select the one below it)
-    if let Some(ref rowid) = selected_rowid {
-        if let Some(pos) = ui
-            .shown
-            .iter()
-            .position(|item| item.original_line.split('\t').next() == Some(rowid.as_str()))
-        {
-            ui.selected = Some(pos);
-        } else if let Some(old_idx) = old_selection {
-            // Rowid not found - likely deleted. Keep same index if possible.
-            if !ui.shown.is_empty() {
-                ui.selected = Some(old_idx.min(ui.shown.len() - 1));
-            } else {
-                ui.selected = None;
-            }
-        }
-    } else if !ui.shown.is_empty() && ui.selected.is_none() {
-        // If nothing was selected before but we have items now, select first
-        ui.selected = Some(0);
-    }
-
-    // Adjust scroll to keep selection visible
-    if let Some(pos) = ui.selected {
-        if pos < ui.scroll_offset {
-            ui.scroll_offset = pos;
-        } else if pos >= ui.scroll_offset + visible_height {
-            ui.scroll_offset = pos + 1 - visible_height;
-        }
-    } else {
-        ui.scroll_offset = 0;
-    }
-
-    // Final boundary check for scroll offset
-    let max_scroll = ui.shown.len().saturating_sub(visible_height);
-    if ui.scroll_offset > max_scroll {
-        ui.scroll_offset = max_scroll;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::effective_content_height;
-
-    #[test]
-    fn effective_content_height_allows_zero() {
-        assert_eq!(effective_content_height(40, 0), 0);
-    }
-
-    #[test]
-    fn effective_content_height_keeps_visible_panels_usable() {
-        assert_eq!(effective_content_height(20, 1), 3);
     }
 }

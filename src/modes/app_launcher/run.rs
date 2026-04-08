@@ -1,18 +1,18 @@
 //! Application launcher mode
 
 use crate::cli::Opts;
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr};
 
 use crate::ui::{InputConfig, InputEvent as Event, UI};
 
-use crate::core::state::{Message, State, sort_by_ranking};
+use crate::core::ranking::{current_unix_seconds, sort_by_ranking};
+use crate::core::state::{Message, State};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use redb::ReadableTable;
 use scopeguard::defer;
-use std::collections::BTreeSet;
 use std::time::Duration;
-use std::{env, fs, io, path};
+use std::{env, io, path};
 
 use crossterm::event::{MouseButton, MouseEventKind};
 
@@ -33,178 +33,11 @@ pub async fn run(cli: Opts) -> Result<()> {
     defer! {
         let _ = crate::ui::terminal::shutdown_terminal(cli.disable_mouse);
     }
-    let db: std::sync::Arc<redb::Database>;
     let data_dir = crate::app::paths::runtime_data_dir()?;
     let hist_db_file = crate::app::paths::history_db_path()?;
     let lock_path = crate::app::paths::launcher_lock_path()?;
-
-    // Check if Fsel is already running (mode-specific lock file) - BEFORE opening database
-    {
-        let contents = match fs::read_to_string(&lock_path) {
-            Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
-            Ok(c) => c,
-            Err(e) => return Err(e).wrap_err("Failed to read lockfile"),
-        };
-
-        if !contents.is_empty() {
-            if cli.replace {
-                let mut target_pids: BTreeSet<i32> = BTreeSet::new();
-
-                if let Ok(pid) = contents.parse::<i32>() {
-                    target_pids.insert(pid);
-                }
-
-                if let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file) {
-                    target_pids.extend(holders);
-                }
-
-                for pid in target_pids.clone() {
-                    if let Err(e) = crate::process::kill_process_sigterm_result(pid)
-                        && e.raw_os_error() != Some(libc::ESRCH)
-                    {
-                        return Err(eyre!("Failed to kill process {}: {}", pid, e));
-                        // Log or handle error, but don't necessarily exit
-                    }
-
-                    const CHECK_INTERVAL_MS: u64 = 5;
-                    const TOTAL_WAIT_MS: u64 = 30;
-                    let mut waited_ms = 0u64;
-                    let mut escalated = false;
-
-                    loop {
-                        #[allow(unsafe_code)]
-                        let still_running = unsafe { libc::kill(pid, 0) == 0 };
-
-                        if !still_running {
-                            break;
-                        }
-
-                        if !escalated {
-                            #[allow(unsafe_code)]
-                            unsafe {
-                                let _ = libc::kill(pid, libc::SIGKILL);
-                            }
-                            escalated = true;
-                        }
-
-                        if waited_ms >= TOTAL_WAIT_MS {
-                            return Err(eyre::eyre!(
-                                "Existing fsel instance (pid {pid}) refused to exit"
-                            ));
-                        }
-
-                        std::thread::sleep(std::time::Duration::from_millis(CHECK_INTERVAL_MS));
-                        waited_ms += CHECK_INTERVAL_MS;
-                    }
-                }
-
-                if let Ok(mut remaining) =
-                    crate::process::find_processes_holding_file(&hist_db_file)
-                {
-                    remaining.retain(|pid| !target_pids.contains(pid));
-
-                    if !remaining.is_empty() {
-                        return Err(eyre::eyre!(
-                            "Existing fsel instance (pid(s) {:?}) refused to exit",
-                            remaining
-                        ));
-                    }
-                }
-            } else {
-                return Err(eyre!("Fsel is already running"));
-            }
-        } else if cli.replace
-            && let Ok(holders) = crate::process::find_processes_holding_file(&hist_db_file)
-            && !holders.is_empty()
-        {
-            for pid in holders.clone() {
-                if let Err(e) = crate::process::kill_process_sigterm_result(pid)
-                    && e.raw_os_error() != Some(libc::ESRCH)
-                {
-                    return Err(eyre!("Failed to kill process {}: {}", pid, e));
-                    // Log or handle error, but don't necessarily exit
-                }
-
-                const CHECK_INTERVAL_MS: u64 = 5;
-                const TOTAL_WAIT_MS: u64 = 30;
-                let mut waited_ms = 0u64;
-                let mut escalated = false;
-
-                loop {
-                    #[allow(unsafe_code)]
-                    let still_running = unsafe { libc::kill(pid, 0) == 0 };
-
-                    if !still_running {
-                        break;
-                    }
-
-                    if !escalated {
-                        #[allow(unsafe_code)]
-                        unsafe {
-                            let _ = libc::kill(pid, libc::SIGKILL);
-                        }
-                        escalated = true;
-                    }
-
-                    if waited_ms >= TOTAL_WAIT_MS {
-                        return Err(eyre::eyre!(
-                            "Existing fsel instance (pid {pid}) refused to exit"
-                        ));
-                    }
-
-                    std::thread::sleep(std::time::Duration::from_millis(CHECK_INTERVAL_MS));
-                    waited_ms += CHECK_INTERVAL_MS;
-                }
-            }
-
-            if let Ok(final_holders) = crate::process::find_processes_holding_file(&hist_db_file)
-                && !final_holders.is_empty()
-            {
-                return Err(eyre::eyre!(
-                    "Existing fsel instance (pid(s) {:?}) refused to exit",
-                    final_holders
-                ));
-            }
-        }
-
-        if let Err(err) = fs::remove_file(&lock_path)
-            && err.kind() != io::ErrorKind::NotFound
-        {
-            return Err(err).wrap_err("Failed to remove existing lockfile");
-        }
-
-        let mut lock_file = fs::File::create(&lock_path)?;
-        let pid;
-        #[allow(unsafe_code)]
-        unsafe {
-            pid = libc::getpid();
-        }
-        use std::io::Write;
-        lock_file.write_all(pid.to_string().as_bytes())?;
-    }
-
-    // Lock file cleanup guard
-    struct LockGuard(path::PathBuf);
-    impl Drop for LockGuard {
-        fn drop(&mut self) {
-            let _ = fs::remove_file(&self.0);
-        }
-    }
-    let _lock_guard = LockGuard(lock_path.clone());
-
-    let mut db_instance = redb::Database::create(&hist_db_file);
-    if let Err(err) = &db_instance
-        && cli.replace
-        && err.to_string().contains("Cannot acquire lock")
-    {
-        std::thread::sleep(std::time::Duration::from_millis(15));
-        db_instance = redb::Database::create(&hist_db_file);
-    }
-
-    let db_instance =
-        db_instance.wrap_err_with(|| format!("Failed to open database at {:?}", hist_db_file))?;
-
-    db = std::sync::Arc::new(db_instance);
+    let session = super::session::LauncherSession::start(&hist_db_file, &lock_path, cli.replace)?;
+    let db = std::sync::Arc::clone(session.db());
 
     if cli.clear_history {
         // Clear all tables in redb
@@ -343,6 +176,7 @@ pub async fn run(cli: Opts) -> Result<()> {
         cli.ranking_mode,
         cli.pinned_order_mode,
         &pin_timestamps,
+        current_unix_seconds(),
     );
 
     // Log startup info if in test mode
@@ -449,12 +283,13 @@ pub async fn run(cli: Opts) -> Result<()> {
                                         // Re-sort so pinned apps move to top with configured ordering
                                         let frecency_data = crate::core::database::load_frecency(&db);
                                         state.pin_timestamps = crate::core::database::load_pin_timestamps(&db);
-                                        crate::core::state::sort_by_ranking(
+                                        crate::core::ranking::sort_by_ranking(
                                             &mut state.apps,
                                             &frecency_data,
                                             state.ranking_mode,
                                             state.pinned_order_mode,
                                             &state.pin_timestamps,
+                                            current_unix_seconds(),
                                         );
                                         state.filter();
                                      }

@@ -1,12 +1,8 @@
-use std::env;
-
-pub(super) fn usage() -> ! {
-    let cmd = env::args().next().unwrap_or_else(|| "fsel".to_string());
-
-    println!(
+pub(crate) fn short_usage(program_name: &str) -> String {
+    format!(
         "fsel — Fast terminal application launcher
 Usage:
-  {cmd} [OPTIONS]
+  {program_name} [OPTIONS]
 
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately and skip the TUI
@@ -48,19 +44,15 @@ Usage:
    ├─ -h                           Show this summary
    ├─ -H, --help                   Show the full option tree with notes
    └─ -V, --version                Print the version and exit
-",
-        cmd = cmd
-    );
-    std::process::exit(0);
+"
+    )
 }
 
-pub(super) fn detailed_usage() -> ! {
-    let cmd = env::args().next().unwrap_or_else(|| "fsel".to_string());
-
-    println!(
+pub(crate) fn detailed_usage(program_name: &str) -> String {
+    format!(
         "fsel — Fast terminal application launcher
 Usage:
-  {cmd} [OPTIONS]
+  {program_name} [OPTIONS]
 
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately and skip the TUI
@@ -125,8 +117,29 @@ Usage:
    ├─ --dmenu and --cclip both imply --no-exec
    ├─ --select and --select-index cannot be combined
    └─ Default config path: ~/.config/fsel/config.toml
-",
-        cmd = cmd
-    );
-    std::process::exit(0);
+"
+    )
+}
+
+pub(super) fn unknown_argument_help(error_message: &str) -> String {
+    format!(
+        "Error: {error_message}
+
+Quick help:
+  -c, --config <FILE>    Read config from FILE
+  -p, --program <NAME>   Launch one app immediately and skip the TUI
+  -ss <SEARCH>           Pre-fill the search box; place this last
+  --dmenu                Read choices from stdin and print the selection
+  --cclip                Browse clipboard history and copy the selection
+  --no-exec              Print the selected item instead of launching it
+  -r, --replace          Replace an existing fsel/cclip instance
+  -d, --detach           Start launched apps without keeping the terminal attached
+  -v, --verbose          Print more diagnostics; repeat as -vv or -vvv
+  -h                     Show the short summary
+  -H, --help             Show the full option tree
+  -V, --version          Print the version and exit
+
+Run 'fsel -h' for a summary or 'fsel --help' for the full option tree.
+"
+    )
 }
