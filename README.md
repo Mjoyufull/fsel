@@ -23,6 +23,7 @@
 - [Install](#install)
 - [Usage](#usage)
 - [Configuration](#configuration)
+  - [Environment variable overrides](#environment-variable-overrides)
 - [Contributing](#contributing)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -264,7 +265,7 @@ fsel -H
 fsel -vvv
 ```
 
-See [USAGE.md](./USAGE.md) for more examples, launch methods, scripting recipes, debugging notes, and advanced usage.
+See [USAGE.md](./USAGE.md) for more examples, launch methods, scripting recipes, debugging notes, [environment variables](./USAGE.md#environment-variables), and advanced usage.
 
 ## Configuration
 
@@ -294,6 +295,20 @@ pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned",
 
 Field placement matters. Root-level UI options and `[app_launcher]` / `[dmenu]` / `[cclip]` sections are validated separately.
 See [config.toml](./config.toml) and [keybinds.toml](./keybinds.toml) for all options with detailed comments.
+
+### Environment variable overrides
+
+After the config file is loaded, any `FSEL_*` variable set in the process environment overrides the corresponding setting. Use this for one-off launches, wrappers, or systemd units without editing `config.toml`.
+
+- **Root / shared keys:** `FSEL_` plus the uppercase TOML key (e.g. `match_mode` → `FSEL_MATCH_MODE`).
+- **Section keys:** `FSEL_DMENU_*`, `FSEL_CCLIP_*`, and `FSEL_APP_LAUNCHER_*` mirror `[dmenu]`, `[cclip]`, and `[app_launcher]` fields.
+
+```sh
+FSEL_MATCH_MODE=exact fsel
+FSEL_HIGHLIGHT_COLOR=Cyan FSEL_DMENU_DELIMITER=: fsel --dmenu < items.txt
+```
+
+`man fsel` summarizes this under **ENVIRONMENT**. For the full variable list, see [Environment variables](./USAGE.md#environment-variables) in [USAGE.md](./USAGE.md).
 
 ### Window Manager Integration
 
