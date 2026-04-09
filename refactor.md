@@ -25,7 +25,7 @@ the app usable the whole time.
 
 ## Current snapshot
 
-Date: 2026-03-24
+Date: 2026-04-07
 
 Toolchain observed:
 
@@ -44,6 +44,13 @@ Repo state observed now:
 - `src/main.rs` is now a thin shell at 9 lines.
 - terminal lifecycle is centralized in `src/ui/terminal.rs`.
 - runtime and config path construction is centralized in `src/app/paths.rs`.
+- `src/cli.rs` has been split into `src/cli/`.
+- `src/config.rs` has been split into `src/config/`.
+- ranking logic is extracted under `src/core/ranking/`.
+- desktop parsing and discovery are split into `src/desktop/parse.rs` and `src/desktop/discover.rs`.
+- `src/ui/dmenu_ui.rs` has been split into `src/ui/dmenu_ui/`.
+- integration tests now exist under `tests/` (`tests/cli_behavior.rs` plus fixtures).
+- there are no `std::process::exit(...)` calls remaining under `src/`.
 
 So the refactor is not hypothetical anymore.
 Some of the shell, terminal, and path work is already landed on the `refactor` branch.
@@ -93,18 +100,18 @@ The work inside it still needs to be testable, deliberate, and revertable in san
 
 ### Size hotspots
 
-`src` currently totals 11,593 lines.
+`src` currently totals 12,347 lines.
 
 Largest files right now:
 
-- `src/modes/cclip/run.rs`: 1,834 lines
-- `src/cli.rs`: 1,380 lines
-- `src/ui/dmenu_ui.rs`: 823 lines
-- `src/desktop/app.rs`: 760 lines
-- `src/modes/dmenu/run.rs`: 737 lines
-- `src/core/state.rs`: 730 lines
-- `src/modes/app_launcher/run.rs`: 648 lines
-- `src/config.rs`: 610 lines
+- `src/modes/cclip/run.rs`: 1,338 lines
+- `src/modes/app_launcher/run.rs`: 483 lines
+- `src/common/item.rs`: 460 lines
+- `src/config/env.rs`: 427 lines
+- `src/core/ranking/query.rs`: 413 lines
+- `src/modes/app_launcher/search.rs`: 409 lines
+- `src/core/cache.rs`: 380 lines
+- `src/cli/parse.rs`: 364 lines
 
 That is still too much mass in too few files.
 `main.rs` is fixed.
@@ -112,31 +119,28 @@ The actual maintenance traps are not.
 
 ### Architectural hotspots
 
-1. `src/cli.rs`
-   - still mixes option types, defaults, config mapping, parsing, validation, color parsing, help
-     behavior, and tests
-   - still carries too much policy in one place
+1. `src/modes/cclip/run.rs`
+   - still carries too much orchestration, tag flow, preview lifecycle, and event policy in one file
+   - remains the largest hotspot by a wide margin
 
-2. `src/config.rs`
-   - still leans on stringly typed values for modes, colors, and layout choices
-   - still has a long hand-applied environment override layer
-   - still duplicates policy that should live in typed config and merge logic
+2. `src/modes/app_launcher/run.rs` and `src/modes/app_launcher/search.rs`
+   - launcher responsibilities are split but still broad
+   - startup/session policy and direct-launch behavior still need tighter boundaries
 
 3. `src/core/state.rs`
-   - still fuses matching, ranking, sorting, cloning, and score breakdown generation
-   - still makes search-quality changes riskier than they need to be
+   - ranking extraction has improved boundaries, but state policy is still denser than ideal
+   - search-quality changes are safer than before, but further isolation is still useful
 
-4. `src/modes/dmenu/run.rs` and `src/modes/cclip/run.rs`
-   - still carry too much orchestration, rendering, and command handling in one file
-   - still want smaller render, selection, and service modules
+4. `src/config/env.rs`
+   - environment override policy is now isolated but still large
+   - merge/normalization boundaries should continue to tighten
 
-5. `src/modes/app_launcher/run.rs`
-   - still mixes startup policy, lock handling, database open logic, XDG discovery, state setup,
-     UI loop, and launch behavior
-   - improved, but still too broad
+5. `src/common/item.rs`
+   - now one of the larger remaining files
+   - likely still carrying too many representational concerns in one module
 
-6. `src/desktop/app.rs`
-   - still mixes discovery, cache use, parsing, environment filtering, and model behavior
+6. `src/process.rs`
+   - process behavior is cleaner but still not yet under a dedicated `platform/` boundary
 
 ### Duplication and policy drift
 
@@ -145,27 +149,30 @@ Some drift is already fixed:
 - `main.rs` is thin
 - terminal setup is centralized
 - path construction is centralized
+- CLI/config monoliths are split into module trees
+- ranking logic has a dedicated module surface
+- desktop parsing/discovery split has landed
 
 What still needs work:
 
-- launcher lock/session handling is still embedded in launcher runtime code
-- dmenu and cclip still own too much mode-local cleanup and render/event policy
-- ranking policy still lives too close to state mutation
-- desktop responsibilities are still too fused
-- process-kill / singleton behavior is still more scattered than it should be
+- launcher runtime is still too broad
+- cclip run loop is still too large
+- process/platform boundaries are not fully isolated
+- desktop cache/model boundaries are not fully split
+- ADR docs for architectural decisions are still missing
 
 ### Test coverage signal
 
 Current tests are real but still thin:
 
-- 14 unit tests
-- no `tests/` integration tree yet
+- unit tests exist across modules
+- integration tests now exist under `tests/`
 - the crate now has a library target, which removes the old excuse for not adding better
   black-box and integration coverage
 
 ## What "Rust standards of 2026" means here
 
-As of 2026-03-24, the latest stable Rust edition is still 2024.
+As of 2026-04-07, the latest stable Rust edition is still 2024.
 So for this repo, "Rust standards of 2026" does not mean chasing made-up future language magic.
 It means using stable Rust properly and writing the code like a grown engineer instead of like a
 guy hoping the compiler will forgive the structure.
@@ -422,8 +429,8 @@ Result:
 
 Why:
 
-- `src/cli.rs` is still way too fat
-- defaults, parsing, validation, config mapping, and help behavior still live too close together
+- the split from `src/cli.rs` landed, but policy is still unevenly distributed
+- parsing, validation, config mapping, and help behavior are cleaner, but still need polish
 
 Do this:
 
@@ -514,7 +521,7 @@ Result:
 
 Why:
 
-- `src/desktop/app.rs` still does too many jobs
+- desktop has been split, but cache/model boundaries are still incomplete
 
 Do this:
 
@@ -573,18 +580,18 @@ Acceptance:
 
 ### Phase 2: introduce `lib.rs` and move the app shell out of `main.rs`
 
-Status: started and largely done
+Status: largely done
 
-Done or in progress:
+Done:
 
 - `src/lib.rs` exists
 - `main.rs` is thin
 - app shell work has started in `app/`
+- top-level shell/error behavior is centralized
 
 Still left:
 
-- finish pulling launcher bootstrap out of mode code
-- finish shrinking shell ownership to the right modules
+- finish shrinking launcher bootstrap/runtime responsibilities out of `modes/app_launcher/run.rs`
 
 Acceptance:
 
@@ -594,12 +601,12 @@ Acceptance:
 
 ### Phase 3: CLI/config split
 
-Status: not done
+Status: largely done, polishing remains
 
 Do:
 
-- split `src/cli.rs`
-- split `src/config.rs`
+- finish hardening the `src/cli/` split
+- finish hardening the `src/config/` split
 - remove deep exit behavior
 - introduce typed config and validation errors
 
@@ -611,7 +618,7 @@ Acceptance:
 
 ### Phase 4: launcher domain split
 
-Status: not done
+Status: started and materially progressed
 
 Do:
 
@@ -632,10 +639,10 @@ Status: started, not finished
 Done:
 
 - shared terminal lifecycle exists
+- shared panel-layout helpers exist
 
 Still left:
 
-- shared layout helpers
 - shared render utilities where they are truly shared
 
 Acceptance:
@@ -646,13 +653,19 @@ Acceptance:
 
 ### Phase 6: mode decomposition
 
-Status: not done
+Status: started, not finished
 
 Do:
 
 - split `dmenu`
 - split `cclip`
 - keep run, render, and command logic separate
+
+Progress:
+
+- `dmenu` has been split into dedicated modules (`events`, `options`, `render`, `parse`)
+- `cclip` has partial decomposition (`commands`, `items`, `state`, `session`)
+- `cclip/run.rs` is still the primary oversized runner and remains the biggest mode-level task
 
 Acceptance:
 
@@ -662,13 +675,20 @@ Acceptance:
 
 ### Phase 7: desktop and platform split
 
-Status: not done
+Status: started, not finished
 
 Do:
 
 - split `desktop/app.rs`
 - finish centralizing paths, locks, and process wrappers
 - keep compatibility unless a migration note says otherwise
+
+Progress:
+
+- `desktop/app.rs` has been removed in favor of `desktop/parse.rs` and `desktop/discover.rs`
+- path policy is centralized in `app/paths.rs`
+- launcher and cclip lock/session ownership now have dedicated session modules
+- process behavior still needs a dedicated `platform/` module boundary
 
 Acceptance:
 
@@ -724,14 +744,13 @@ Do not:
 From the current branch state, the next order is:
 
 1. Keep the branch green at all times.
-2. Finish the CLI/config split.
-3. Extract pure ranking out of `core/state.rs`.
-4. Finish pulling launcher bootstrap and lock behavior out of `modes/app_launcher/run.rs`.
-5. Finish shared layout and TUI helper extraction.
-6. Split `dmenu`.
-7. Split `cclip`.
-8. Split `desktop/app.rs`.
-9. Add the missing integration, snapshot, and fixture coverage that proves the refactor did not go sideways.
+2. Finish splitting `modes/cclip/run.rs` into focused event/action/render helpers.
+3. Continue shrinking `modes/app_launcher/run.rs` and `modes/app_launcher/search.rs`.
+4. Continue ranking/state boundary cleanup and add stronger ranking fixtures.
+5. Finish process/platform isolation (`platform/process.rs` shape) and remove remaining scatter.
+6. Continue desktop decomposition by separating cache/model concerns.
+7. Expand integration and snapshot coverage (help text, config merge, mode behavior).
+8. Add ADR stubs for the architectural decisions already made on this branch.
 
 ## References
 
@@ -761,10 +780,12 @@ Local repo evidence used for this plan:
 - `src/lib.rs`
 - `src/app/mod.rs`
 - `src/app/paths.rs`
-- `src/cli.rs`
-- `src/config.rs`
+- `src/cli/mod.rs`
+- `src/config/mod.rs`
 - `src/core/state.rs`
+- `src/core/ranking/mod.rs`
 - `src/modes/app_launcher/run.rs`
 - `src/modes/dmenu/run.rs`
 - `src/modes/cclip/run.rs`
-- `src/desktop/app.rs`
+- `src/desktop/parse.rs`
+- `src/desktop/discover.rs`
