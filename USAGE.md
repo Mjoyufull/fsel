@@ -475,6 +475,8 @@ fsel
 FSEL_FILTER_DESKTOP=false FSEL_MATCH_MODE=exact fsel -p nvim
 ```
 
+Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config.toml` or `FSEL_APP_LAUNCHER_*` overrides them for the app launcher.
+
 **General / launcher (root-level and shared launcher behavior):**
 
 `FSEL_TERMINAL_LAUNCHER`, `FSEL_FILTER_DESKTOP`, `FSEL_LIST_EXECUTABLES_IN_PATH`, `FSEL_HIDE_BEFORE_TYPING`, `FSEL_MATCH_MODE`, `FSEL_RANKING_MODE`, `FSEL_PINNED_ORDER`, `FSEL_SYSTEMD_RUN`, `FSEL_UWSM`, `FSEL_DETACH`, `FSEL_NO_EXEC`, `FSEL_CONFIRM_FIRST_LAUNCH`, `FSEL_PREFIX_DEPTH`
