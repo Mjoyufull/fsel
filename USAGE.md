@@ -463,7 +463,7 @@ Variable names use the `FSEL_` prefix and match config field names in `SCREAMING
 | `[cclip]` | `FSEL_CCLIP_` | `image_preview` | `FSEL_CCLIP_IMAGE_PREVIEW` |
 | `[app_launcher]` | `FSEL_APP_LAUNCHER_` | `ranking_mode` | `FSEL_APP_LAUNCHER_RANKING_MODE` |
 
-**Types:** Use `true` / `false` for booleans and decimal integers for numeric fields (e.g. `FSEL_PREFIX_DEPTH=3`). If a boolean or number fails to parse, fsel keeps the value already loaded from the file or defaults. Strings (colors, modes, paths) are taken as-is.
+**Types:** Use `true` / `false` for booleans and decimal integers for numeric fields (e.g. `FSEL_PREFIX_DEPTH=3`). If parsing fails, fsel keeps the current value; for `FSEL_APP_LAUNCHER_*` booleans/numbers, fallback is the corresponding general setting. Strings (colors, modes, paths) are taken as-is.
 
 **`FSEL_APP_LAUNCHER_LAUNCH_PREFIX`:** Parsed like shell words (quoted segments allowed), same idea as a command-line prefix.
 
