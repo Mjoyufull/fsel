@@ -450,6 +450,55 @@ show_line_numbers = true
 image_preview = true
 ```
 
+### Environment variables
+
+Settings are loaded in this order: **built-in defaults** → **`config.toml`** → **`FSEL_*` environment variables** (env wins when set).
+
+Variable names use the `FSEL_` prefix and match config field names in `SCREAMING_SNAKE_CASE`. Section-specific options use an extra infix:
+
+| Config area | Prefix | Example TOML key | Environment variable |
+|-------------|--------|------------------|----------------------|
+| Root / general | `FSEL_` | `match_mode` | `FSEL_MATCH_MODE` |
+| `[dmenu]` | `FSEL_DMENU_` | `delimiter` | `FSEL_DMENU_DELIMITER` |
+| `[cclip]` | `FSEL_CCLIP_` | `image_preview` | `FSEL_CCLIP_IMAGE_PREVIEW` |
+| `[app_launcher]` | `FSEL_APP_LAUNCHER_` | `ranking_mode` | `FSEL_APP_LAUNCHER_RANKING_MODE` |
+
+**Types:** Use `true` / `false` for booleans and decimal integers for numeric fields (e.g. `FSEL_PREFIX_DEPTH=3`). If parsing fails, fsel keeps the current value; for `FSEL_APP_LAUNCHER_*` booleans/numbers, fallback is the corresponding general setting. Strings (colors, modes, paths) are taken as-is.
+
+**`FSEL_APP_LAUNCHER_LAUNCH_PREFIX`:** Parsed like shell words (quoted segments allowed), same idea as a command-line prefix.
+
+```sh
+export FSEL_RANKING_MODE=recency
+fsel
+
+# One-shot
+FSEL_FILTER_DESKTOP=false FSEL_MATCH_MODE=exact fsel -p nvim
+```
+
+Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config.toml` or `FSEL_APP_LAUNCHER_*` overrides them for the app launcher.
+
+**General / launcher (root-level and shared launcher behavior):**
+
+`FSEL_TERMINAL_LAUNCHER`, `FSEL_FILTER_DESKTOP`, `FSEL_LIST_EXECUTABLES_IN_PATH`, `FSEL_HIDE_BEFORE_TYPING`, `FSEL_MATCH_MODE`, `FSEL_RANKING_MODE`, `FSEL_PINNED_ORDER`, `FSEL_SYSTEMD_RUN`, `FSEL_UWSM`, `FSEL_DETACH`, `FSEL_NO_EXEC`, `FSEL_CONFIRM_FIRST_LAUNCH`, `FSEL_PREFIX_DEPTH`
+
+**Default UI / layout (applies when a mode does not override):**
+
+`FSEL_HIGHLIGHT_COLOR`, `FSEL_CURSOR`, `FSEL_HARD_STOP`, `FSEL_ROUNDED_BORDERS`, `FSEL_DISABLE_MOUSE`, `FSEL_TITLE_PANEL_HEIGHT_PERCENT`, `FSEL_INPUT_PANEL_HEIGHT`, `FSEL_TITLE_PANEL_POSITION`
+
+**`[dmenu]` overrides (`FSEL_DMENU_*`):**
+
+`DELIMITER`, `PASSWORD_CHARACTER`, `SHOW_LINE_NUMBERS`, `WRAP_LONG_LINES`, `EXIT_IF_EMPTY`, `DISABLE_MOUSE`, `HARD_STOP`, `ROUNDED_BORDERS`, `CURSOR`, `HIGHLIGHT_COLOR`, `MAIN_BORDER_COLOR`, `ITEMS_BORDER_COLOR`, `INPUT_BORDER_COLOR`, `MAIN_TEXT_COLOR`, `ITEMS_TEXT_COLOR`, `INPUT_TEXT_COLOR`, `HEADER_TITLE_COLOR`, `TITLE_PANEL_HEIGHT_PERCENT`, `INPUT_PANEL_HEIGHT`, `TITLE_PANEL_POSITION` (each prefixed with `FSEL_DMENU_`)
+
+**`[cclip]` overrides (`FSEL_CCLIP_*`):**
+
+`IMAGE_PREVIEW`, `HIDE_INLINE_IMAGE_MESSAGE`, `SHOW_TAG_COLOR_NAMES`, `SHOW_LINE_NUMBERS`, `WRAP_LONG_LINES`, `DISABLE_MOUSE`, `HARD_STOP`, `ROUNDED_BORDERS`, `CURSOR`, `HIGHLIGHT_COLOR`, `MAIN_BORDER_COLOR`, `ITEMS_BORDER_COLOR`, `INPUT_BORDER_COLOR`, `MAIN_TEXT_COLOR`, `ITEMS_TEXT_COLOR`, `INPUT_TEXT_COLOR`, `HEADER_TITLE_COLOR`, `TITLE_PANEL_HEIGHT_PERCENT`, `INPUT_PANEL_HEIGHT`, `TITLE_PANEL_POSITION` (each prefixed with `FSEL_CCLIP_`)
+
+**`[app_launcher]` overrides (`FSEL_APP_LAUNCHER_*`):**
+
+`FILTER_DESKTOP`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH` (each prefixed with `FSEL_APP_LAUNCHER_`)
+
+Keybinds are not configurable via environment variables; use `keybinds.toml` or the `[keybinds]` section in `config.toml`.
+
 #### Common Mistakes (Will Crash):
 ```toml
 # WRONG - Color options in app_launcher section
