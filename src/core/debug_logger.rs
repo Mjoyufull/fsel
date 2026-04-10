@@ -165,10 +165,11 @@ pub fn log_search_snapshot(query: &str, matches: &[App], prefix_depth: usize, fi
             for (idx, app) in matches.iter().take(50).enumerate() {
                 let _ = writeln!(
                     file,
-                    "  [{:>3}] {} (Score: {})",
+                    "  [{:>3}] {} (Score: {}, Icon: \"{}\")",
                     idx + 1,
                     app.name,
-                    app.score
+                    app.score,
+                    app.icon.as_deref().unwrap_or("None")
                 );
                 if let Some(ref b) = app.breakdown {
                     let _ = writeln!(file, "       ├── Tier: {}", b.tier);

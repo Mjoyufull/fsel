@@ -1,7 +1,7 @@
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
 
 pub(crate) fn effective_title_height(total_height: u16, title_panel_height_percent: u16) -> u16 {
@@ -22,7 +22,13 @@ impl UI {
     }
 
     /// Render the UI using the centralized State
-    pub fn render(&self, f: &mut Frame, state: &crate::core::state::State, cli: &crate::cli::Opts) {
+    pub fn render(
+        &self,
+        f: &mut Frame,
+        state: &crate::core::state::State,
+        cli: &crate::cli::Opts,
+        image_manager: &mut crate::ui::graphics::ImageManager,
+    ) {
         let size = f.area();
         let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
         let should_render_border = title_height > 0;
@@ -157,8 +163,8 @@ impl UI {
             .scroll((0, scroll_x));
         f.render_widget(input, input_area);
 
-        // Calculate max visible rows (subtract borders)
-        let max_visible = apps_area.height.saturating_sub(2) as usize;
+        // Calculate max visible rows (each app is 2 rows tall, subtract borders)
+        let max_visible = (apps_area.height.saturating_sub(2) / 2) as usize;
 
         // Apps block with border
         let apps_block = Block::default()
@@ -175,51 +181,59 @@ impl UI {
             });
 
         // only render whats on screen, not the whole dang list
-        let items: Vec<ListItem> = state
+        //
+        f.render_widget(apps_block, apps_area);
+        let inner = apps_area.inner(ratatui::layout::Margin {
+            vertical: 1,
+            horizontal: 1,
+        });
+
+        let visible_apps = state
             .shown
             .iter()
             .skip(state.scroll_offset)
-            .take(max_visible)
-            .map(|app| {
-                let mut spans = Vec::new();
+            .take(max_visible);
 
-                // Pin support
-                if app.pinned {
-                    spans.push(Span::styled(
-                        &cli.pin_icon,
-                        Style::default().fg(cli.pin_color),
-                    ));
-                    spans.push(Span::raw(" "));
-                }
+        for (i, app) in visible_apps.enumerate() {
+            let row_rect = Rect::new(inner.x, inner.y + (i as u16 * 2), inner.width, 2);
+            let is_selected = state.selected == Some(i + state.scroll_offset);
 
-                spans.push(Span::styled(
-                    &app.name,
-                    Style::default().fg(cli.apps_text_color),
-                ));
+            // Split row into [Gutter (Selector + Icon), Content (Name)]
+            let row_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(6), // 2 for selector, 4 for icon
+                    Constraint::Min(0),
+                ])
+                .split(row_rect);
 
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
+            let gutter_area = row_chunks[0];
+            let name_area = row_chunks[1];
 
-        let list = List::new(items)
-            .block(apps_block)
-            .highlight_style(
+            // Render Selection Symbol
+            let symbol = if is_selected { "> " } else { "  " };
+            f.render_widget(
+                Paragraph::new(symbol).style(Style::default().fg(cli.highlight_color)),
+                Rect::new(gutter_area.x, gutter_area.y, 2, 1),
+            );
+
+            // Render the Icon
+            let icon_rect = Rect::new(gutter_area.x + 2, gutter_area.y, 4, 1);
+            if let Some(ref icon_name) = app.icon {
+                image_manager.render_at(f, icon_name, icon_rect);
+            }
+
+            // Render App Name
+
+            let style = if is_selected {
                 Style::default()
                     .fg(cli.highlight_color)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("> ");
-
-        // gotta adjust for the scroll offset innit
-        let mut list_state = ratatui::widgets::ListState::default();
-        if let Some(sel) = state.selected {
-            // Only highlight if selection is within visible range
-            if sel >= state.scroll_offset && sel < state.scroll_offset + max_visible {
-                list_state.select(Some(sel - state.scroll_offset));
-            }
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(cli.apps_text_color)
+            };
+            f.render_widget(Paragraph::new(app.name.as_str()).style(style), name_area);
         }
-
-        f.render_stateful_widget(list, apps_area, &mut list_state);
     }
 }
 
