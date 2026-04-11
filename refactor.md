@@ -1,5 +1,7 @@
 # fsel Refactor Plan for Rust 2026
 
+Estimated completion: 82%
+
 ## Why this exists
 
 `fsel` is not broken in the stupid obvious way.
@@ -46,9 +48,12 @@ Repo state observed now:
 - runtime and config path construction is centralized in `src/app/paths.rs`.
 - `src/cli.rs` has been split into `src/cli/`.
 - `src/config.rs` has been split into `src/config/`.
+- environment override policy is now split under `src/config/env/`.
 - ranking logic is extracted under `src/core/ranking/`.
+- ranking query policy is now split under `src/core/ranking/query/`.
 - desktop parsing and discovery are split into `src/desktop/parse.rs` and `src/desktop/discover.rs`.
 - desktop application-directory discovery is centralized in `src/desktop/dirs.rs`.
+- cache ownership is now split under `src/core/cache/`.
 - `src/ui/dmenu_ui.rs` has been split into `src/ui/dmenu_ui/`.
 - launcher runtime is now split across focused modules:
   `src/modes/app_launcher/run.rs`,
@@ -122,19 +127,17 @@ The work inside it still needs to be testable, deliberate, and revertable in san
 
 ### Size hotspots
 
-`src` currently totals 12,487 lines.
+`src` currently totals 12,707 lines.
 
 Largest files right now:
 
-- `src/config/env.rs`: 427 lines
 - `src/modes/cclip/events.rs`: 416 lines
-- `src/core/ranking/query.rs`: 413 lines
-- `src/core/cache.rs`: 380 lines
 - `src/cli/parse.rs`: 364 lines
 - `src/modes/cclip/render.rs`: 332 lines
 - `src/ui/dmenu_ui/content.rs`: 310 lines
 - `src/modes/cclip/image.rs`: 308 lines
 - `src/cli/types.rs`: 306 lines
+- `src/modes/cclip/mod.rs`: 301 lines
 
 That is still too much mass in too few files.
 The biggest single-file failures are gone.
@@ -144,9 +147,9 @@ There are no files above 500 lines anymore.
 
 ### Architectural hotspots
 
-1. `src/config/env.rs`
-   - environment override policy is still one of the broadest remaining files
-   - merge/normalization boundaries should continue to tighten
+1. `src/core/ranking/query/`
+   - ranking is isolated and the query policy is now split
+   - future search-quality changes would still benefit from additional fixture coverage
 
 2. launcher mode (`src/modes/app_launcher/`)
    - the runner is now small and the direct-launch/event/admin paths are split out
@@ -156,18 +159,18 @@ There are no files above 500 lines anymore.
    - state construction, filtering, info text, and transitions are now split into dedicated files
    - ranking/state cleanup is improved, but fixture coverage can still get stronger
 
-4. `src/core/ranking/query.rs`
-   - ranking is isolated, but the remaining query policy is still substantial
-   - future search-quality changes would benefit from additional fixture coverage
-
-5. cclip mode (`src/modes/cclip/`)
+4. cclip mode (`src/modes/cclip/`)
    - the old oversized runner is gone
    - the remaining event/render/image modules are much smaller, but the area still deserves better
      direct behavior coverage
 
-6. desktop cache/model boundaries
-   - discovery and parsing are split, and the XDG applications-directory policy is now centralized
-   - cache/model ownership is still not cleanly separated enough
+5. shared UI/TUI surfaces
+   - terminal lifecycle and panel layout are centralized
+   - render utility sharing is still uneven across dmenu and cclip
+
+6. desktop persistence/model boundaries
+   - discovery, parsing, directory policy, and cache ownership are now split
+   - remaining work is narrower follow-on cleanup, not a monolithic boundary problem
 
 ### Duplication and policy drift
 
@@ -177,8 +180,11 @@ Some drift is already fixed:
 - terminal setup is centralized
 - path construction is centralized
 - CLI/config monoliths are split into module trees
+- config environment override policy is split under `config/env/`
 - ranking logic has a dedicated module surface
+- ranking query policy is split under `core/ranking/query/`
 - desktop parsing/discovery split has landed
+- desktop cache and history/pinned loading are split under `core/cache/`
 - launcher runtime is now decomposed into focused modules
 - cclip runtime is now decomposed into focused modules
 - launcher state policy is now split under `core/state/`
@@ -188,9 +194,9 @@ Some drift is already fixed:
 
 What still needs work:
 
-- desktop cache/model boundaries are not fully split
-- config environment override policy is still broad
 - ranking query/state coverage can still be stronger
+- shared render utility extraction is not finished
+- dmenu and cclip behavior could use deeper fixture coverage
 
 ### Test coverage signal
 
@@ -198,6 +204,7 @@ Current tests are real but still thin:
 
 - unit tests exist across modules
 - integration tests now exist under `tests/`
+- env override precedence and invalid-value coverage now exist under `config::env` tests
 - the crate now has a library target, which removes the old excuse for not adding better
   black-box and integration coverage
 
@@ -386,20 +393,27 @@ src/
     schema.rs
     defaults.rs
     file.rs
-    env.rs
+    env/
+      mod.rs
+      helpers.rs
+      general.rs
+      ui.rs
+      layout.rs
+      dmenu.rs
+      cclip.rs
+      app_launcher.rs
     merge.rs
   core/
     mod.rs
-    state.rs
-    ranking.rs
+    state/
+    ranking/
     database.rs
-    history.rs
+    cache/
   desktop/
     mod.rs
     discover.rs
-    parser.rs
-    cache.rs
-    model.rs
+    parse.rs
+    dirs.rs
   modes/
     mod.rs
     launcher/
@@ -650,14 +664,21 @@ Acceptance:
 
 ### Phase 3: CLI/config split
 
-Status: largely done, polishing remains
+Status: materially done, follow-on CLI polish remains
+
+Done:
+
+- `src/cli.rs` is split into `src/cli/`
+- `src/config.rs` is split into `src/config/`
+- environment override policy is split into focused `src/config/env/` modules
+- typed config validation errors exist
+- env override precedence, shell-words launch-prefix parsing, and invalid-value failures now have
+  direct tests
 
 Do:
 
 - finish hardening the `src/cli/` split
-- finish hardening the `src/config/` split
 - remove deep exit behavior
-- introduce typed config and validation errors
 
 Acceptance:
 
@@ -667,13 +688,14 @@ Acceptance:
 
 ### Phase 4: launcher domain split
 
-Status: materially progressed
+Status: largely done, fixture work remains
 
 Done:
 
 - launcher runtime responsibilities have been split out of the main runner
 - `core/state.rs` has been replaced by `core/state/` with dedicated `filter`, `info`, and
   `update` modules
+- ranking query policy is split under `core/ranking/query/`
 
 Do:
 
@@ -735,7 +757,7 @@ Acceptance:
 
 ### Phase 7: desktop and platform split
 
-Status: materially progressed, not finished
+Status: largely done, final cleanup remains
 
 Do:
 
@@ -747,6 +769,8 @@ Progress:
 
 - `desktop/app.rs` has been removed in favor of `desktop/parse.rs` and `desktop/discover.rs`
 - XDG applications-directory discovery is centralized in `desktop/dirs.rs`
+- cache ownership is split under `core/cache/` with dedicated desktop-cache and history/pinned
+  modules
 - path policy is centralized in `app/paths.rs`
 - launcher and cclip lock/session ownership now have dedicated session modules
 - process behavior now lives under `platform/process.rs`
@@ -805,9 +829,9 @@ Do not:
 From the current branch state, the next order is:
 
 1. Keep the branch green at all times.
-2. Continue item/model boundary cleanup (`common/item.rs`, desktop cache/model split).
-3. Continue ranking/state boundary cleanup and add stronger ranking fixtures.
-4. Expand integration and snapshot coverage (help text, config merge, mode behavior).
+2. Continue ranking/query boundary cleanup and add stronger ranking fixtures.
+3. Expand integration and snapshot coverage (help text, config merge, dmenu/cclip behavior).
+4. Finish the remaining shared render/TUI extractions where the duplication is real.
 5. Keep the ADR set updated when decisions materially change.
 
 ## References

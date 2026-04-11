@@ -4,9 +4,6 @@ use redb::ReadableTable;
 use std::path::Path;
 use std::sync::Arc;
 
-const HISTORY_TABLE: redb::TableDefinition<&str, u64> = redb::TableDefinition::new("history");
-const PINNED_TABLE: redb::TableDefinition<&str, &[u8]> = redb::TableDefinition::new("pinned_apps");
-
 pub(crate) fn handle_maintenance_command(
     cli: &Opts,
     db: &Arc<redb::Database>,
@@ -61,8 +58,8 @@ pub(crate) fn log_startup_if_enabled(cli: &Opts, app_count: usize, frecency_entr
 fn clear_history(db: &redb::Database) -> Result<()> {
     let write_txn = db.begin_write().wrap_err("Error starting transaction")?;
     {
-        let mut history_table = write_txn.open_table(HISTORY_TABLE)?;
-        let mut pinned_table = write_txn.open_table(PINNED_TABLE)?;
+        let mut history_table = write_txn.open_table(crate::core::cache::HISTORY_TABLE)?;
+        let mut pinned_table = write_txn.open_table(crate::core::cache::PINNED_TABLE)?;
 
         let history_keys: Vec<String> = history_table
             .iter()?
