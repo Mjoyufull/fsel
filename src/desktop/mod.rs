@@ -2,9 +2,11 @@ use crate::core::ranking::ScoreBreakdown;
 use ratatui::widgets::ListItem;
 use std::fmt;
 
+mod dirs;
 mod discover;
 mod parse;
 
+pub(crate) use dirs::application_dirs;
 pub use discover::read_with_options;
 
 /// An XDG Specification app with full desktop-entry metadata.

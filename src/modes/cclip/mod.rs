@@ -1,13 +1,17 @@
 // Cclip mode - clipboard history browser
 
 mod commands;
+mod events;
+mod image;
 mod items;
 pub mod preview;
+mod render;
 pub mod run;
 pub mod scan;
 pub mod select;
 mod session;
 mod state;
+mod tags;
 
 use crate::common::Item;
 use eyre::{Result, eyre};

@@ -11,7 +11,7 @@ mod config;
 mod core;
 mod desktop;
 mod modes;
-mod process;
+mod platform;
 mod strings;
 mod ui;
 

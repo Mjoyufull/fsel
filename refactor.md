@@ -25,7 +25,7 @@ the app usable the whole time.
 
 ## Current snapshot
 
-Date: 2026-04-07
+Date: 2026-04-11
 
 Toolchain observed:
 
@@ -48,8 +48,30 @@ Repo state observed now:
 - `src/config.rs` has been split into `src/config/`.
 - ranking logic is extracted under `src/core/ranking/`.
 - desktop parsing and discovery are split into `src/desktop/parse.rs` and `src/desktop/discover.rs`.
+- desktop application-directory discovery is centralized in `src/desktop/dirs.rs`.
 - `src/ui/dmenu_ui.rs` has been split into `src/ui/dmenu_ui/`.
+- launcher runtime is now split across focused modules:
+  `src/modes/app_launcher/run.rs`,
+  `src/modes/app_launcher/admin.rs`,
+  `src/modes/app_launcher/direct.rs`,
+  `src/modes/app_launcher/events.rs`,
+  `src/modes/app_launcher/search.rs`,
+  `src/modes/app_launcher/session.rs`,
+  and `src/modes/app_launcher/launch.rs`.
+- `src/modes/app_launcher/run.rs` is now down to 152 lines instead of 483.
+- cclip runtime is now split across focused modules:
+  `src/modes/cclip/run.rs`,
+  `src/modes/cclip/events.rs`,
+  `src/modes/cclip/render.rs`,
+  `src/modes/cclip/image.rs`,
+  `src/modes/cclip/tags.rs`,
+  plus the existing command/item/session helpers.
+- `src/modes/cclip/run.rs` is now down to 116 lines instead of 1,338.
+- launcher state policy is now split under `src/core/state/`.
+- common item policy is now split under `src/common/item/`.
+- process behavior now lives under `src/platform/process.rs`.
 - integration tests now exist under `tests/` (`tests/cli_behavior.rs` plus fixtures).
+- ADR stubs now exist under `docs/adr/`.
 - there are no `std::process::exit(...)` calls remaining under `src/`.
 
 So the refactor is not hypothetical anymore.
@@ -100,47 +122,52 @@ The work inside it still needs to be testable, deliberate, and revertable in san
 
 ### Size hotspots
 
-`src` currently totals 12,347 lines.
+`src` currently totals 12,487 lines.
 
 Largest files right now:
 
-- `src/modes/cclip/run.rs`: 1,338 lines
-- `src/modes/app_launcher/run.rs`: 483 lines
-- `src/common/item.rs`: 460 lines
 - `src/config/env.rs`: 427 lines
+- `src/modes/cclip/events.rs`: 416 lines
 - `src/core/ranking/query.rs`: 413 lines
-- `src/modes/app_launcher/search.rs`: 409 lines
 - `src/core/cache.rs`: 380 lines
 - `src/cli/parse.rs`: 364 lines
+- `src/modes/cclip/render.rs`: 332 lines
+- `src/ui/dmenu_ui/content.rs`: 310 lines
+- `src/modes/cclip/image.rs`: 308 lines
+- `src/cli/types.rs`: 306 lines
 
 That is still too much mass in too few files.
-`main.rs` is fixed.
-The actual maintenance traps are not.
+The biggest single-file failures are gone.
+The remaining maintenance traps are denser policy modules and a few still-large helpers, not
+thousand-line runners.
+There are no files above 500 lines anymore.
 
 ### Architectural hotspots
 
-1. `src/modes/cclip/run.rs`
-   - still carries too much orchestration, tag flow, preview lifecycle, and event policy in one file
-   - remains the largest hotspot by a wide margin
-
-2. `src/modes/app_launcher/run.rs` and `src/modes/app_launcher/search.rs`
-   - launcher responsibilities are split but still broad
-   - startup/session policy and direct-launch behavior still need tighter boundaries
-
-3. `src/core/state.rs`
-   - ranking extraction has improved boundaries, but state policy is still denser than ideal
-   - search-quality changes are safer than before, but further isolation is still useful
-
-4. `src/config/env.rs`
-   - environment override policy is now isolated but still large
+1. `src/config/env.rs`
+   - environment override policy is still one of the broadest remaining files
    - merge/normalization boundaries should continue to tighten
 
-5. `src/common/item.rs`
-   - now one of the larger remaining files
-   - likely still carrying too many representational concerns in one module
+2. launcher mode (`src/modes/app_launcher/`)
+   - the runner is now small and the direct-launch/event/admin paths are split out
+   - remaining launcher work is mostly in search/session policy and follow-on test coverage
 
-6. `src/process.rs`
-   - process behavior is cleaner but still not yet under a dedicated `platform/` boundary
+3. `src/core/state/`
+   - state construction, filtering, info text, and transitions are now split into dedicated files
+   - ranking/state cleanup is improved, but fixture coverage can still get stronger
+
+4. `src/core/ranking/query.rs`
+   - ranking is isolated, but the remaining query policy is still substantial
+   - future search-quality changes would benefit from additional fixture coverage
+
+5. cclip mode (`src/modes/cclip/`)
+   - the old oversized runner is gone
+   - the remaining event/render/image modules are much smaller, but the area still deserves better
+     direct behavior coverage
+
+6. desktop cache/model boundaries
+   - discovery and parsing are split, and the XDG applications-directory policy is now centralized
+   - cache/model ownership is still not cleanly separated enough
 
 ### Duplication and policy drift
 
@@ -152,14 +179,18 @@ Some drift is already fixed:
 - CLI/config monoliths are split into module trees
 - ranking logic has a dedicated module surface
 - desktop parsing/discovery split has landed
+- launcher runtime is now decomposed into focused modules
+- cclip runtime is now decomposed into focused modules
+- launcher state policy is now split under `core/state/`
+- common item policy is now split under `common/item/`
+- process helpers now sit behind `platform/process.rs`
+- ADR stubs now exist for the major architectural decisions already landed
 
 What still needs work:
 
-- launcher runtime is still too broad
-- cclip run loop is still too large
-- process/platform boundaries are not fully isolated
 - desktop cache/model boundaries are not fully split
-- ADR docs for architectural decisions are still missing
+- config environment override policy is still broad
+- ranking query/state coverage can still be stronger
 
 ### Test coverage signal
 
@@ -203,6 +234,11 @@ Minimum ADR set for this refactor:
 - typed config and merge precedence policy
 - path, lock, and process centralization policy
 - any persistence or storage-compatibility decision that affects on-disk behavior
+
+Current status:
+
+- initial ADR set now exists under `docs/adr/0001` through `docs/adr/0005`
+- future material architecture changes still need follow-up decision records instead of silent drift
 
 The ADRs do not need to be novels.
 They do need to capture:
@@ -540,7 +576,23 @@ They are not a promise of separate feature branches.
 
 ### Phase 0: freeze behavior and create baselines
 
-Status: partly done, keep refreshing it
+Status: partly done, materially refreshed
+
+Done:
+
+- integration fixtures live under `tests/fixtures/`
+- top-level CLI regression coverage exists under `tests/cli_behavior.rs`
+- ADR stubs for the current branch decisions now exist under `docs/adr/`
+- dependency and size baselines have been refreshed with:
+  `cargo audit`,
+  `cargo outdated --workspace`,
+  `cargo tree -d`,
+  and `cargo bloat --release -n 20`
+- `cargo audit` currently reports `RUSTSEC-2026-0097` through transitive `rand` versions pulled in
+  by `ratatui-image`
+- `cargo tree -d` currently shows duplicate `rustix`, `linux-raw-sys`, `rand`, and `thiserror`
+  families
+- `cargo bloat --release -n 20` currently reports about `3.0 MiB` of `.text`
 
 Do:
 
@@ -549,7 +601,6 @@ Do:
 - capture dmenu item parsing fixtures
 - capture cclip tag behavior
 - record startup and error-path behavior for launcher, dmenu, and cclip
-- baseline dependency health and size
 - write the initial ADRs this plan depends on
 
 Deliverables:
@@ -580,18 +631,16 @@ Acceptance:
 
 ### Phase 2: introduce `lib.rs` and move the app shell out of `main.rs`
 
-Status: largely done
+Status: done
 
 Done:
 
 - `src/lib.rs` exists
 - `main.rs` is thin
-- app shell work has started in `app/`
+- app shell work is explicit in `app/`
 - top-level shell/error behavior is centralized
-
-Still left:
-
-- finish shrinking launcher bootstrap/runtime responsibilities out of `modes/app_launcher/run.rs`
+- launcher bootstrap/runtime responsibilities have been split out of `modes/app_launcher/run.rs`
+  into focused launcher modules
 
 Acceptance:
 
@@ -618,18 +667,24 @@ Acceptance:
 
 ### Phase 4: launcher domain split
 
-Status: started and materially progressed
+Status: materially progressed
+
+Done:
+
+- launcher runtime responsibilities have been split out of the main runner
+- `core/state.rs` has been replaced by `core/state/` with dedicated `filter`, `info`, and
+  `update` modules
 
 Do:
 
-- pull ranking/history/model logic out of `core/state.rs`
 - reduce launcher runtime responsibilities
 - make ranking pure
+- keep strengthening ranking fixtures and follow-on state coverage
 
 Acceptance:
 
 - ranking behavior is fixture-backed
-- `core/state.rs` gets materially smaller
+- `core/state` gets materially smaller and clearer
 - behavior drift is intentional and documented if it happens
 
 ### Phase 5: TUI infrastructure extraction
@@ -653,7 +708,7 @@ Acceptance:
 
 ### Phase 6: mode decomposition
 
-Status: started, not finished
+Status: materially progressed
 
 Do:
 
@@ -663,9 +718,14 @@ Do:
 
 Progress:
 
+- launcher runtime has been materially reduced:
+  `modes/app_launcher/run.rs` is now 152 lines
+- direct-launch matching and execution policy now live in `modes/app_launcher/direct.rs`
+- event handling and maintenance actions now live in dedicated launcher modules
 - `dmenu` has been split into dedicated modules (`events`, `options`, `render`, `parse`)
-- `cclip` has partial decomposition (`commands`, `items`, `state`, `session`)
-- `cclip/run.rs` is still the primary oversized runner and remains the biggest mode-level task
+- `cclip` is now split across dedicated runtime modules
+  (`events`, `render`, `image`, `tags`, `commands`, `items`, `state`, `session`)
+- `cclip/run.rs` is now 116 lines instead of 1,338
 
 Acceptance:
 
@@ -675,7 +735,7 @@ Acceptance:
 
 ### Phase 7: desktop and platform split
 
-Status: started, not finished
+Status: materially progressed, not finished
 
 Do:
 
@@ -686,9 +746,10 @@ Do:
 Progress:
 
 - `desktop/app.rs` has been removed in favor of `desktop/parse.rs` and `desktop/discover.rs`
+- XDG applications-directory discovery is centralized in `desktop/dirs.rs`
 - path policy is centralized in `app/paths.rs`
 - launcher and cclip lock/session ownership now have dedicated session modules
-- process behavior still needs a dedicated `platform/` module boundary
+- process behavior now lives under `platform/process.rs`
 
 Acceptance:
 
@@ -744,13 +805,10 @@ Do not:
 From the current branch state, the next order is:
 
 1. Keep the branch green at all times.
-2. Finish splitting `modes/cclip/run.rs` into focused event/action/render helpers.
-3. Continue shrinking `modes/app_launcher/run.rs` and `modes/app_launcher/search.rs`.
-4. Continue ranking/state boundary cleanup and add stronger ranking fixtures.
-5. Finish process/platform isolation (`platform/process.rs` shape) and remove remaining scatter.
-6. Continue desktop decomposition by separating cache/model concerns.
-7. Expand integration and snapshot coverage (help text, config merge, mode behavior).
-8. Add ADR stubs for the architectural decisions already made on this branch.
+2. Continue item/model boundary cleanup (`common/item.rs`, desktop cache/model split).
+3. Continue ranking/state boundary cleanup and add stronger ranking fixtures.
+4. Expand integration and snapshot coverage (help text, config merge, mode behavior).
+5. Keep the ADR set updated when decisions materially change.
 
 ## References
 
@@ -784,8 +842,17 @@ Local repo evidence used for this plan:
 - `src/config/mod.rs`
 - `src/core/state.rs`
 - `src/core/ranking/mod.rs`
+- `src/platform/process.rs`
+- `src/desktop/dirs.rs`
+- `src/modes/app_launcher/direct.rs`
+- `src/modes/app_launcher/events.rs`
 - `src/modes/app_launcher/run.rs`
 - `src/modes/dmenu/run.rs`
 - `src/modes/cclip/run.rs`
 - `src/desktop/parse.rs`
 - `src/desktop/discover.rs`
+- `docs/adr/0001-library-backed-crate-and-thin-main.md`
+- `docs/adr/0002-module-topology-and-boundaries.md`
+- `docs/adr/0003-config-precedence-and-typed-schema.md`
+- `docs/adr/0004-path-lock-and-process-boundaries.md`
+- `docs/adr/0005-storage-compatibility-for-history-and-cache.md`

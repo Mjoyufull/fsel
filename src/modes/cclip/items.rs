@@ -88,6 +88,32 @@ pub(super) fn reload_and_restore(
     }
 }
 
+pub(super) fn reload_visible_history(
+    ui: &mut DmenuUI,
+    cli: &Opts,
+    tag_metadata_formatter: &super::TagMetadataFormatter,
+    show_line_numbers: bool,
+    show_tag_color_names: bool,
+    max_visible: usize,
+) {
+    let updated_items = if let Some(ref tag_name) = cli.cclip_tag {
+        super::scan::get_clipboard_history_by_tag(tag_name)
+    } else {
+        super::scan::get_clipboard_history()
+    };
+
+    if let Ok(updated_items) = updated_items {
+        reload_and_restore(
+            ui,
+            updated_items,
+            tag_metadata_formatter,
+            show_line_numbers,
+            show_tag_color_names,
+            max_visible,
+        );
+    }
+}
+
 fn item_rowid(item: &Item) -> Option<&str> {
     item.original_line.split('\t').next()
 }

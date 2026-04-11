@@ -52,14 +52,14 @@ fn ensure_single_launcher_instance(
             return Err(eyre!("Fsel is already running"));
         }
 
-        let holder_pids =
-            crate::process::find_processes_holding_file(history_db_path).unwrap_or_default();
+        let holder_pids = crate::platform::process::find_processes_holding_file(history_db_path)
+            .unwrap_or_default();
         let target_pids = collect_target_pids(&lock_contents, &holder_pids);
         terminate_target_pids(&target_pids)?;
         ensure_no_remaining_holders(history_db_path, &target_pids)?;
     } else if replace {
         let target_pids: BTreeSet<i32> =
-            crate::process::find_processes_holding_file(history_db_path)
+            crate::platform::process::find_processes_holding_file(history_db_path)
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
@@ -96,7 +96,7 @@ fn collect_target_pids(lock_contents: &str, holder_pids: &[i32]) -> BTreeSet<i32
 
 fn terminate_target_pids(target_pids: &BTreeSet<i32>) -> Result<()> {
     for pid in target_pids.iter().copied() {
-        if let Err(error) = crate::process::kill_process_sigterm_result(pid)
+        if let Err(error) = crate::platform::process::kill_process_sigterm_result(pid)
             && error.raw_os_error() != Some(libc::ESRCH)
         {
             return Err(eyre!("Failed to kill process {}: {}", pid, error));
@@ -113,12 +113,12 @@ fn wait_for_process_exit(pid: i32) -> Result<()> {
     let mut escalated = false;
 
     loop {
-        if !crate::process::process_exists(pid) {
+        if !crate::platform::process::process_exists(pid) {
             return Ok(());
         }
 
         if !escalated {
-            if let Err(error) = crate::process::kill_process_sigkill_result(pid)
+            if let Err(error) = crate::platform::process::kill_process_sigkill_result(pid)
                 && error.raw_os_error() != Some(libc::ESRCH)
             {
                 return Err(eyre!("Failed to kill process {}: {}", pid, error));
@@ -139,7 +139,9 @@ fn ensure_no_remaining_holders(
     history_db_path: &Path,
     excluded_pids: &BTreeSet<i32>,
 ) -> Result<()> {
-    if let Ok(mut remaining) = crate::process::find_processes_holding_file(history_db_path) {
+    if let Ok(mut remaining) =
+        crate::platform::process::find_processes_holding_file(history_db_path)
+    {
         remaining.retain(|pid| !excluded_pids.contains(pid));
         if !remaining.is_empty() {
             return Err(eyre!(
@@ -164,7 +166,11 @@ fn remove_existing_lockfile(lock_path: &Path) -> Result<()> {
 
 fn write_current_pid_lockfile(lock_path: &Path) -> Result<()> {
     let mut lock_file = fs::File::create(lock_path)?;
-    lock_file.write_all(crate::process::get_current_pid().to_string().as_bytes())?;
+    lock_file.write_all(
+        crate::platform::process::get_current_pid()
+            .to_string()
+            .as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -199,7 +205,7 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!(
             "fsel-session-{label}-{}-{unique}",
-            crate::process::get_current_pid()
+            crate::platform::process::get_current_pid()
         ));
         fs::create_dir_all(&dir).expect("test temp dir should be created");
         dir
@@ -255,7 +261,7 @@ mod tests {
             assert!(lock_path.exists());
             assert_eq!(
                 fs::read_to_string(&lock_path).expect("lockfile should be readable"),
-                crate::process::get_current_pid().to_string()
+                crate::platform::process::get_current_pid().to_string()
             );
             assert!(session.db().begin_read().is_ok());
         }

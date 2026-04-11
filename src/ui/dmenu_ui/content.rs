@@ -146,12 +146,11 @@ impl<'a> DmenuUI<'a> {
                 .output()
                 && output.status.success()
                 && let Ok(content) = String::from_utf8(output.stdout)
+                && !content.trim().is_empty()
             {
-                if !content.trim().is_empty() {
-                    self.content_cache
-                        .insert(rowid.to_string(), content.clone());
-                    return content;
-                }
+                self.content_cache
+                    .insert(rowid.to_string(), content.clone());
+                return content;
             }
 
             if !preview.is_empty() {
@@ -272,10 +271,10 @@ fn build_content_lines<'a>(
         }
 
         let chunk = &display_content[current_pos..split_pos];
-        if chunk.width() >= max_width {
-            if let Some(safe_split) = find_safe_split(current_pos, remaining, max_width) {
-                split_pos = safe_split;
-            }
+        if chunk.width() >= max_width
+            && let Some(safe_split) = find_safe_split(current_pos, remaining, max_width)
+        {
+            split_pos = safe_split;
         }
 
         lines.push(Line::from(Span::raw(

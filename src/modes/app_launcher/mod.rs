@@ -1,5 +1,8 @@
 // App launcher mode - verb-based organization
 
+mod admin;
+mod direct;
+mod events;
 pub mod launch;
 pub mod run;
 pub mod search;

@@ -35,7 +35,7 @@ fn ensure_single_cclip_instance(lock_path: &Path, replace: bool) -> Result<Cclip
     }
 
     if let Ok(pid) = lock_contents.trim().parse::<i32>() {
-        if !crate::process::process_exists(pid) {
+        if !crate::platform::process::process_exists(pid) {
             remove_existing_lockfile(lock_path)?;
             write_current_pid_lockfile(lock_path)?;
             return Ok(CclipLockGuard(lock_path.to_path_buf()));
@@ -45,7 +45,7 @@ fn ensure_single_cclip_instance(lock_path: &Path, replace: bool) -> Result<Cclip
             return Err(eyre!("Fsel cclip mode is already running"));
         }
 
-        match crate::process::kill_process_sigterm_result(pid) {
+        match crate::platform::process::kill_process_sigterm_result(pid) {
             Ok(()) => remove_existing_lockfile(lock_path)?,
             Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {
                 remove_existing_lockfile(lock_path)?
@@ -88,7 +88,7 @@ fn remove_existing_lockfile(lock_path: &Path) -> Result<()> {
 
 fn write_current_pid_lockfile(lock_path: &Path) -> Result<()> {
     let mut lock_file = fs::File::create(lock_path)?;
-    let pid = crate::process::get_current_pid();
+    let pid = crate::platform::process::get_current_pid();
     lock_file.write_all(pid.to_string().as_bytes())?;
     Ok(())
 }

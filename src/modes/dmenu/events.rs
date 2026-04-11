@@ -247,8 +247,10 @@ mod tests {
         );
         ui.filter();
 
-        let mut cli = Opts::default();
-        cli.dmenu_accept_nth = Some(vec![1]);
+        let cli = Opts {
+            dmenu_accept_nth: Some(vec![1]),
+            ..Opts::default()
+        };
 
         let outcome = handle_key_event(
             &mut ui,

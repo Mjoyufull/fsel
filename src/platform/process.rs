@@ -1,27 +1,26 @@
-// Process management utilities
+//! Process-management helpers kept behind an explicit platform boundary.
 
 use std::fs;
 use std::io;
-use std::path;
+use std::path::Path;
 
-/// Get current process ID
+/// Returns the current process ID.
 #[allow(unsafe_code)]
 pub fn get_current_pid() -> i32 {
+    // SAFETY: `getpid` has no preconditions and does not dereference pointers.
     unsafe { libc::getpid() }
 }
 
-/// Wrapper
-/// Send SIGTERM to a process, ignore result
+/// Sends `SIGTERM` to a process and ignores the result.
 #[allow(unsafe_code, dead_code)]
 pub fn kill_process_sigterm(pid: i32) {
     let _ = kill_process_sigterm_result(pid);
 }
 
-/// Send SIGTERM to a process
-/// Lets SIGTERM fail with error code
-/// Allows caller to handle error codes
+/// Sends `SIGTERM` to a process and returns any OS error to the caller.
 #[allow(unsafe_code)]
 pub fn kill_process_sigterm_result(pid: i32) -> io::Result<()> {
+    // SAFETY: `kill` is called with a plain PID and a fixed signal value.
     let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
     if ret == 0 {
         Ok(())
@@ -30,9 +29,10 @@ pub fn kill_process_sigterm_result(pid: i32) -> io::Result<()> {
     }
 }
 
-/// Send SIGKILL to a process and return any OS error to the caller.
+/// Sends `SIGKILL` to a process and returns any OS error to the caller.
 #[allow(unsafe_code)]
 pub fn kill_process_sigkill_result(pid: i32) -> io::Result<()> {
+    // SAFETY: `kill` is called with a plain PID and a fixed signal value.
     let ret = unsafe { libc::kill(pid, libc::SIGKILL) };
     if ret == 0 {
         Ok(())
@@ -41,13 +41,14 @@ pub fn kill_process_sigkill_result(pid: i32) -> io::Result<()> {
     }
 }
 
-/// Check if a process exists
+/// Returns whether a process exists for the given PID.
 #[allow(unsafe_code)]
 pub fn process_exists(pid: i32) -> bool {
+    // SAFETY: `kill(pid, 0)` is the standard existence probe and has no extra preconditions.
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
-pub(crate) fn find_processes_holding_file(path: &path::Path) -> io::Result<Vec<i32>> {
+pub(crate) fn find_processes_holding_file(path: &Path) -> io::Result<Vec<i32>> {
     let mut holders = Vec::new();
 
     if !path.exists() {
@@ -64,30 +65,32 @@ pub(crate) fn find_processes_holding_file(path: &path::Path) -> io::Result<Vec<i
 
     for entry in proc_entries {
         let entry = match entry {
-            Ok(e) => e,
+            Ok(entry) => entry,
             Err(_) => continue,
         };
 
-        let file_name = entry.file_name();
-        let pid: i32 = match file_name.to_str().and_then(|s| s.parse().ok()) {
+        let pid = match entry
+            .file_name()
+            .to_str()
+            .and_then(|value| value.parse().ok())
+        {
             Some(pid) => pid,
             None => continue,
         };
 
-        let fd_dir = entry.path().join("fd");
-        let fd_entries = match fs::read_dir(fd_dir) {
+        let fd_entries = match fs::read_dir(entry.path().join("fd")) {
             Ok(entries) => entries,
             Err(_) => continue,
         };
 
         for fd_entry in fd_entries {
             let fd_entry = match fd_entry {
-                Ok(e) => e,
+                Ok(entry) => entry,
                 Err(_) => continue,
             };
 
             let target = match fs::read_link(fd_entry.path()) {
-                Ok(t) => t,
+                Ok(target) => target,
                 Err(_) => continue,
             };
 
