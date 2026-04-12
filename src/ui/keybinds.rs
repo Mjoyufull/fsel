@@ -231,12 +231,34 @@ impl Keybinds {
         mods == KeyModifiers::ALT
             && self.tag.iter().any(|binding| match binding {
                 KeyBind::Simple(key) => parse_key(key).0 == code,
-                KeyBind::WithMod { key, .. } => parse_key(key).0 == code,
+                KeyBind::WithMod { key, modifiers } => {
+                    parse_key(key).0 == code && !parse_modifiers(modifiers).contains(KeyModifiers::ALT)
+                }
             })
     }
 
     /// Delete keybind for cclip mode
     pub fn matches_cclip_delete(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.cclip_delete.iter().any(|kb| kb.matches(code, mods))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KeyBind, Keybinds};
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    #[test]
+    fn alt_tag_binding_does_not_overlap_with_tag_removal() {
+        let keybinds = Keybinds {
+            tag: vec![KeyBind::WithMod {
+                key: "t".to_string(),
+                modifiers: "alt".to_string(),
+            }],
+            ..Keybinds::default()
+        };
+
+        assert!(keybinds.matches_tag(KeyCode::Char('t'), KeyModifiers::ALT));
+        assert!(!keybinds.matches_tag_removal(KeyCode::Char('t'), KeyModifiers::ALT));
     }
 }

@@ -255,7 +255,11 @@ fn parse_lock_pid(lock_contents: &str) -> Option<i32> {
 fn remove_lockfile_if_unchanged(lock_path: &Path, expected_contents: &str) -> Result<bool> {
     match fs::read_to_string(lock_path) {
         Ok(current_contents) if current_contents == expected_contents => {
-            fs::remove_file(lock_path).wrap_err("Failed to remove launcher lockfile")?;
+            if let Err(error) = fs::remove_file(lock_path)
+                && error.kind() != io::ErrorKind::NotFound
+            {
+                return Err(error).wrap_err("Failed to remove launcher lockfile");
+            }
             Ok(true)
         }
         Ok(_) => Ok(false),

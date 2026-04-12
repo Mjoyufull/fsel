@@ -50,6 +50,7 @@ fn ensure_single_cclip_instance(lock_path: &Path, replace: bool) -> Result<Cclip
 
         let lock_contents = read_lock_contents(lock_path)?;
         if lock_contents.is_empty() {
+            remove_lockfile_if_unchanged(lock_path, &lock_contents)?;
             continue;
         }
 
@@ -163,11 +164,54 @@ fn wait_for_process_exit(pid: i32) -> Result<()> {
 fn remove_lockfile_if_unchanged(lock_path: &Path, expected_contents: &str) -> Result<bool> {
     match fs::read_to_string(lock_path) {
         Ok(current_contents) if current_contents == expected_contents => {
-            fs::remove_file(lock_path).wrap_err("Failed to remove cclip lockfile")?;
+            if let Err(error) = fs::remove_file(lock_path)
+                && error.kind() != io::ErrorKind::NotFound
+            {
+                return Err(error).wrap_err("Failed to remove cclip lockfile");
+            }
             Ok(true)
         }
         Ok(_) => Ok(false),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).wrap_err("Failed to validate cclip lockfile ownership"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CclipSession;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "fsel-cclip-session-{label}-{}-{unique}",
+            crate::platform::process::get_current_pid()
+        ));
+        fs::create_dir_all(&dir).expect("test temp dir should be created");
+        dir
+    }
+
+    #[test]
+    fn start_reclaims_empty_lockfile() {
+        let dir = test_temp_dir("empty-lock");
+        let lock_path = dir.join("cclip.lock");
+        fs::write(&lock_path, "").expect("empty lockfile should be created");
+
+        {
+            let _session =
+                CclipSession::start(&lock_path, false).expect("session should reclaim empty lock");
+            let contents = fs::read_to_string(&lock_path).expect("lockfile should be readable");
+            assert!(contents.contains("pid="));
+            assert!(contents.contains("mode=cclip"));
+        }
+
+        assert!(!lock_path.exists());
+        let _ = fs::remove_dir_all(dir);
     }
 }

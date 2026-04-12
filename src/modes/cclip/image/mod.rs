@@ -157,16 +157,55 @@ impl ImageRuntime {
         let mut state = DISPLAY_STATE
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        *state = if let Some(rowid) = &self.current_rowid
-            && self
+        if let Some(rowid) = &self.current_rowid {
+            let is_cached = self
                 .image_manager
                 .as_ref()
                 .and_then(|manager| manager.try_lock().ok())
-                .is_some_and(|manager| manager.is_cached(rowid))
-        {
-            DisplayState::Image(rowid.clone())
+                .is_some_and(|manager| manager.is_cached(rowid));
+
+            if is_cached {
+                *state = DisplayState::Image(rowid.clone());
+            }
         } else {
-            DisplayState::Empty
+            *state = DisplayState::Empty;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ImageRuntime;
+    use crate::ui::{DISPLAY_STATE, DisplayState, GraphicsAdapter};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    use tokio::sync::{Mutex, mpsc};
+
+    #[test]
+    fn restore_display_state_keeps_loading_state_for_uncached_selection() {
+        let (redraw_tx, redraw_rx) = mpsc::unbounded_channel();
+        let runtime = ImageRuntime {
+            image_manager: None,
+            failed_rowids: Arc::new(Mutex::new(HashSet::new())),
+            redraw_tx,
+            redraw_rx,
+            image_preview_enabled: true,
+            cached_is_sixel: false,
+            detected_adapter: GraphicsAdapter::None,
+            previous_was_image: false,
+            current_is_image: true,
+            current_rowid: Some("42".to_string()),
+            force_buffer_sync: false,
         };
+
+        {
+            let mut state = DISPLAY_STATE.lock().unwrap_or_else(|error| error.into_inner());
+            *state = DisplayState::Loading("42".to_string());
+        }
+
+        runtime.restore_display_state();
+
+        let state = DISPLAY_STATE.lock().unwrap_or_else(|error| error.into_inner());
+        assert_eq!(*state, DisplayState::Loading("42".to_string()));
     }
 }

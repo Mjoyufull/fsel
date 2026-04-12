@@ -6,6 +6,7 @@ use eyre::{Result, WrapErr};
 
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::ListState;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::io;
 
 use super::events::{LoopOutcome, handle_key_event, handle_mouse_event};
@@ -51,7 +52,7 @@ pub fn run(cli: &Opts) -> Result<()> {
     let options = DmenuOptions::from_cli(cli);
     crate::ui::terminal::setup_terminal(options.disable_mouse)?;
 
-    let run_result = (|| -> Result<LoopOutcome> {
+    let run_result = catch_unwind(AssertUnwindSafe(|| -> Result<LoopOutcome> {
         let backend = CrosstermBackend::new(io::stderr());
         let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
         terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
@@ -97,21 +98,26 @@ pub fn run(cli: &Opts) -> Result<()> {
                 Event::Render => {}
             }
         }
-    })();
+    }));
 
     let shutdown_result = crate::ui::terminal::shutdown_terminal(options.disable_mouse);
     match (run_result, shutdown_result) {
-        (Ok(LoopOutcome::Exit), Ok(())) => Ok(()),
-        (Ok(LoopOutcome::Print(output)), Ok(())) => {
+        (Ok(Ok(LoopOutcome::Exit)), Ok(())) => Ok(()),
+        (Ok(Ok(LoopOutcome::Print(output))), Ok(())) => {
             println!("{}", output);
             Ok(())
         }
-        (Ok(LoopOutcome::Continue), Ok(())) => Ok(()),
-        (Err(error), Ok(())) => Err(error),
-        (Ok(_), Err(error)) => Err(error.wrap_err("Failed to restore dmenu terminal state")),
-        (Err(error), Err(shutdown_error)) => Err(error.wrap_err(format!(
+        (Ok(Ok(LoopOutcome::Continue)), Ok(())) => Ok(()),
+        (Ok(Err(error)), Ok(())) => Err(error),
+        (Ok(Err(error)), Err(shutdown_error)) => Err(error.wrap_err(format!(
             "Failed to restore dmenu terminal state: {shutdown_error}"
         ))),
+        (Ok(_), Err(error)) => Err(error.wrap_err("Failed to restore dmenu terminal state")),
+        (Err(payload), Ok(())) => resume_unwind(payload),
+        (Err(payload), Err(shutdown_error)) => {
+            eprintln!("Failed to restore dmenu terminal state after panic: {shutdown_error}");
+            resume_unwind(payload);
+        }
     }
 }
 

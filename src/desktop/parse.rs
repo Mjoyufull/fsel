@@ -50,15 +50,21 @@ fn parse_semicolon_list(value: &str) -> Vec<String> {
 #[derive(Default)]
 struct LocalizedField {
     base: Option<String>,
-    localized: Option<String>,
+    localized: Option<(usize, String)>,
 }
 
 impl LocalizedField {
     fn set(&mut self, key: &str, value: &str, locales: &[String]) {
         if let Some(bracket_pos) = key.find('[') {
             let locale_part = &key[bracket_pos + 1..key.len() - 1];
-            if locales.iter().any(|locale| locale == locale_part) {
-                self.localized = Some(value.to_string());
+            if let Some(rank) = locales.iter().position(|locale| locale == locale_part) {
+                let should_replace = self
+                    .localized
+                    .as_ref()
+                    .is_none_or(|(current_rank, _)| rank <= *current_rank);
+                if should_replace {
+                    self.localized = Some((rank, value.to_string()));
+                }
             }
         } else if self.base.is_none() {
             self.base = Some(value.to_string());
@@ -66,7 +72,7 @@ impl LocalizedField {
     }
 
     fn into_value(self) -> Option<String> {
-        self.localized.or(self.base)
+        self.localized.map(|(_, value)| value).or(self.base)
     }
 }
 
@@ -230,7 +236,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, App};
+    use super::{Action, App, LocalizedField};
 
     #[test]
     fn parse_strips_exec_field_codes() {
@@ -266,5 +272,17 @@ mod tests {
         .expect("NoDisplay entries should still parse when desktop filtering is disabled");
 
         assert_eq!(app.name, "Hidden Tool");
+    }
+
+    #[test]
+    fn localized_field_prefers_more_specific_locale_over_file_order() {
+        let locales = vec!["en_US".to_string(), "en".to_string()];
+        let mut field = LocalizedField::default();
+
+        field.set("Name[en_US]", "US English", &locales);
+        field.set("Name[en]", "English", &locales);
+        field.set("Name", "Fallback", &locales);
+
+        assert_eq!(field.into_value().as_deref(), Some("US English"));
     }
 }
