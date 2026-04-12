@@ -1,4 +1,6 @@
 use super::super::DmenuUI;
+use std::process::Command;
+use std::sync::mpsc::{self, TryRecvError};
 
 impl<'a> DmenuUI<'a> {
     /// Check if an Item is a cclip item (has tab-separated format with rowid).
@@ -36,25 +38,18 @@ impl<'a> DmenuUI<'a> {
 
         if parts.len() >= 3 {
             let rowid = parts[0].trim();
-            let preview = parts[2].trim();
+            let preview = parts[2];
 
             if let Some(cached_content) = self.content_cache.get(rowid) {
                 return cached_content.clone();
             }
 
-            if let Ok(output) = std::process::Command::new("cclip")
-                .args(["get", rowid])
-                .output()
-                && output.status.success()
-                && let Ok(content) = String::from_utf8(output.stdout)
-                && !content.trim().is_empty()
-            {
-                self.content_cache
-                    .insert(rowid.to_string(), content.clone());
+            if let Some(content) = self.poll_cclip_content_request(rowid) {
                 return content;
             }
 
             if !preview.is_empty() {
+                self.start_cclip_content_request(rowid);
                 preview.to_string()
             } else {
                 format!("[Failed to get content for rowid {}]", rowid)
@@ -66,6 +61,42 @@ impl<'a> DmenuUI<'a> {
         }
     }
 
+    fn start_cclip_content_request(&mut self, rowid: &str) {
+        if self.content_requests.contains_key(rowid) {
+            return;
+        }
+
+        let rowid_owned = rowid.to_string();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let content = Command::new("cclip")
+                .args(["get", &rowid_owned])
+                .output()
+                .ok()
+                .filter(|output| output.status.success())
+                .and_then(|output| String::from_utf8(output.stdout).ok());
+            let _ = tx.send(content);
+        });
+        self.content_requests.insert(rowid.to_string(), rx);
+    }
+
+    fn poll_cclip_content_request(&mut self, rowid: &str) -> Option<String> {
+        let receiver = self.content_requests.get(rowid)?;
+        match receiver.try_recv() {
+            Ok(Some(content)) => {
+                self.content_requests.remove(rowid);
+                self.content_cache
+                    .insert(rowid.to_string(), content.clone());
+                Some(content)
+            }
+            Ok(None) | Err(TryRecvError::Disconnected) => {
+                self.content_requests.remove(rowid);
+                None
+            }
+            Err(TryRecvError::Empty) => None,
+        }
+    }
+
     /// Get image info for display in the preview panel.
     pub fn get_image_info(&self, item: &crate::common::Item) -> String {
         if !self.is_cclip_image_item(item) {
@@ -74,7 +105,7 @@ impl<'a> DmenuUI<'a> {
 
         let parts: Vec<&str> = item.original_line.splitn(4, '\t').collect();
         if parts.len() >= 3 {
-            let preview = parts[2].trim();
+            let preview = parts[2];
             if !preview.is_empty() {
                 preview.to_string()
             } else {

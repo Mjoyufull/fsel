@@ -78,8 +78,12 @@ impl<'a> DmenuUI<'a> {
             }
 
             let len = available_tags.len() as i32;
-            let current = selected_tag.map(|idx| idx as i32).unwrap_or(-1);
-            let next = (current + direction).rem_euclid(len);
+            let next = match (*selected_tag, direction.cmp(&0)) {
+                (_, std::cmp::Ordering::Equal) => return,
+                (None, std::cmp::Ordering::Greater) => 0,
+                (None, std::cmp::Ordering::Less) => len - 1,
+                (Some(current), _) => ((current as i32) + direction).rem_euclid(len),
+            };
             *selected_tag = Some(next as usize);
 
             if let Some(idx) = *selected_tag

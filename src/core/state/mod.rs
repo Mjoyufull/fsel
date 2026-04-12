@@ -40,12 +40,14 @@ pub struct State {
     pub pinned_order_mode: crate::cli::PinnedOrderMode,
     /// First pinned timestamp by app name.
     pub pin_timestamps: std::collections::HashMap<String, u64>,
+    /// Match mode used for app filtering.
+    pub match_mode: crate::cli::MatchMode,
 }
 
 impl State {
     pub fn new(
         apps: Vec<App>,
-        _match_mode: crate::cli::MatchMode,
+        match_mode: crate::cli::MatchMode,
         frecency_data: std::collections::HashMap<String, FrecencyEntry>,
         prefix_depth: usize,
         ranking_mode: crate::cli::RankingMode,
@@ -66,6 +68,7 @@ impl State {
             ranking_mode,
             pinned_order_mode,
             pin_timestamps,
+            match_mode,
         };
         state.filter();
         state

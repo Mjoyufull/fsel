@@ -120,17 +120,17 @@ fn score_candidate(
     } else if app_name_lower.starts_with(program_name_lower) {
         700_000
     } else {
+        let mut program_chars = Vec::new();
+        let program_utf32 = Utf32Str::new(program_name, &mut program_chars);
+        let mut name_chars = Vec::new();
+        let name_utf32 = Utf32Str::new(app.name.as_str(), &mut name_chars);
         let name_score = matcher
-            .fuzzy_match(
-                Utf32Str::Ascii(app.name.as_bytes()),
-                Utf32Str::Ascii(program_name.as_bytes()),
-            )
+            .fuzzy_match(name_utf32, program_utf32)
             .unwrap_or(0) as i64;
+        let mut exec_chars = Vec::new();
+        let exec_utf32 = Utf32Str::new(exec_name, &mut exec_chars);
         let exec_score = matcher
-            .fuzzy_match(
-                Utf32Str::Ascii(exec_name.as_bytes()),
-                Utf32Str::Ascii(program_name.as_bytes()),
-            )
+            .fuzzy_match(exec_utf32, program_utf32)
             .unwrap_or(0) as i64;
         let best_score = std::cmp::max(name_score, exec_score * 2);
 
@@ -190,9 +190,9 @@ mod tests {
     #[test]
     fn executable_prefix_match_scores_above_fuzzy_name_match() {
         let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
-        let exec_prefix = score_candidate(&app("Foot Terminal", "foot"), "fo", "fo", &mut matcher)
+        let exec_prefix = score_candidate(&app("Console", "fx-run"), "fx", "fx", &mut matcher)
             .expect("prefix candidate should score");
-        let fuzzy = score_candidate(&app("Firefox", "firefox"), "fo", "fo", &mut matcher)
+        let fuzzy = score_candidate(&app("Firefox", "browser"), "fx", "fx", &mut matcher)
             .expect("fuzzy candidate should score");
 
         assert!(exec_prefix > fuzzy);

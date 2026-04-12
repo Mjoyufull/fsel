@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Returns the current process ID.
 #[allow(unsafe_code)]
@@ -48,6 +48,21 @@ pub fn process_exists(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
+pub(crate) fn process_matches_current_exe(pid: i32) -> io::Result<bool> {
+    let current_exe = canonical_path(std::env::current_exe()?);
+    let process_exe = canonical_path(fs::read_link(format!("/proc/{pid}/exe"))?);
+    Ok(process_exe == current_exe)
+}
+
+pub(crate) fn process_has_argument(pid: i32, expected: &str) -> io::Result<bool> {
+    let raw = fs::read(format!("/proc/{pid}/cmdline"))?;
+    Ok(raw
+        .split(|byte| *byte == 0)
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| std::str::from_utf8(part).ok())
+        .any(|argument| argument == expected))
+}
+
 pub(crate) fn find_processes_holding_file(path: &Path) -> io::Result<Vec<i32>> {
     let mut holders = Vec::new();
 
@@ -56,8 +71,6 @@ pub(crate) fn find_processes_holding_file(path: &Path) -> io::Result<Vec<i32>> {
     }
 
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let canonical_str = canonical.to_string_lossy();
-
     let proc_entries = match fs::read_dir("/proc") {
         Ok(entries) => entries,
         Err(_) => return Ok(holders),
@@ -94,14 +107,7 @@ pub(crate) fn find_processes_holding_file(path: &Path) -> io::Result<Vec<i32>> {
                 Err(_) => continue,
             };
 
-            if target == canonical {
-                holders.push(pid);
-                break;
-            }
-
-            if let Some(target_str) = target.to_str()
-                && target_str.starts_with(canonical_str.as_ref())
-            {
+            if target_matches_path(&target, &canonical) {
                 holders.push(pid);
                 break;
             }
@@ -109,4 +115,25 @@ pub(crate) fn find_processes_holding_file(path: &Path) -> io::Result<Vec<i32>> {
     }
 
     Ok(holders)
+}
+
+fn canonical_path(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
+}
+
+fn target_matches_path(target: &Path, canonical: &Path) -> bool {
+    if target == canonical {
+        return true;
+    }
+
+    let Some(target_str) = target.to_str() else {
+        return false;
+    };
+    let Some(canonical_str) = canonical.to_str() else {
+        return false;
+    };
+
+    target_str
+        .strip_suffix(" (deleted)")
+        .is_some_and(|trimmed| trimmed == canonical_str)
 }

@@ -140,5 +140,11 @@ pub(super) fn query_bucket(
 }
 
 fn matches_word_start(haystack: &str, query_lower: &str) -> bool {
-    haystack.starts_with(query_lower) || haystack.contains(&format!(" {}", query_lower))
+    haystack.match_indices(query_lower).any(|(index, _)| {
+        index == 0
+            || haystack[..index]
+                .chars()
+                .next_back()
+                .is_some_and(|ch| !ch.is_alphanumeric())
+    })
 }

@@ -17,6 +17,7 @@ pub(super) struct ImageRuntime {
     pub(super) redraw_rx: mpsc::UnboundedReceiver<()>,
     image_preview_enabled: bool,
     cached_is_sixel: bool,
+    detected_adapter: crate::ui::GraphicsAdapter,
     previous_was_image: bool,
     current_is_image: bool,
     current_rowid: Option<String>,
@@ -36,10 +37,12 @@ impl ImageRuntime {
 
         let mut image_preview_enabled = false;
         let mut cached_is_sixel = false;
+        let mut detected_adapter = crate::ui::GraphicsAdapter::None;
         if let Some(manager) = &image_manager {
             let manager_lock = manager.lock().await;
             image_preview_enabled = options.image_preview_enabled(manager_lock.supports_graphics());
             cached_is_sixel = manager_lock.is_sixel();
+            detected_adapter = crate::ui::GraphicsAdapter::detect(Some(manager_lock.picker()));
         }
 
         if picker.is_none() && image_preview_enabled {
@@ -55,6 +58,7 @@ impl ImageRuntime {
             redraw_rx,
             image_preview_enabled,
             cached_is_sixel,
+            detected_adapter,
             previous_was_image: false,
             current_is_image: false,
             current_rowid: None,
@@ -64,6 +68,10 @@ impl ImageRuntime {
 
     pub(super) fn preview_enabled(&self) -> bool {
         self.image_preview_enabled
+    }
+
+    pub(super) fn detected_adapter(&self) -> crate::ui::GraphicsAdapter {
+        self.detected_adapter
     }
 
     pub(super) fn current_is_image(&self) -> bool {
@@ -99,7 +107,6 @@ impl ImageRuntime {
         if let Ok(mut failed) = self.failed_rowids.try_lock() {
             failed.clear();
         }
-        self.previous_was_image = false;
         self.current_is_image = false;
         self.current_rowid = None;
     }
@@ -150,9 +157,16 @@ impl ImageRuntime {
         let mut state = DISPLAY_STATE
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        *state = match &self.current_rowid {
-            Some(rowid) => DisplayState::Image(rowid.clone()),
-            None => DisplayState::Empty,
+        *state = if let Some(rowid) = &self.current_rowid
+            && self
+                .image_manager
+                .as_ref()
+                .and_then(|manager| manager.try_lock().ok())
+                .is_some_and(|manager| manager.is_cached(rowid))
+        {
+            DisplayState::Image(rowid.clone())
+        } else {
+            DisplayState::Empty
         };
     }
 }

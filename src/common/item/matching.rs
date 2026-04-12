@@ -55,8 +55,9 @@ impl Item {
             return Some(0);
         }
 
-        let (is_quoted, search_query) = if (query.starts_with('"') && query.ends_with('"'))
-            || (query.starts_with('\'') && query.ends_with('\''))
+        let (is_quoted, search_query) = if query.len() >= 2
+            && ((query.starts_with('"') && query.ends_with('"'))
+                || (query.starts_with('\'') && query.ends_with('\'')))
         {
             (true, &query[1..query.len() - 1])
         } else {

@@ -3,6 +3,7 @@ mod filter;
 mod tag_mode;
 
 use std::collections::HashMap;
+use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
 use nucleo_matcher::{Config, Matcher};
@@ -38,6 +39,8 @@ pub struct DmenuUI<'a> {
     pub tag_mode: TagMode,
     /// Cache for clipboard content to avoid repeated cclip calls.
     content_cache: HashMap<String, String>,
+    /// In-flight clipboard content fetches keyed by row ID.
+    content_requests: HashMap<String, Receiver<Option<String>>>,
     /// Temporary error/info message with expiration time.
     pub temp_message: Option<(String, Instant)>,
     #[doc(hidden)]
@@ -50,7 +53,7 @@ impl<'a> DmenuUI<'a> {
         DmenuUI {
             shown: vec![],
             hidden: items,
-            selected: Some(0),
+            selected: None,
             text: vec![],
             query: String::new(),
             scroll_offset: 0,
@@ -60,6 +63,7 @@ impl<'a> DmenuUI<'a> {
             match_nth: None,
             tag_mode: TagMode::Normal,
             content_cache: HashMap::new(),
+            content_requests: HashMap::new(),
             temp_message: None,
             matcher: Matcher::new(Config::DEFAULT.match_paths()),
         }
@@ -100,8 +104,10 @@ impl<'a> DmenuUI<'a> {
     pub fn set_items(&mut self, items: Vec<Item>) {
         self.hidden = items;
         self.shown.clear();
+        self.selected = None;
         self.scroll_offset = 0;
         self.content_cache.clear();
+        self.content_requests.clear();
         self.filter();
     }
 

@@ -30,7 +30,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
         return Ok(());
     }
 
-    let options = CclipOptions::from_cli(cli);
+    let mut options = CclipOptions::from_cli(cli);
     let (db, _) = crate::core::database::open_history_db()?;
     let mut tag_metadata_map = super::load_tag_metadata(&db);
     let mut tag_metadata_formatter = super::TagMetadataFormatter::new(tag_metadata_map.clone());
@@ -43,8 +43,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
     );
 
     crate::ui::terminal::setup_terminal(options.disable_mouse)?;
+    let disable_mouse = options.disable_mouse;
     defer! {
-        let _ = crate::ui::terminal::shutdown_terminal(options.disable_mouse);
+        let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
     }
 
     let backend = CrosstermBackend::new(io::stderr());
@@ -63,6 +64,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     }
 
     let mut image_runtime = super::image::ImageRuntime::new(&options, &mut ui).await;
+    options.set_graphics_adapter(image_runtime.detected_adapter());
     let mut list_state = ListState::default();
     let mut max_visible = 0usize;
     let mut needs_redraw = true;

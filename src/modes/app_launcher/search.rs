@@ -21,9 +21,6 @@ pub fn find_app_by_name_fast(
         return Ok(Some(history_cache.apply_to_app(app)));
     }
 
-    let desktop_cache = cache::DesktopCache::new(db.clone())?;
-    let history_cache = cache::HistoryCache::load(db)?;
-
     for dir in crate::desktop::application_dirs() {
         for entry in WalkDir::new(dir)
             .min_depth(1)

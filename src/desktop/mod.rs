@@ -10,7 +10,7 @@ pub(crate) use dirs::application_dirs;
 pub use discover::read_with_options;
 
 /// An XDG Specification app with full desktop-entry metadata.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct App {
     /// App name (Name field).
     pub name: String,
@@ -72,10 +72,20 @@ impl App {
         } else if self.score < 1 {
             self.history as i64
         } else {
-            self.score * self.history as i64
+            self.score.saturating_mul(self.history as i64)
         }
     }
 }
+
+impl PartialEq for App {
+    fn eq(&self, other: &Self) -> bool {
+        self.pinned == other.pinned
+            && self.corrected_score() == other.corrected_score()
+            && self.name.eq_ignore_ascii_case(&other.name)
+    }
+}
+
+impl Eq for App {}
 
 impl Ord for App {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {

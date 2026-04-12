@@ -14,6 +14,7 @@ impl State {
                 &self.apps,
                 crate::core::ranking::FilterOptions {
                     query: &self.query,
+                    match_mode: self.match_mode,
                     frecency_data: &self.frecency_data,
                     prefix_depth: self.prefix_depth,
                     ranking_mode: self.ranking_mode,

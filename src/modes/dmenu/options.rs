@@ -101,7 +101,7 @@ impl DmenuOptions {
 
     pub(super) fn display_query(&self, query: &str) -> String {
         if self.password_mode {
-            self.password_character.repeat(query.len())
+            self.password_character.repeat(query.chars().count())
         } else {
             query.to_string()
         }

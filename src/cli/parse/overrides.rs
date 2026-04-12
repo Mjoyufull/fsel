@@ -228,7 +228,6 @@ fn report_unknown_argument(arg: lexopt::Arg<'_>) -> CliError {
             'C' => "Unknown option '-C'. Did you mean '-c' for --config?",
             'P' => "Unknown option '-P'. Did you mean '-p' for --program?",
             'R' => "Unknown option '-R'. Did you mean '-r' for --replace?",
-            'H' => "Unknown option '-H'. Did you mean '-h' for --help?",
             _ => "Unknown option. Use '-h' or '--help' to see available options.",
         },
         Value(_) => unreachable!(),

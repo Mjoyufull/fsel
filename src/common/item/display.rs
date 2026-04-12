@@ -97,8 +97,12 @@ fn build_tagged_list_item<'a>(
     }
 
     spans.push(Span::styled("]", Style::default().fg(first_tag_color)));
-    if tag_end + 2 < item.display_text.len() {
-        spans.push(Span::raw(&item.display_text[tag_end + 2..]));
+    if tag_end + 1 < item.display_text.len() {
+        let suffix = &item.display_text[tag_end + 1..];
+        let suffix = suffix.strip_prefix(' ').unwrap_or(suffix);
+        if !suffix.is_empty() {
+            spans.push(Span::raw(suffix));
+        }
     }
 
     ListItem::new(Line::from(spans))
@@ -106,7 +110,7 @@ fn build_tagged_list_item<'a>(
 
 fn tag_bounds(display_text: &str) -> Option<(usize, usize)> {
     let tag_start = display_text.find('[')?;
-    let tag_end = display_text.find(']')?;
+    let tag_end = display_text[tag_start + 1..].find(']')? + tag_start + 1;
     Some((tag_start, tag_end))
 }
 

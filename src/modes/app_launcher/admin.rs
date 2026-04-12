@@ -11,7 +11,7 @@ pub(crate) fn handle_maintenance_command(
 ) -> Result<bool> {
     if cli.clear_history {
         clear_history(db)?;
-        println!("Database cleared succesfully!");
+        println!("Database cleared successfully!");
         println!(
             "To fully remove the database, delete {}",
             data_dir.display()
@@ -63,12 +63,12 @@ fn clear_history(db: &redb::Database) -> Result<()> {
 
         let history_keys: Vec<String> = history_table
             .iter()?
-            .filter_map(|result| result.ok().map(|(key, _)| key.value().to_string()))
-            .collect();
+            .map(|result| result.map(|(key, _)| key.value().to_string()))
+            .collect::<Result<_, _>>()?;
         let pinned_keys: Vec<String> = pinned_table
             .iter()?
-            .filter_map(|result| result.ok().map(|(key, _)| key.value().to_string()))
-            .collect();
+            .map(|result| result.map(|(key, _)| key.value().to_string()))
+            .collect::<Result<_, _>>()?;
 
         for key in history_keys {
             history_table.remove(key.as_str())?;

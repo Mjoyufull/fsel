@@ -204,7 +204,8 @@ fn submit_tag_color(
             return;
         }
 
-        ctx.tag_metadata_map.insert(
+        let mut updated_metadata = ctx.tag_metadata_map.clone();
+        updated_metadata.insert(
             tag_name.clone(),
             TagMetadata {
                 name: tag_name.clone(),
@@ -212,7 +213,13 @@ fn submit_tag_color(
                 emoji,
             },
         );
-        let _ = super::save_tag_metadata(ctx.db, ctx.tag_metadata_map);
+        if let Err(error) = super::save_tag_metadata(ctx.db, &updated_metadata) {
+            ctx.ui
+                .set_temp_message(format!("Failed to save tag metadata: {}", error));
+            ctx.ui.tag_mode = TagMode::Normal;
+            return;
+        }
+        *ctx.tag_metadata_map = updated_metadata;
         *ctx.tag_metadata_formatter = TagMetadataFormatter::new(ctx.tag_metadata_map.clone());
         reload_history(ctx);
     }

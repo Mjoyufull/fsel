@@ -3,7 +3,7 @@ mod matcher;
 
 use super::FrecencyEntry;
 use super::sort::{compare_names, compare_pinned_order, ranking_boost, ranking_score};
-use crate::cli::{PinnedOrderMode, RankingMode};
+use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
 use crate::desktop::App;
 use bucket::query_bucket;
 use matcher::{QueryContext, base_fuzzy_score};
@@ -37,6 +37,8 @@ fn default_ranking_mode_label() -> String {
 pub struct FilterOptions<'a> {
     /// Query text entered by the user.
     pub query: &'a str,
+    /// Matching strategy for the current query.
+    pub match_mode: MatchMode,
     /// Frecency metadata keyed by app name.
     pub frecency_data: &'a HashMap<String, FrecencyEntry>,
     /// Prefix depth that still enables word-start tiering.
@@ -81,7 +83,10 @@ pub fn filter_apps(apps: &[App], options: FilterOptions<'_>) -> Vec<App> {
 
 fn score_app_for_query(app: &App, context: &mut QueryContext<'_>) -> Option<(i64, App)> {
     let exec_name = crate::strings::extract_exec_name(&app.command);
-    let matcher_score = base_fuzzy_score(app, exec_name, context);
+    let matcher_score = match context.options.match_mode {
+        MatchMode::Exact => 0,
+        MatchMode::Fuzzy => base_fuzzy_score(app, exec_name, context),
+    };
     let bucket = query_bucket(
         app,
         exec_name,
@@ -116,7 +121,7 @@ fn score_app_for_query(app: &App, context: &mut QueryContext<'_>) -> Option<(i64
 #[cfg(test)]
 mod tests {
     use super::{FilterOptions, filter_apps};
-    use crate::cli::{PinnedOrderMode, RankingMode};
+    use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
     use crate::desktop::App;
     use std::collections::HashMap;
 
@@ -159,6 +164,7 @@ mod tests {
             &apps,
             FilterOptions {
                 query: "alpha",
+                match_mode: MatchMode::Fuzzy,
                 frecency_data: &HashMap::new(),
                 prefix_depth: 5,
                 ranking_mode: RankingMode::Frecency,
@@ -193,6 +199,7 @@ mod tests {
             &apps,
             FilterOptions {
                 query: "zip",
+                match_mode: MatchMode::Fuzzy,
                 frecency_data: &HashMap::new(),
                 prefix_depth: 5,
                 ranking_mode: RankingMode::Frecency,

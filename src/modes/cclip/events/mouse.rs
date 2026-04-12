@@ -66,7 +66,10 @@ pub(super) fn handle_mouse_event(
             }
         }
         MouseEventKind::ScrollDown => {
-            if matches!(ctx.ui.tag_mode, TagMode::Normal) && !ctx.ui.shown.is_empty() {
+            if matches!(ctx.ui.tag_mode, TagMode::Normal)
+                && !ctx.ui.shown.is_empty()
+                && max_visible_rows > 0
+            {
                 let max_visible = max_visible_rows as usize;
                 if ctx.ui.scroll_offset + max_visible < ctx.ui.shown.len() {
                     ctx.ui.scroll_offset += 1;

@@ -238,6 +238,19 @@ fn write_cached_app(
     let data = postcard::to_allocvec(&entry)?;
     let path_key = path.to_string_lossy();
 
+    if let Some(existing) = cache_table.get(path_key.as_ref())?
+        && let Ok(previous_entry) = postcard::from_bytes::<CacheEntry>(existing.value())
+        && previous_entry.app.name != app.name
+    {
+        let should_remove_old_name = index_table
+            .get(previous_entry.app.name.as_str())?
+            .is_some_and(|index_value| index_value.value() == path_key.as_bytes());
+
+        if should_remove_old_name {
+            index_table.remove(previous_entry.app.name.as_str())?;
+        }
+    }
+
     cache_table.insert(path_key.as_ref(), data.as_slice())?;
     index_table.insert(app.name.as_str(), path_key.as_bytes())?;
     Ok(())

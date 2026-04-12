@@ -20,7 +20,8 @@ impl HistoryCache {
         let read_txn = db.begin_read()?;
 
         if let Ok(history_table) = read_txn.open_table(HISTORY_TABLE) {
-            for (key, value) in (history_table.iter()?).flatten() {
+            for entry in history_table.iter()? {
+                let (key, value) = entry?;
                 history.insert(key.value().to_string(), value.value());
             }
         }

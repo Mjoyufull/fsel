@@ -78,8 +78,9 @@ fn parse_hex_color(color_str: &str) -> Option<ratatui::style::Color> {
 
 fn parse_rgb_color(color_str: &str) -> Option<ratatui::style::Color> {
     let rgb_str = color_str.trim();
+    let rgb_lower = rgb_str.to_ascii_lowercase();
 
-    if rgb_str.starts_with("rgb(") && rgb_str.ends_with(')') {
+    if rgb_lower.starts_with("rgb(") && rgb_str.ends_with(')') {
         let values = &rgb_str[4..rgb_str.len() - 1];
         return parse_rgb_values(values);
     }

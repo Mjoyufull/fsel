@@ -23,7 +23,7 @@ pub(super) async fn handle_key_event(
         (code, mods) if ctx.cli.keybinds.matches_tag(code, mods) => {
             super::super::tags::begin_tag_creation(ctx.ui, ctx.image_runtime, ctx.terminal)?;
         }
-        (KeyCode::Char('t'), KeyModifiers::ALT) => {
+        (code, mods) if ctx.cli.keybinds.matches_tag_removal(code, mods) => {
             super::super::tags::begin_tag_removal(ctx.ui);
         }
         (code, mods) if ctx.cli.keybinds.matches_cclip_delete(code, mods) => {

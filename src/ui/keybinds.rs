@@ -226,6 +226,15 @@ impl Keybinds {
         self.tag.iter().any(|kb| kb.matches(code, mods))
     }
 
+    /// Tag-removal keybind for cclip mode using the configured tag key with `Alt`.
+    pub fn matches_tag_removal(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        mods == KeyModifiers::ALT
+            && self.tag.iter().any(|binding| match binding {
+                KeyBind::Simple(key) => parse_key(key).0 == code,
+                KeyBind::WithMod { key, .. } => parse_key(key).0 == code,
+            })
+    }
+
     /// Delete keybind for cclip mode
     pub fn matches_cclip_delete(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.cclip_delete.iter().any(|kb| kb.matches(code, mods))

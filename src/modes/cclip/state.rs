@@ -106,6 +106,10 @@ impl CclipOptions {
         }
     }
 
+    pub(super) fn set_graphics_adapter(&mut self, adapter: GraphicsAdapter) {
+        self.graphics_adapter = adapter;
+    }
+
     pub(super) fn input_config(&self) -> InputConfig {
         InputConfig {
             exit_key: KeyCode::Null,

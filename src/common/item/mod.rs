@@ -74,7 +74,7 @@ impl<'a> From<&'a Item> for ListItem<'a> {
 
 impl PartialEq for Item {
     fn eq(&self, other: &Self) -> bool {
-        self.original_line == other.original_line
+        self.score == other.score && self.line_number == other.line_number
     }
 }
 

@@ -33,15 +33,18 @@ fn application_dirs_from_sources(
             push_applications_dir(&mut dirs, PathBuf::from(data_dir));
         }
     } else {
+        #[cfg(not(target_os = "openbsd"))]
         let default_paths = vec![
             PathBuf::from("/usr/local/share"),
             PathBuf::from("/usr/share"),
         ];
 
         #[cfg(target_os = "openbsd")]
-        {
-            default_paths.push(PathBuf::from("/usr/X11R6/share"));
-        }
+        let default_paths = vec![
+            PathBuf::from("/usr/local/share"),
+            PathBuf::from("/usr/share"),
+            PathBuf::from("/usr/X11R6/share"),
+        ];
 
         for default_path in default_paths {
             push_applications_dir(&mut dirs, default_path);

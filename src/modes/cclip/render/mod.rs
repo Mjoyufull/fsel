@@ -27,7 +27,7 @@ pub(super) fn draw(
     let needs_sixel_clear = image_runtime.needs_terminal_clear();
     let force_buffer_sync = image_runtime.consume_buffer_sync();
 
-    terminal.draw(|frame| {
+    let draw_result = terminal.draw(|frame| {
         let content_height = options.content_height(frame.area().height);
         let show_content_panel = content_height > 0;
         let layout = options.split_layout(frame.area());
@@ -152,11 +152,12 @@ pub(super) fn draw(
 
         frame.render_stateful_widget(items_list, chunks[items_panel_index], list_state);
         frame.render_widget(input_paragraph, chunks[input_panel_index]);
-    })?;
-    render_error?;
-
+    });
     set_synchronized_output(options.term_is_foot, false);
     image_runtime.finish_draw();
+
+    draw_result?;
+    render_error?;
     Ok(max_visible)
 }
 

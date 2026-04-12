@@ -50,6 +50,10 @@ impl ImageManager {
         matches!(self.picker.protocol_type(), ProtocolType::Sixel)
     }
 
+    pub fn picker(&self) -> &Picker {
+        &self.picker
+    }
+
     /// Check if an image is already in cache
     pub fn is_cached(&self, rowid: &str) -> bool {
         self.cache.contains_key(rowid)
@@ -87,11 +91,7 @@ impl ImageManager {
     pub async fn load_cclip_image(&mut self, rowid: &str) -> Result<()> {
         // Check cache first
         if self.cache.contains_key(rowid) {
-            self.current_rowid = Some(rowid.to_string());
             self.update_lru(rowid);
-
-            // Update display state
-            self.update_display_state(DisplayState::Image(rowid.to_string()));
             return Ok(());
         }
 
@@ -142,11 +142,6 @@ impl ImageManager {
         {
             self.cache.remove(&old_rowid);
         }
-
-        self.current_rowid = Some(rowid.to_string());
-
-        // Update display state
-        self.update_display_state(DisplayState::Image(rowid.to_string()));
 
         Ok(())
     }

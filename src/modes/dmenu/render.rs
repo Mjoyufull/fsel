@@ -40,6 +40,14 @@ pub(super) fn draw_frame(
         .border_type(border_type)
         .border_style(Style::default().fg(options.main_border_color));
 
+    ui.info_with_image_support(
+        options.highlight_color,
+        false,
+        false,
+        chunks[content_panel_index].width,
+        chunks[content_panel_index].height.saturating_sub(2),
+    );
+
     let content_paragraph = Paragraph::new(ui.text.clone())
         .block(content_block)
         .style(Style::default().fg(options.main_text_color))

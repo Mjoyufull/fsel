@@ -92,6 +92,8 @@ fn move_last(state: &mut State, max_visible: usize) {
         state.selected = Some(last);
         if max_visible > 0 && last >= max_visible {
             state.scroll_offset = last - max_visible + 1;
+        } else {
+            state.scroll_offset = 0;
         }
     }
 }

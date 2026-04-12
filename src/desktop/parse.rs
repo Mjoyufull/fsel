@@ -8,9 +8,9 @@ static LOCALE_CACHE: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new
 fn get_locale() -> &'static [String] {
     LOCALE_CACHE.get_or_init(|| {
         let mut locales = Vec::new();
-        let locale_var = env::var("LC_MESSAGES")
+        let locale_var = env::var("LC_ALL")
+            .or_else(|_| env::var("LC_MESSAGES"))
             .or_else(|_| env::var("LANG"))
-            .or_else(|_| env::var("LC_ALL"))
             .unwrap_or_else(|_| "C".to_string());
 
         if locale_var != "C" && locale_var != "POSIX" {
@@ -47,22 +47,26 @@ fn parse_semicolon_list(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn get_localized_value(
-    key: &str,
-    value: &str,
-    existing_value: &Option<String>,
-    locales: &[String],
-) -> Option<String> {
-    if let Some(bracket_pos) = key.find('[') {
-        let locale_part = &key[bracket_pos + 1..key.len() - 1];
-        if existing_value.is_none() && locales.iter().any(|locale| locale == locale_part) {
-            return Some(value.to_string());
+#[derive(Default)]
+struct LocalizedField {
+    base: Option<String>,
+    localized: Option<String>,
+}
+
+impl LocalizedField {
+    fn set(&mut self, key: &str, value: &str, locales: &[String]) {
+        if let Some(bracket_pos) = key.find('[') {
+            let locale_part = &key[bracket_pos + 1..key.len() - 1];
+            if locales.iter().any(|locale| locale == locale_part) {
+                self.localized = Some(value.to_string());
+            }
+        } else if self.base.is_none() {
+            self.base = Some(value.to_string());
         }
-        None
-    } else if existing_value.is_none() {
-        Some(value.to_string())
-    } else {
-        None
+    }
+
+    fn into_value(self) -> Option<String> {
+        self.localized.or(self.base)
     }
 }
 
@@ -85,10 +89,10 @@ impl App {
             None => "[Desktop Entry]".to_string(),
         };
 
-        let mut name = None;
-        let mut generic_name = None;
+        let mut name = LocalizedField::default();
+        let mut generic_name = LocalizedField::default();
         let mut exec = None;
-        let mut description = None;
+        let mut description = LocalizedField::default();
         let mut keywords = Vec::with_capacity(4);
         let mut categories = Vec::with_capacity(2);
         let mut mime_types = Vec::new();
@@ -126,28 +130,9 @@ impl App {
                 let value = value.trim();
                 match key.split('[').next().unwrap_or(key) {
                     "Type" => entry_type = Some(value.to_string()),
-                    "Name" => {
-                        if let Some(localized) = get_localized_value(key, value, &name, locales) {
-                            name = Some(match action {
-                                Some(action) => format!("{} ({localized})", action.from),
-                                None => localized,
-                            });
-                        }
-                    }
-                    "GenericName" => {
-                        if let Some(localized) =
-                            get_localized_value(key, value, &generic_name, locales)
-                        {
-                            generic_name = Some(localized);
-                        }
-                    }
-                    "Comment" => {
-                        if let Some(localized) =
-                            get_localized_value(key, value, &description, locales)
-                        {
-                            description = Some(localized);
-                        }
-                    }
+                    "Name" => name.set(key, value, locales),
+                    "GenericName" => generic_name.set(key, value, locales),
+                    "Comment" => description.set(key, value, locales),
                     "Keywords" if keywords.is_empty() => keywords = parse_semicolon_list(value),
                     "Categories" if categories.is_empty() => {
                         categories = parse_semicolon_list(value);
@@ -192,7 +177,13 @@ impl App {
             return Err(eyre!("Not an Application type desktop entry"));
         }
 
-        let name = name.unwrap_or_else(|| "Unknown".to_string());
+        let name = name
+            .into_value()
+            .map(|value| match action {
+                Some(action) => format!("{} ({value})", action.from),
+                None => value,
+            })
+            .unwrap_or_else(|| "Unknown".to_string());
         let command = exec.ok_or_else(|| eyre!("Missing required Exec field"))?;
 
         if hidden || (filter_desktop && no_display) {
@@ -206,8 +197,8 @@ impl App {
             last_access: None,
             name,
             command,
-            description: description.unwrap_or_default(),
-            generic_name,
+            description: description.into_value().unwrap_or_default(),
+            generic_name: generic_name.into_value(),
             keywords,
             categories,
             mime_types,

@@ -9,10 +9,15 @@ fn runtime_project_dirs() -> Result<ProjectDirs> {
 }
 
 fn ensure_dir(path: &PathBuf) -> Result<()> {
-    if !path.exists() {
-        fs::create_dir_all(path)?;
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(()),
+        Ok(_) => Err(eyre!("runtime path exists but is not a directory: {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(path)?;
+            Ok(())
+        }
+        Err(error) => Err(error.into()),
     }
-    Ok(())
 }
 
 pub(crate) fn runtime_data_dir() -> Result<PathBuf> {

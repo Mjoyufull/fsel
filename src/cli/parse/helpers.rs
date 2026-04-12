@@ -17,7 +17,16 @@ pub(super) fn parse_column_list(
     let columns = value_as_string(parser, "Column specification must be valid UTF-8")?;
     columns
         .split(',')
-        .map(|part| part.trim().parse::<usize>())
+        .map(|part| {
+            let column = part
+                .trim()
+                .parse::<usize>()
+                .map_err(|_| "invalid column")?;
+            if column == 0 {
+                return Err("column indices are 1-based");
+            }
+            Ok(column)
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| CliError::message(error_message))
 }

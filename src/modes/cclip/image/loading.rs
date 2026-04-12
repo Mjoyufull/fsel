@@ -66,30 +66,56 @@ impl ImageRuntime {
             match result {
                 Ok(Ok(_)) => {
                     failed_rowids.lock().await.remove(&rowid);
-                    let mut state = DISPLAY_STATE
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    *state = DisplayState::Image(rowid.clone());
+                    let should_publish = {
+                        let state = DISPLAY_STATE
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        matches!(&*state, DisplayState::Loading(id) if id == &rowid)
+                    };
+
+                    if should_publish
+                        && let Ok(mut manager_lock) = manager_clone.try_lock()
+                    {
+                        manager_lock.set_image(&rowid);
+                    }
                 }
                 Ok(Err(error)) => {
                     failed_rowids.lock().await.insert(rowid.clone());
-                    if let Ok(mut manager_lock) = manager_clone.try_lock() {
-                        manager_lock.clear();
+                    let should_publish = {
+                        let state = DISPLAY_STATE
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        matches!(&*state, DisplayState::Loading(id) if id == &rowid)
+                    };
+
+                    if should_publish {
+                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                            manager_lock.clear();
+                        }
+                        let mut state = DISPLAY_STATE
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        *state = DisplayState::Failed(error.to_string());
                     }
-                    let mut state = DISPLAY_STATE
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    *state = DisplayState::Failed(error.to_string());
                 }
                 Err(_) => {
                     failed_rowids.lock().await.insert(rowid.clone());
-                    if let Ok(mut manager_lock) = manager_clone.try_lock() {
-                        manager_lock.clear();
+                    let should_publish = {
+                        let state = DISPLAY_STATE
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        matches!(&*state, DisplayState::Loading(id) if id == &rowid)
+                    };
+
+                    if should_publish {
+                        if let Ok(mut manager_lock) = manager_clone.try_lock() {
+                            manager_lock.clear();
+                        }
+                        let mut state = DISPLAY_STATE
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        *state = DisplayState::Failed("Task panicked during image load".to_string());
                     }
-                    let mut state = DISPLAY_STATE
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    *state = DisplayState::Failed("Task panicked during image load".to_string());
                 }
             }
 

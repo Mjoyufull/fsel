@@ -102,7 +102,7 @@ pub(super) fn handle_mouse_event(
                 let clicked_item_index = ui.scroll_offset + row_in_content as usize;
 
                 if clicked_item_index < ui.shown.len() {
-                    return LoopOutcome::Print(ui.shown[clicked_item_index].original_line.clone());
+                    return LoopOutcome::Print(selected_output(ui, options, clicked_item_index));
                 }
             }
         }
