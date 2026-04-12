@@ -53,7 +53,7 @@ fn clear_tag_metadata() -> Result<()> {
     let (db, _) = crate::core::database::open_history_db()?;
     let write_txn = db.begin_write()?;
     {
-        let mut table = write_txn.open_table(super::TAG_METADATA_TABLE)?;
+        let mut table = write_txn.open_table(super::metadata::TAG_METADATA_TABLE)?;
         let _ = table.remove("tag_metadata");
     }
     write_txn.commit()?;

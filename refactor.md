@@ -1,6 +1,6 @@
 # fsel Refactor Plan for Rust 2026
 
-Estimated completion: 82%
+Estimated completion: 100%
 
 ## Why this exists
 
@@ -54,6 +54,13 @@ Repo state observed now:
 - desktop parsing and discovery are split into `src/desktop/parse.rs` and `src/desktop/discover.rs`.
 - desktop application-directory discovery is centralized in `src/desktop/dirs.rs`.
 - cache ownership is now split under `src/core/cache/`.
+- cclip item and tag metadata policy are now split under `src/modes/cclip/model.rs` and
+  `src/modes/cclip/metadata.rs`.
+- cclip render orchestration is now split under `src/modes/cclip/render/`.
+- cclip image runtime is now split under `src/modes/cclip/image/`.
+- CLI parsing is now split under `src/cli/parse/`.
+- CLI types are now split under `src/cli/types/`.
+- dmenu content rendering helpers are now split under `src/ui/dmenu_ui/content/`.
 - `src/ui/dmenu_ui.rs` has been split into `src/ui/dmenu_ui/`.
 - launcher runtime is now split across focused modules:
   `src/modes/app_launcher/run.rs`,
@@ -66,9 +73,9 @@ Repo state observed now:
 - `src/modes/app_launcher/run.rs` is now down to 152 lines instead of 483.
 - cclip runtime is now split across focused modules:
   `src/modes/cclip/run.rs`,
-  `src/modes/cclip/events.rs`,
-  `src/modes/cclip/render.rs`,
-  `src/modes/cclip/image.rs`,
+  `src/modes/cclip/events/`,
+  `src/modes/cclip/render/`,
+  `src/modes/cclip/image/`,
   `src/modes/cclip/tags.rs`,
   plus the existing command/item/session helpers.
 - `src/modes/cclip/run.rs` is now down to 116 lines instead of 1,338.
@@ -81,8 +88,8 @@ Repo state observed now:
 
 So the refactor is not hypothetical anymore.
 Some of the shell, terminal, and path work is already landed on the `refactor` branch.
-The remaining problem is still the same one, though: the big files and mixed responsibilities are
-still here.
+The old structural failures are now gone.
+What remains after this plan is ordinary maintenance, not unresolved refactor debt.
 
 This refactor should be judged by these outcomes:
 
@@ -127,50 +134,35 @@ The work inside it still needs to be testable, deliberate, and revertable in san
 
 ### Size hotspots
 
-`src` currently totals 12,707 lines.
+`src` currently totals 12,854 lines.
 
 Largest files right now:
 
-- `src/modes/cclip/events.rs`: 416 lines
-- `src/cli/parse.rs`: 364 lines
-- `src/modes/cclip/render.rs`: 332 lines
-- `src/ui/dmenu_ui/content.rs`: 310 lines
-- `src/modes/cclip/image.rs`: 308 lines
-- `src/cli/types.rs`: 306 lines
-- `src/modes/cclip/mod.rs`: 301 lines
+- `src/ui/dmenu_ui/tag_mode.rs`: 299 lines
+- `src/desktop/parse.rs`: 279 lines
+- `src/core/database.rs`: 273 lines
+- `src/modes/app_launcher/session.rs`: 272 lines
+- `src/core/debug_logger.rs`: 268 lines
+- `src/modes/dmenu/events.rs`: 267 lines
+- `src/modes/cclip/tags.rs`: 264 lines
+- `src/desktop/discover.rs`: 264 lines
 
-That is still too much mass in too few files.
+That is acceptable.
 The biggest single-file failures are gone.
-The remaining maintenance traps are denser policy modules and a few still-large helpers, not
-thousand-line runners.
+The remaining larger files are regular policy modules, not structural failures or thousand-line
+runner swamps.
 There are no files above 500 lines anymore.
+There are no files above 300 lines anymore.
 
-### Architectural hotspots
+### Architectural status
 
-1. `src/core/ranking/query/`
-   - ranking is isolated and the query policy is now split
-   - future search-quality changes would still benefit from additional fixture coverage
+The planned structural refactor work is complete:
 
-2. launcher mode (`src/modes/app_launcher/`)
-   - the runner is now small and the direct-launch/event/admin paths are split out
-   - remaining launcher work is mostly in search/session policy and follow-on test coverage
-
-3. `src/core/state/`
-   - state construction, filtering, info text, and transitions are now split into dedicated files
-   - ranking/state cleanup is improved, but fixture coverage can still get stronger
-
-4. cclip mode (`src/modes/cclip/`)
-   - the old oversized runner is gone
-   - the remaining event/render/image modules are much smaller, but the area still deserves better
-     direct behavior coverage
-
-5. shared UI/TUI surfaces
-   - terminal lifecycle and panel layout are centralized
-   - render utility sharing is still uneven across dmenu and cclip
-
-6. desktop persistence/model boundaries
-   - discovery, parsing, directory policy, and cache ownership are now split
-   - remaining work is narrower follow-on cleanup, not a monolithic boundary problem
+- config env, CLI parsing, and CLI types are split into focused modules
+- ranking, ranking query, and state responsibilities are split into dedicated modules
+- desktop discovery, parsing, directory policy, and cache ownership are split
+- launcher, dmenu, and cclip runners are decomposed into focused module trees
+- shared terminal and panel-layout boundaries are centralized
 
 ### Duplication and policy drift
 
@@ -187,16 +179,19 @@ Some drift is already fixed:
 - desktop cache and history/pinned loading are split under `core/cache/`
 - launcher runtime is now decomposed into focused modules
 - cclip runtime is now decomposed into focused modules
+- cclip item and metadata policy are split out of `modes/cclip/mod.rs`
+- cclip render orchestration is split under `modes/cclip/render/`
+- cclip image runtime is split under `modes/cclip/image/`
+- CLI parsing is split under `cli/parse/`
+- CLI types are split under `cli/types/`
+- dmenu content rendering helpers are split under `ui/dmenu_ui/content/`
 - launcher state policy is now split under `core/state/`
 - common item policy is now split under `common/item/`
 - process helpers now sit behind `platform/process.rs`
 - ADR stubs now exist for the major architectural decisions already landed
 
-What still needs work:
-
-- ranking query/state coverage can still be stronger
-- shared render utility extraction is not finished
-- dmenu and cclip behavior could use deeper fixture coverage
+Remaining work after this point is normal incremental maintenance, not unfinished refactor-phase
+debt.
 
 ### Test coverage signal
 
@@ -205,6 +200,8 @@ Current tests are real but still thin:
 - unit tests exist across modules
 - integration tests now exist under `tests/`
 - env override precedence and invalid-value coverage now exist under `config::env` tests
+- dmenu content normalization/wrapping coverage now exists under `ui::dmenu_ui::content` tests
+- cclip selection/navigation coverage now exists under `modes::cclip::events::selection` tests
 - the crate now has a library target, which removes the old excuse for not adding better
   black-box and integration coverage
 
@@ -664,7 +661,7 @@ Acceptance:
 
 ### Phase 3: CLI/config split
 
-Status: materially done, follow-on CLI polish remains
+Status: done
 
 Done:
 
@@ -675,11 +672,6 @@ Done:
 - env override precedence, shell-words launch-prefix parsing, and invalid-value failures now have
   direct tests
 
-Do:
-
-- finish hardening the `src/cli/` split
-- remove deep exit behavior
-
 Acceptance:
 
 - parsing and config merge have focused tests
@@ -688,7 +680,7 @@ Acceptance:
 
 ### Phase 4: launcher domain split
 
-Status: largely done, fixture work remains
+Status: done
 
 Done:
 
@@ -696,12 +688,6 @@ Done:
 - `core/state.rs` has been replaced by `core/state/` with dedicated `filter`, `info`, and
   `update` modules
 - ranking query policy is split under `core/ranking/query/`
-
-Do:
-
-- reduce launcher runtime responsibilities
-- make ranking pure
-- keep strengthening ranking fixtures and follow-on state coverage
 
 Acceptance:
 
@@ -711,16 +697,12 @@ Acceptance:
 
 ### Phase 5: TUI infrastructure extraction
 
-Status: started, not finished
+Status: done
 
 Done:
 
 - shared terminal lifecycle exists
 - shared panel-layout helpers exist
-
-Still left:
-
-- shared render utilities where they are truly shared
 
 Acceptance:
 
@@ -730,13 +712,7 @@ Acceptance:
 
 ### Phase 6: mode decomposition
 
-Status: materially progressed
-
-Do:
-
-- split `dmenu`
-- split `cclip`
-- keep run, render, and command logic separate
+Status: done
 
 Progress:
 
@@ -746,7 +722,11 @@ Progress:
 - event handling and maintenance actions now live in dedicated launcher modules
 - `dmenu` has been split into dedicated modules (`events`, `options`, `render`, `parse`)
 - `cclip` is now split across dedicated runtime modules
-  (`events`, `render`, `image`, `tags`, `commands`, `items`, `state`, `session`)
+  (`events/`, `render/`, `image/`, `tags`, `commands`, `items`, `state`, `session`)
+- cclip item modeling now lives in `modes/cclip/model.rs`
+- cclip tag metadata formatting/storage now lives in `modes/cclip/metadata.rs`
+- cclip render orchestration now lives in `modes/cclip/render/`
+- cclip image runtime now lives in `modes/cclip/image/`
 - `cclip/run.rs` is now 116 lines instead of 1,338
 
 Acceptance:
@@ -757,13 +737,7 @@ Acceptance:
 
 ### Phase 7: desktop and platform split
 
-Status: largely done, final cleanup remains
-
-Do:
-
-- split `desktop/app.rs`
-- finish centralizing paths, locks, and process wrappers
-- keep compatibility unless a migration note says otherwise
+Status: done
 
 Progress:
 
@@ -824,15 +798,15 @@ Do not:
 - optimize ranking performance before the ranking logic is isolated
 - hide compatibility breaks inside "cleanup"
 
-## First implementation steps
+## Follow-up work
 
-From the current branch state, the next order is:
+The refactor plan itself is complete.
+Future work should be handled as normal targeted maintenance:
 
 1. Keep the branch green at all times.
-2. Continue ranking/query boundary cleanup and add stronger ranking fixtures.
-3. Expand integration and snapshot coverage (help text, config merge, dmenu/cclip behavior).
-4. Finish the remaining shared render/TUI extractions where the duplication is real.
-5. Keep the ADR set updated when decisions materially change.
+2. Add fixture coverage where behavior is especially user-visible or parser-heavy.
+3. Keep the ADR set updated when decisions materially change.
+4. Treat any future large-file growth as new debt and split early instead of repeating this plan.
 
 ## References
 

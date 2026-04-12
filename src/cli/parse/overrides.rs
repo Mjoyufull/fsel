@@ -1,84 +1,16 @@
-use super::error::CliError;
-use super::help::unknown_argument_help;
-use super::launch::{parse_launch_prefix, set_launch_prefix, set_systemd_run, set_uwsm};
-use super::types::{MatchMode, Opts};
-use super::{CliCommand, validate};
-use crate::config::FselConfig;
+use super::helpers::{parse_column_list, value_as_string};
+use crate::cli::error::CliError;
+use crate::cli::help::unknown_argument_help;
+use crate::cli::launch::{parse_launch_prefix, set_launch_prefix, set_systemd_run, set_uwsm};
+use crate::cli::{CliCommand, MatchMode, Opts};
 use lexopt::prelude::*;
-use std::env;
-use std::path::PathBuf;
 
-enum OverridesResult {
+pub(super) enum OverridesResult {
     Continue(usize),
-    Command(Box<CliCommand>),
+    Command(CliCommand),
 }
 
-pub fn parse() -> Result<CliCommand, CliError> {
-    parse_from(env::args())
-}
-
-pub(crate) fn parse_from<I, S>(args: I) -> Result<CliCommand, CliError>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<String>,
-{
-    let args = collect_args(args);
-    let config = FselConfig::new(find_config_path(&args))?;
-    parse_with_config(&args, config)
-}
-
-fn parse_with_config(args: &[String], config: FselConfig) -> Result<CliCommand, CliError> {
-    let program_name = args.first().cloned().unwrap_or_else(|| "fsel".to_string());
-    let mut default = Opts::default();
-    super::from_config::apply_config_defaults(&mut default, &config);
-
-    if program_name.ends_with("dmenu") {
-        default.dmenu_mode = true;
-    }
-
-    let mut parser = build_parser(args, &mut default);
-    let cli_launch_methods = match parse_cli_overrides(&mut parser, &mut default, &program_name)? {
-        OverridesResult::Continue(count) => count,
-        OverridesResult::Command(command) => return Ok(*command),
-    };
-
-    validate::validate(&mut default, cli_launch_methods)?;
-    Ok(CliCommand::Run(Box::new(default)))
-}
-
-fn collect_args<I, S>(args: I) -> Vec<String>
-where
-    I: IntoIterator<Item = S>,
-    S: Into<String>,
-{
-    let mut args: Vec<String> = args.into_iter().map(Into::into).collect();
-    if args.is_empty() {
-        args.push("fsel".to_string());
-    }
-    args
-}
-
-fn find_config_path(args: &[String]) -> Option<PathBuf> {
-    let mut index = 1;
-    while index < args.len() {
-        if (args[index] == "-c" || args[index] == "--config") && index + 1 < args.len() {
-            return Some(PathBuf::from(&args[index + 1]));
-        }
-        index += 1;
-    }
-    None
-}
-
-fn build_parser(args: &[String], default: &mut Opts) -> lexopt::Parser {
-    if let Some(search_pos) = args.iter().position(|arg| arg == "-ss") {
-        default.search_string = Some(args[search_pos + 1..].join(" "));
-        return lexopt::Parser::from_args(args[..search_pos].iter().skip(1).cloned());
-    }
-
-    lexopt::Parser::from_args(args.iter().skip(1).cloned())
-}
-
-fn parse_cli_overrides(
+pub(super) fn parse_cli_overrides(
     parser: &mut lexopt::Parser,
     default: &mut Opts,
     program_name: &str,
@@ -236,21 +168,17 @@ fn parse_cli_overrides(
                 default.verbose = Some(default.verbose.unwrap_or(0) + 1);
             }
             Short('h') => {
-                return Ok(OverridesResult::Command(Box::new(
-                    CliCommand::PrintShortHelp {
-                        program_name: program_name.to_string(),
-                    },
-                )));
+                return Ok(OverridesResult::Command(CliCommand::PrintShortHelp {
+                    program_name: program_name.to_string(),
+                }));
             }
             Short('H') | Long("help") => {
-                return Ok(OverridesResult::Command(Box::new(
-                    CliCommand::PrintLongHelp {
-                        program_name: program_name.to_string(),
-                    },
-                )));
+                return Ok(OverridesResult::Command(CliCommand::PrintLongHelp {
+                    program_name: program_name.to_string(),
+                }));
             }
             Short('V') | Long("version") => {
-                return Ok(OverridesResult::Command(Box::new(CliCommand::PrintVersion)));
+                return Ok(OverridesResult::Command(CliCommand::PrintVersion));
             }
             Value(_) => return Err(arg.unexpected().into()),
             _ => return Err(report_unknown_argument(arg)),
@@ -287,28 +215,6 @@ fn parse_tag(parser: &mut lexopt::Parser, default: &mut Opts) -> Result<(), CliE
     Ok(())
 }
 
-fn value_as_string(
-    parser: &mut lexopt::Parser,
-    error_message: &'static str,
-) -> Result<String, CliError> {
-    parser
-        .value()?
-        .into_string()
-        .map_err(|_| CliError::message(error_message))
-}
-
-fn parse_column_list(
-    parser: &mut lexopt::Parser,
-    error_message: &'static str,
-) -> Result<Vec<usize>, CliError> {
-    let columns = value_as_string(parser, "Column specification must be valid UTF-8")?;
-    columns
-        .split(',')
-        .map(|part| part.trim().parse::<usize>())
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| CliError::message(error_message))
-}
-
 fn report_unknown_argument(arg: lexopt::Arg<'_>) -> CliError {
     let error_msg = match arg {
         Long(name) => match name {
@@ -329,36 +235,4 @@ fn report_unknown_argument(arg: lexopt::Arg<'_>) -> CliError {
     };
 
     CliError::message(unknown_argument_help(error_msg))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{CliCommand, CliError, parse_with_config};
-    use crate::config::FselConfig;
-
-    fn args(values: &[&str]) -> Vec<String> {
-        values.iter().map(|value| value.to_string()).collect()
-    }
-
-    #[test]
-    fn short_help_returns_command_without_exiting() {
-        let command = parse_with_config(&args(&["fsel", "-h"]), FselConfig::default()).unwrap();
-        assert!(matches!(command, CliCommand::PrintShortHelp { .. }));
-    }
-
-    #[test]
-    fn version_returns_command_without_exiting() {
-        let command =
-            parse_with_config(&args(&["fsel", "--version"]), FselConfig::default()).unwrap();
-        assert!(matches!(command, CliCommand::PrintVersion));
-    }
-
-    #[test]
-    fn invalid_tag_mode_returns_typed_error() {
-        let error = parse_with_config(&args(&["fsel", "--tag", "list"]), FselConfig::default())
-            .unwrap_err();
-        assert!(
-            matches!(error, CliError::Message(message) if message.contains("--tag requires --cclip mode"))
-        );
-    }
 }
