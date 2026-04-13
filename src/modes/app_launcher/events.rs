@@ -36,9 +36,9 @@ fn handle_key_event(
     } else if cli.keybinds.matches_down(key.code, key.modifiers) {
         Message::MoveDown
     } else if cli.keybinds.matches_left(key.code, key.modifiers) {
-        Message::MoveFirst
+        Message::MoveUp
     } else if cli.keybinds.matches_right(key.code, key.modifiers) {
-        Message::MoveLast
+        Message::MoveDown
     } else if cli.keybinds.matches_backspace(key.code, key.modifiers) {
         Message::Backspace
     } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
