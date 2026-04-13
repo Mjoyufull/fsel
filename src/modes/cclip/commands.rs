@@ -91,7 +91,16 @@ fn print_tag_list(cli: &Opts) -> Result<()> {
     println!("Available tags:");
     for tag in tags {
         if cli.verbose.unwrap_or(0) >= 2 {
-            let items = super::scan::get_clipboard_history_by_tag(&tag).unwrap_or_default();
+            let items = match super::scan::get_clipboard_history_by_tag(&tag) {
+                Ok(items) => items,
+                Err(error) => {
+                    eprintln!(
+                        "Failed to load clipboard history for tag '{}': {}",
+                        tag, error
+                    );
+                    Vec::new()
+                }
+            };
             println!("  {} ({} items)", tag, items.len());
         } else {
             println!("  {}", tag);

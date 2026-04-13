@@ -124,14 +124,10 @@ fn score_candidate(
         let program_utf32 = Utf32Str::new(program_name, &mut program_chars);
         let mut name_chars = Vec::new();
         let name_utf32 = Utf32Str::new(app.name.as_str(), &mut name_chars);
-        let name_score = matcher
-            .fuzzy_match(name_utf32, program_utf32)
-            .unwrap_or(0) as i64;
+        let name_score = matcher.fuzzy_match(name_utf32, program_utf32).unwrap_or(0) as i64;
         let mut exec_chars = Vec::new();
         let exec_utf32 = Utf32Str::new(exec_name, &mut exec_chars);
-        let exec_score = matcher
-            .fuzzy_match(exec_utf32, program_utf32)
-            .unwrap_or(0) as i64;
+        let exec_score = matcher.fuzzy_match(exec_utf32, program_utf32).unwrap_or(0) as i64;
         let best_score = std::cmp::max(name_score, exec_score * 2);
 
         if best_score == 0 {
@@ -143,17 +139,18 @@ fn score_candidate(
 
     if app.pinned {
         if final_score < 700_000 {
-            final_score += 500_000;
+            final_score = final_score.saturating_add(500_000);
         } else {
-            final_score += 50_000;
+            final_score = final_score.saturating_add(50_000);
         }
     }
 
     if app.history > 0 {
+        let history = i64::try_from(app.history).unwrap_or(i64::MAX);
         final_score = if final_score >= 700_000 {
-            final_score + app.history as i64
+            final_score.saturating_add(history)
         } else {
-            final_score * app.history as i64
+            final_score.saturating_mul(history)
         };
     }
 

@@ -79,7 +79,7 @@ pub(super) fn query_bucket(
     let exec_exact = exec_name_lower == query_lower;
     let name_prefix = app_name_lower.starts_with(query_lower);
     let exec_prefix = exec_name_lower.starts_with(query_lower);
-    let within_depth = query_lower.len() <= prefix_depth;
+    let within_depth = query_lower.chars().count() <= prefix_depth;
 
     let name_word = matches_word_start(&app_name_lower, query_lower);
     let exec_word = matches_word_start(&exec_name_lower, query_lower);

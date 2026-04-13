@@ -14,9 +14,7 @@ pub(crate) fn setup_terminal(disable_mouse: bool) -> Result<()> {
         return Err(error).wrap_err("Failed to enter alternate screen");
     }
 
-    if !disable_mouse
-        && let Err(error) = io::stderr().execute(EnableMouseCapture)
-    {
+    if !disable_mouse && let Err(error) = io::stderr().execute(EnableMouseCapture) {
         let _ = io::stderr().execute(LeaveAlternateScreen);
         let _ = disable_raw_mode();
         return Err(error).wrap_err("Failed to enable mouse capture");

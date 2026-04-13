@@ -199,13 +199,17 @@ mod tests {
         };
 
         {
-            let mut state = DISPLAY_STATE.lock().unwrap_or_else(|error| error.into_inner());
+            let mut state = DISPLAY_STATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
             *state = DisplayState::Loading("42".to_string());
         }
 
         runtime.restore_display_state();
 
-        let state = DISPLAY_STATE.lock().unwrap_or_else(|error| error.into_inner());
+        let state = DISPLAY_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         assert_eq!(*state, DisplayState::Loading("42".to_string()));
     }
 }

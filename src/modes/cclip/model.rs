@@ -109,7 +109,8 @@ impl CclipItem {
     ) -> String {
         let base_name =
             self.get_display_name_with_formatter_options(formatter, include_color_names);
-        format!("{:<3} {}", self.rowid, base_name)
+        let id_width = self.rowid.to_string().len().max(3);
+        format!("{:<width$} {}", self.rowid, base_name, width = id_width)
     }
 }
 

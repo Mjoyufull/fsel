@@ -9,7 +9,9 @@ use super::{DmenuUI, tag_mode::tag_mode_lines};
 impl<'a> DmenuUI<'a> {
     /// Update `self.text` to show content for current selection.
     pub fn info(&mut self, color: Color) {
-        let panel_width = crossterm::terminal::size().map(|(width, _)| width).unwrap_or(0);
+        let panel_width = crossterm::terminal::size()
+            .map(|(width, _)| width)
+            .unwrap_or(0);
         self.info_with_image_support(color, false, false, panel_width, 0);
     }
 

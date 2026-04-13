@@ -45,7 +45,12 @@ pub fn kill_process_sigkill_result(pid: i32) -> io::Result<()> {
 #[allow(unsafe_code)]
 pub fn process_exists(pid: i32) -> bool {
     // SAFETY: `kill(pid, 0)` is the standard existence probe and has no extra preconditions.
-    unsafe { libc::kill(pid, 0) == 0 }
+    let result = unsafe { libc::kill(pid, 0) };
+    if result == 0 {
+        true
+    } else {
+        io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
 }
 
 pub(crate) fn process_matches_current_exe(pid: i32) -> io::Result<bool> {

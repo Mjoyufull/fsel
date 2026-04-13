@@ -232,7 +232,8 @@ impl Keybinds {
             && self.tag.iter().any(|binding| match binding {
                 KeyBind::Simple(key) => parse_key(key).0 == code,
                 KeyBind::WithMod { key, modifiers } => {
-                    parse_key(key).0 == code && !parse_modifiers(modifiers).contains(KeyModifiers::ALT)
+                    parse_key(key).0 == code
+                        && !parse_modifiers(modifiers).contains(KeyModifiers::ALT)
                 }
             })
     }

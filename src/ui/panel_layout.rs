@@ -10,10 +10,12 @@ pub(crate) struct PanelLayout {
 }
 
 pub(crate) fn effective_content_height(total_height: u16, content_panel_percent: u16) -> u16 {
-    if content_panel_percent == 0 {
+    if total_height == 0 || content_panel_percent == 0 {
         0
     } else {
-        ((total_height as f32 * content_panel_percent as f32 / 100.0).round() as u16).max(3)
+        ((total_height as f32 * content_panel_percent as f32 / 100.0).round() as u16)
+            .max(3)
+            .min(total_height)
     }
 }
 
@@ -113,6 +115,12 @@ mod tests {
     #[test]
     fn effective_content_height_keeps_visible_panels_usable() {
         assert_eq!(effective_content_height(20, 1), 3);
+    }
+
+    #[test]
+    fn effective_content_height_respects_zero_and_small_totals() {
+        assert_eq!(effective_content_height(0, 50), 0);
+        assert_eq!(effective_content_height(2, 50), 2);
     }
 
     #[test]

@@ -99,7 +99,6 @@ fn build_tagged_list_item<'a>(
     spans.push(Span::styled("]", Style::default().fg(first_tag_color)));
     if tag_end + 1 < item.display_text.len() {
         let suffix = &item.display_text[tag_end + 1..];
-        let suffix = suffix.strip_prefix(' ').unwrap_or(suffix);
         if !suffix.is_empty() {
             spans.push(Span::raw(suffix));
         }
@@ -127,4 +126,30 @@ fn fallback_tag_display(
     }
     display.push_str(tag_name);
     display
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Item;
+    use ratatui::style::{Color, Style};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::ListItem;
+
+    #[test]
+    fn tagged_list_item_preserves_spacing_after_closing_bracket() {
+        let mut item = Item::new_simple("row".into(), "[tag] content".into(), 1);
+        item.tags = Some(vec!["tag".to_string()]);
+        let formatter =
+            crate::modes::cclip::TagMetadataFormatter::new(std::collections::HashMap::new());
+
+        let rendered = item.to_list_item(Some(&formatter));
+        let expected = ListItem::new(Line::from(vec![
+            Span::styled("[", Style::default().fg(Color::Green)),
+            Span::styled("tag", Style::default().fg(Color::Green)),
+            Span::styled("]", Style::default().fg(Color::Green)),
+            Span::raw(" content"),
+        ]));
+
+        assert_eq!(rendered, expected);
+    }
 }

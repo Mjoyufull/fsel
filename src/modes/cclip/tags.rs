@@ -41,6 +41,8 @@ pub(super) fn begin_tag_creation(
             available_tags,
             selected_tag: None,
         };
+    } else {
+        ui.set_temp_message("No item selected - cannot create tag".to_string());
     }
 
     Ok(())
@@ -71,14 +73,10 @@ pub(super) fn begin_tag_removal(ui: &mut DmenuUI<'_>) {
             }
             Err(error) => {
                 ui.set_temp_message(format!("Failed to parse item: {}", error));
-                ui.tag_mode = TagMode::RemovingTag {
-                    input: String::new(),
-                    tags: Vec::new(),
-                    selected: None,
-                    selected_item,
-                };
             }
         }
+    } else {
+        ui.set_temp_message("No item selected - cannot remove tag".to_string());
     }
 }
 
@@ -194,35 +192,43 @@ fn submit_tag_color(
         false
     };
 
-    if let Some(item_line) = selected_item
-        && let Some(rowid) = rowid_from_item_line(&item_line)
-    {
-        if !is_editing && let Err(error) = super::select::tag_item(rowid, &tag_name) {
-            ctx.ui
-                .set_temp_message(format!("Failed to tag item: {}", error));
-            ctx.ui.tag_mode = TagMode::Normal;
-            return;
-        }
+    let Some(item_line) = selected_item else {
+        ctx.ui.set_temp_message("No item selected".to_string());
+        ctx.ui.tag_mode = TagMode::Normal;
+        return;
+    };
+    let Some(rowid) = rowid_from_item_line(&item_line) else {
+        ctx.ui
+            .set_temp_message("Unable to determine item id".to_string());
+        ctx.ui.tag_mode = TagMode::Normal;
+        return;
+    };
 
-        let mut updated_metadata = ctx.tag_metadata_map.clone();
-        updated_metadata.insert(
-            tag_name.clone(),
-            TagMetadata {
-                name: tag_name.clone(),
-                color,
-                emoji,
-            },
-        );
-        if let Err(error) = super::save_tag_metadata(ctx.db, &updated_metadata) {
-            ctx.ui
-                .set_temp_message(format!("Failed to save tag metadata: {}", error));
-            ctx.ui.tag_mode = TagMode::Normal;
-            return;
-        }
-        *ctx.tag_metadata_map = updated_metadata;
-        *ctx.tag_metadata_formatter = TagMetadataFormatter::new(ctx.tag_metadata_map.clone());
-        reload_history(ctx);
+    if !is_editing && let Err(error) = super::select::tag_item(rowid, &tag_name) {
+        ctx.ui
+            .set_temp_message(format!("Failed to tag item: {}", error));
+        ctx.ui.tag_mode = TagMode::Normal;
+        return;
     }
+
+    let mut updated_metadata = ctx.tag_metadata_map.clone();
+    updated_metadata.insert(
+        tag_name.clone(),
+        TagMetadata {
+            name: tag_name.clone(),
+            color,
+            emoji,
+        },
+    );
+    if let Err(error) = super::save_tag_metadata(ctx.db, &updated_metadata) {
+        ctx.ui
+            .set_temp_message(format!("Failed to save tag metadata: {}", error));
+        ctx.ui.tag_mode = TagMode::Normal;
+        return;
+    }
+    *ctx.tag_metadata_map = updated_metadata;
+    *ctx.tag_metadata_formatter = TagMetadataFormatter::new(ctx.tag_metadata_map.clone());
+    reload_history(ctx);
 
     ctx.ui.tag_mode = TagMode::Normal;
 }
@@ -232,20 +238,31 @@ fn submit_tag_removal(
     input: String,
     selected_item: Option<String>,
 ) {
-    if let Some(item_line) = selected_item
-        && let Some(rowid) = rowid_from_item_line(&item_line)
-    {
-        let tag_to_remove = if input.trim().is_empty() {
-            None
-        } else {
-            Some(input.trim())
-        };
+    let Some(item_line) = selected_item else {
+        ctx.ui.set_temp_message("No item selected".to_string());
+        ctx.ui.tag_mode = TagMode::Normal;
+        return;
+    };
+    let Some(rowid) = rowid_from_item_line(&item_line) else {
+        ctx.ui
+            .set_temp_message("Unable to determine item id".to_string());
+        ctx.ui.tag_mode = TagMode::Normal;
+        return;
+    };
 
-        match super::select::untag_item(rowid, tag_to_remove) {
-            Err(error) => ctx
-                .ui
-                .set_temp_message(format!("Failed to remove tag: {}", error)),
-            Ok(()) => reload_history(ctx),
+    let trimmed_input = input.trim();
+    let tag_to_remove = (!trimmed_input.is_empty()).then_some(trimmed_input);
+
+    match super::select::untag_item(rowid, tag_to_remove) {
+        Err(error) => ctx
+            .ui
+            .set_temp_message(format!("Failed to remove tag: {}", error)),
+        Ok(()) => {
+            reload_history(ctx);
+            ctx.ui.set_temp_message(match tag_to_remove {
+                Some(tag) => format!("Removed tag '{tag}'"),
+                None => "Removed all tags".to_string(),
+            });
         }
     }
 

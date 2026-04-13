@@ -56,7 +56,13 @@ struct LocalizedField {
 impl LocalizedField {
     fn set(&mut self, key: &str, value: &str, locales: &[String]) {
         if let Some(bracket_pos) = key.find('[') {
-            let locale_part = &key[bracket_pos + 1..key.len() - 1];
+            let Some(closing_pos) = key[bracket_pos + 1..]
+                .find(']')
+                .map(|offset| bracket_pos + 1 + offset)
+            else {
+                return;
+            };
+            let locale_part = &key[bracket_pos + 1..closing_pos];
             if let Some(rank) = locales.iter().position(|locale| locale == locale_part) {
                 let should_replace = self
                     .localized
@@ -186,8 +192,9 @@ impl App {
         let name = name
             .into_value()
             .map(|value| match action {
-                Some(action) => format!("{} ({value})", action.from),
+                Some(action) if !action.from.is_empty() => format!("{} ({value})", action.from),
                 None => value,
+                Some(_) => value,
             })
             .unwrap_or_else(|| "Unknown".to_string());
         let command = exec.ok_or_else(|| eyre!("Missing required Exec field"))?;
@@ -284,5 +291,29 @@ mod tests {
         field.set("Name", "Fallback", &locales);
 
         assert_eq!(field.into_value().as_deref(), Some("US English"));
+    }
+
+    #[test]
+    fn malformed_localized_key_falls_back_without_panicking() {
+        let app = App::parse(
+            "[Desktop Entry]\nType=Application\nName[en_US=Broken\nName=Fallback\nExec=/usr/bin/fallback",
+            false,
+        )
+        .expect("desktop entry should parse even with malformed localized key");
+
+        assert_eq!(app.name, "Fallback");
+    }
+
+    #[test]
+    fn parse_action_with_empty_from_avoids_leading_space() {
+        let action = Action::default().name("Open").from("");
+        let app = App::parse_action(
+            "[Desktop Entry]\nType=Application\nName=Editor\nExec=/usr/bin/editor\nActions=Open;\n\n[Desktop Action Open]\nName=Open\nExec=/usr/bin/editor --open",
+            &action,
+            false,
+        )
+        .expect("desktop action should parse");
+
+        assert_eq!(app.name, "Open");
     }
 }

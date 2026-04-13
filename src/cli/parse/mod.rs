@@ -103,4 +103,15 @@ mod tests {
             matches!(error, CliError::Message(message) if message.contains("--tag requires --cclip mode"))
         );
     }
+
+    #[test]
+    fn tag_list_does_not_consume_following_flag_as_tag_name() {
+        let command = parse_with_config(
+            &args(&["fsel", "--cclip", "--tag", "list", "--help"]),
+            FselConfig::default(),
+        )
+        .unwrap();
+
+        assert!(matches!(command, CliCommand::PrintLongHelp { .. }));
+    }
 }

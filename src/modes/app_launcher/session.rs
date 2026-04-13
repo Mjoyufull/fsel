@@ -75,7 +75,9 @@ fn ensure_single_launcher_instance(
         if holder_pids.is_empty() {
             match owner_state {
                 LauncherOwner::Stale => {
-                    if lock_contents.is_empty() || remove_lockfile_if_unchanged(lock_path, &lock_contents)? {
+                    if lock_contents.is_empty()
+                        || remove_lockfile_if_unchanged(lock_path, &lock_contents)?
+                    {
                         continue;
                     }
                 }
@@ -356,8 +358,7 @@ mod tests {
 
         let message = error.to_string();
         assert!(
-            message.contains("Fsel is already running")
-                || message.contains("Refusing to start"),
+            message.contains("Fsel is already running") || message.contains("Refusing to start"),
             "unexpected error message: {message}"
         );
         let _ = fs::remove_dir_all(dir);

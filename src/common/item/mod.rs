@@ -72,6 +72,7 @@ impl<'a> From<&'a Item> for ListItem<'a> {
     }
 }
 
+/// Equality intentionally mirrors the ordering keys so ordered collections stay consistent.
 impl PartialEq for Item {
     fn eq(&self, other: &Self) -> bool {
         self.score == other.score && self.line_number == other.line_number

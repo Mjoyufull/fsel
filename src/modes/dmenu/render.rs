@@ -134,8 +134,12 @@ pub(super) fn draw_frame(
     .wrap(Wrap { trim: false });
 
     if matches!(options.graphics_adapter, crate::ui::GraphicsAdapter::Kitty) {
-        frame.render_widget(Clear, chunks[content_panel_index]);
-        frame.render_widget(Clear, chunks[items_panel_index]);
+        if show_content_panel && (!options.hide_before_typing || !ui.query.is_empty()) {
+            frame.render_widget(Clear, chunks[content_panel_index]);
+        }
+        if !options.prompt_only && (!options.hide_before_typing || !ui.query.is_empty()) {
+            frame.render_widget(Clear, chunks[items_panel_index]);
+        }
         frame.render_widget(Clear, chunks[input_panel_index]);
     }
 

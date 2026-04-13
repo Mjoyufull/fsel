@@ -67,12 +67,14 @@ pub struct App {
 impl App {
     /// Returns a corrected score that blends history and matching score.
     pub fn corrected_score(&self) -> i64 {
+        let history = i64::try_from(self.history).unwrap_or(i64::MAX);
+
         if self.history < 1 {
             self.score
         } else if self.score < 1 {
-            self.history as i64
+            history
         } else {
-            self.score.saturating_mul(self.history as i64)
+            self.score.saturating_mul(history)
         }
     }
 }

@@ -1,8 +1,8 @@
 use eyre::{Result, WrapErr, eyre};
 use std::fs;
+use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
-use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -151,7 +151,9 @@ fn wait_for_process_exit(pid: i32) -> Result<()> {
 
     while crate::platform::process::process_exists(pid) {
         if waited_ms >= TOTAL_WAIT_MS {
-            return Err(eyre!("Existing fsel cclip process (pid {pid}) refused to exit"));
+            return Err(eyre!(
+                "Existing fsel cclip process (pid {pid}) refused to exit"
+            ));
         }
 
         thread::sleep(Duration::from_millis(CHECK_INTERVAL_MS));

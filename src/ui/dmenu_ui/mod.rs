@@ -50,7 +50,7 @@ pub struct DmenuUI<'a> {
 impl<'a> DmenuUI<'a> {
     /// Creates a new DmenuUI from a `Vec<Item>`.
     pub fn new(items: Vec<Item>, wrap_long_lines: bool, show_line_numbers: bool) -> DmenuUI<'a> {
-        DmenuUI {
+        let mut ui = DmenuUI {
             shown: vec![],
             hidden: items,
             selected: None,
@@ -66,7 +66,9 @@ impl<'a> DmenuUI<'a> {
             content_requests: HashMap::new(),
             temp_message: None,
             matcher: Matcher::new(Config::DEFAULT.match_paths()),
-        }
+        };
+        ui.filter();
+        ui
     }
 
     /// Set match mode.

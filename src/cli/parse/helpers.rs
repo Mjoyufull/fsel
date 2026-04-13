@@ -18,10 +18,7 @@ pub(super) fn parse_column_list(
     columns
         .split(',')
         .map(|part| {
-            let column = part
-                .trim()
-                .parse::<usize>()
-                .map_err(|_| "invalid column")?;
+            let column = part.trim().parse::<usize>().map_err(|_| "invalid column")?;
             if column == 0 {
                 return Err("column indices are 1-based");
             }

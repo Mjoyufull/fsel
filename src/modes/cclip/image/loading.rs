@@ -73,9 +73,7 @@ impl ImageRuntime {
                         matches!(&*state, DisplayState::Loading(id) if id == &rowid)
                     };
 
-                    if should_publish
-                        && let Ok(mut manager_lock) = manager_clone.try_lock()
-                    {
+                    if should_publish && let Ok(mut manager_lock) = manager_clone.try_lock() {
                         manager_lock.set_image(&rowid);
                     }
                 }
@@ -114,7 +112,8 @@ impl ImageRuntime {
                         let mut state = DISPLAY_STATE
                             .lock()
                             .unwrap_or_else(|error| error.into_inner());
-                        *state = DisplayState::Failed("Task panicked during image load".to_string());
+                        *state =
+                            DisplayState::Failed("Task panicked during image load".to_string());
                     }
                 }
             }

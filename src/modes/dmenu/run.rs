@@ -6,8 +6,8 @@ use eyre::{Result, WrapErr};
 
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::ListState;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::io;
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use super::events::{LoopOutcome, handle_key_event, handle_mouse_event};
 use super::options::DmenuOptions;

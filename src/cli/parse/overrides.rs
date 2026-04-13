@@ -193,7 +193,7 @@ fn parse_tag(parser: &mut lexopt::Parser, default: &mut Opts) -> Result<(), CliE
     match tag_arg.as_str() {
         "list" => {
             default.cclip_tag_list = true;
-            if let Ok(value) = parser.value() {
+            if let Some(value) = parser.optional_value() {
                 default.cclip_tag = Some(
                     value
                         .into_string()

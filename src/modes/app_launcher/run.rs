@@ -8,6 +8,7 @@ use eyre::{Result, WrapErr};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use scopeguard::defer;
+use std::cell::Cell;
 use std::io;
 use std::time::Duration;
 
@@ -22,8 +23,11 @@ pub async fn run(cli: Opts) -> Result<()> {
     }
 
     crate::ui::terminal::setup_terminal(cli.disable_mouse)?;
+    let terminal_active = Cell::new(true);
     defer! {
-        let _ = crate::ui::terminal::shutdown_terminal(cli.disable_mouse);
+        if terminal_active.get() {
+            let _ = crate::ui::terminal::shutdown_terminal(cli.disable_mouse);
+        }
     }
 
     let data_dir = crate::app::paths::runtime_data_dir()?;
@@ -128,6 +132,7 @@ pub async fn run(cli: Opts) -> Result<()> {
                 }
 
                 crate::ui::terminal::shutdown_terminal(cli.disable_mouse)?;
+                terminal_active.set(false);
 
                 if cli.no_exec {
                     println!("{}", app.command);
@@ -142,6 +147,7 @@ pub async fn run(cli: Opts) -> Result<()> {
 
     if !state.should_launch {
         crate::ui::terminal::shutdown_terminal(cli.disable_mouse)?;
+        terminal_active.set(false);
     }
 
     if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
