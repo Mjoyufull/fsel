@@ -30,6 +30,7 @@ pub(crate) fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> Re
         desktop::application_dirs(),
         &db,
         cli.filter_desktop,
+        cli.filter_actions,
         cli.list_executables_in_path,
     );
 

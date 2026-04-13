@@ -181,6 +181,7 @@ pub fn read_with_options(
     dirs: Vec<impl Into<PathBuf>>,
     db: &std::sync::Arc<redb::Database>,
     filter_desktop: bool,
+    filter_actions: bool,
     list_executables: bool,
 ) -> mpsc::Receiver<App> {
     let (sender, receiver) = mpsc::channel();
@@ -213,7 +214,7 @@ pub fn read_with_options(
 
                 let app_with_history = history_cache_ref.apply_to_app(app.clone());
 
-                if let Some(actions) = &app.actions {
+                if !filter_actions && let Some(actions) = &app.actions {
                     let contents = match &file_contents {
                         Some(contents) => Some(contents.clone()),
                         None => fs::read_to_string(file_path_ref).ok(),
@@ -261,4 +262,65 @@ pub fn read_with_options(
     });
 
     receiver
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_with_options;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "fsel-discover-{label}-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        dir
+    }
+
+    fn collect_names(filter_actions: bool) -> Vec<String> {
+        let dir = test_temp_dir(if filter_actions { "filtered" } else { "all" });
+        let db_path = dir.join("history.redb");
+        let desktop_path = dir.join("editor.desktop");
+        fs::write(
+            &desktop_path,
+            "[Desktop Entry]\nType=Application\nName=Editor\nExec=/usr/bin/editor\nActions=OpenWindow;\n\n[Desktop Action OpenWindow]\nName=Open Window\nExec=/usr/bin/editor --new-window\n",
+        )
+        .expect("desktop entry should be written");
+
+        let db = Arc::new(redb::Database::create(&db_path).expect("database should be created"));
+        let receiver = read_with_options(vec![dir.clone()], &db, false, filter_actions, false);
+        let mut names = Vec::new();
+        while let Ok(app) = receiver.recv() {
+            names.push(app.name);
+        }
+
+        let _ = fs::remove_dir_all(dir);
+        names
+    }
+
+    #[test]
+    fn read_with_options_filters_desktop_actions_when_requested() {
+        let names = collect_names(true);
+
+        assert_eq!(names, vec!["Editor".to_string()]);
+    }
+
+    #[test]
+    fn read_with_options_keeps_desktop_actions_when_disabled() {
+        let mut names = collect_names(false);
+        names.sort();
+
+        assert_eq!(
+            names,
+            vec!["Editor".to_string(), "Editor (Open Window)".to_string()]
+        );
+    }
 }

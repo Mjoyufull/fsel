@@ -24,6 +24,7 @@ pub struct FselConfig {
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct AppLauncherConfig {
     pub filter_desktop: Option<bool>,
+    pub filter_actions: Option<bool>,
     pub list_executables_in_path: Option<bool>,
     pub hide_before_typing: Option<bool>,
     pub launch_prefix: Option<Vec<String>>,
@@ -43,6 +44,8 @@ pub struct GeneralConfig {
     pub terminal_launcher: String,
     #[serde(default = "super::defaults::default_true")]
     pub filter_desktop: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub filter_actions: bool,
     #[serde(default)]
     pub list_executables_in_path: bool,
     #[serde(default)]

@@ -14,6 +14,13 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
     )?;
     set_optional_parsed(
         source,
+        "FSEL_APP_LAUNCHER_FILTER_ACTIONS",
+        &mut cfg.app_launcher.filter_actions,
+        cfg.general.filter_actions,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_optional_parsed(
+        source,
         "FSEL_APP_LAUNCHER_LIST_EXECUTABLES_IN_PATH",
         &mut cfg.app_launcher.list_executables_in_path,
         cfg.general.list_executables_in_path,

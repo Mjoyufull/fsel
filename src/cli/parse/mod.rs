@@ -76,6 +76,7 @@ fn build_parser(args: &[String], default: &mut super::types::Opts) -> lexopt::Pa
 #[cfg(test)]
 mod tests {
     use super::{CliCommand, CliError, parse_with_config};
+    use crate::cli::Opts;
     use crate::config::FselConfig;
 
     fn args(values: &[&str]) -> Vec<String> {
@@ -113,5 +114,28 @@ mod tests {
         .unwrap();
 
         assert!(matches!(command, CliCommand::PrintLongHelp { .. }));
+    }
+
+    #[test]
+    fn filter_actions_flag_parses_yes_and_no_forms() {
+        let enabled =
+            parse_with_config(&args(&["fsel", "--filter-actions"]), FselConfig::default()).unwrap();
+        let disabled = parse_with_config(
+            &args(&["fsel", "--filter-actions=no"]),
+            FselConfig::default(),
+        )
+        .unwrap();
+
+        let CliCommand::Run(enabled_opts) = enabled else {
+            panic!("expected run command");
+        };
+        let CliCommand::Run(disabled_opts) = disabled else {
+            panic!("expected run command");
+        };
+
+        let enabled_opts: Box<Opts> = enabled_opts;
+        let disabled_opts: Box<Opts> = disabled_opts;
+        assert!(enabled_opts.filter_actions);
+        assert!(!disabled_opts.filter_actions);
     }
 }

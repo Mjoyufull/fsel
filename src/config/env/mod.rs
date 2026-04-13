@@ -130,4 +130,18 @@ prefix_depth = 2
 
         assert_eq!(config.ui.cursor, "");
     }
+
+    #[test]
+    fn applies_filter_actions_env_overrides() {
+        let mut config = FselConfig::default();
+        let source = MapSource::new(&[
+            ("FSEL_FILTER_ACTIONS", "false"),
+            ("FSEL_APP_LAUNCHER_FILTER_ACTIONS", "true"),
+        ]);
+
+        apply_overrides(&mut config, &source).unwrap();
+
+        assert!(!config.general.filter_actions);
+        assert_eq!(config.app_launcher.filter_actions, Some(true));
+    }
 }

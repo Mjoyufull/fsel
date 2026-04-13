@@ -47,6 +47,7 @@ pub async fn run(cli: Opts) -> Result<()> {
         crate::desktop::application_dirs(),
         &db,
         cli.filter_desktop,
+        cli.filter_actions,
         cli.list_executables_in_path,
     );
 

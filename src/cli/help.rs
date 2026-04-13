@@ -29,6 +29,7 @@ Usage:
 │  ├─ --clear-cache                Delete the desktop entry cache, then exit
 │  ├─ --refresh-cache              Rescan desktop entries before showing results
 │  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn; pass =no to ignore them
+│  ├─ --filter-actions[=no]        Hide desktop actions; pass =no to keep entries like new window
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching
@@ -79,6 +80,7 @@ Usage:
 │  ├─ --clear-cache                Delete the desktop entry cache, then exit
 │  ├─ --refresh-cache              Rescan desktop entries before showing results
 │  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn; pass =no to ignore them
+│  ├─ --filter-actions[=no]        Hide desktop actions; pass =no to keep entries like new window
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching (default: fuzzy)
