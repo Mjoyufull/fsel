@@ -1,16 +1,6 @@
-use eyre::{Result, WrapErr, eyre};
+use eyre::{Result, WrapErr};
 
 use crate::cli::Opts;
-
-pub(super) fn validate_environment() -> Result<()> {
-    if !super::scan::check_cclip_available() {
-        return Err(eyre!(
-            "cclip is not available. Please install cclip and ensure it's in your PATH."
-        ));
-    }
-
-    super::scan::check_cclip_database().wrap_err("cclip database check failed")
-}
 
 pub(super) fn handle_noninteractive_mode(cli: &Opts) -> Result<bool> {
     if cli.cclip_clear_tags {

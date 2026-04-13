@@ -17,6 +17,14 @@ struct CacheEntry {
     mtime: SystemTime,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LegacyCacheEntry {
+    app: App,
+    mtime: SystemTime,
+    #[allow(dead_code)]
+    path: PathBuf,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileListCache {
@@ -200,25 +208,53 @@ fn file_list_cache_is_fresh(cache: &FileListCache, dirs: &[PathBuf]) -> bool {
 
 fn read_cached_app(table: &redb::ReadOnlyTable<&str, &[u8]>, path: &Path) -> Result<Option<App>> {
     let path_key = encode_path_key(path);
-    read_cached_app_by_key(table, &path_key)
+    if let Some(app) = read_cached_app_at_key(table, &path_key, path)? {
+        return Ok(Some(app));
+    }
+
+    let legacy_path_key = path.to_string_lossy();
+    read_cached_app_at_key(table, legacy_path_key.as_ref(), path)
 }
 
 fn read_cached_app_by_key(
     table: &redb::ReadOnlyTable<&str, &[u8]>,
     path_key: &str,
 ) -> Result<Option<App>> {
-    let Some(path) = decode_path_key(path_key) else {
-        return Ok(None);
-    };
+    if let Some(path) = decode_path_key(path_key)
+        && let Some(app) = read_cached_app_at_key(table, path_key, &path)?
+    {
+        return Ok(Some(app));
+    }
 
+    read_cached_app_at_key(table, path_key, Path::new(path_key))
+}
+
+fn read_cached_app_at_key(
+    table: &redb::ReadOnlyTable<&str, &[u8]>,
+    path_key: &str,
+    path: &Path,
+) -> Result<Option<App>> {
     if let Some(data) = table.get(path_key)?
-        && let Ok(entry) = postcard::from_bytes::<CacheEntry>(data.value())
-        && cache_entry_is_fresh(&path, &entry)
+        && let Some(entry) = deserialize_cache_entry(data.value())
+        && cache_entry_is_fresh(path, &entry)
     {
         return Ok(Some(entry.app));
     }
 
     Ok(None)
+}
+
+fn deserialize_cache_entry(data: &[u8]) -> Option<CacheEntry> {
+    if let Ok(entry) = postcard::from_bytes::<CacheEntry>(data) {
+        return Some(entry);
+    }
+
+    postcard::from_bytes::<LegacyCacheEntry>(data)
+        .ok()
+        .map(|entry| CacheEntry {
+            app: entry.app,
+            mtime: entry.mtime,
+        })
 }
 
 fn encode_path_key(path: &Path) -> String {
@@ -350,7 +386,7 @@ fn write_cached_app(
     let path_key = encode_path_key(path);
 
     if let Some(existing) = cache_table.get(path_key.as_str())?
-        && let Ok(previous_entry) = postcard::from_bytes::<CacheEntry>(existing.value())
+        && let Some(previous_entry) = deserialize_cache_entry(existing.value())
         && previous_entry.app.name != app.name
     {
         let should_remove_old_name = index_table
@@ -385,7 +421,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{DesktopCache, FileListCache, file_list_cache_is_fresh};
+    use super::{DesktopCache, FileListCache, LegacyCacheEntry, file_list_cache_is_fresh};
     use crate::desktop::App;
     use std::collections::HashMap;
     use std::fs;
@@ -468,6 +504,67 @@ mod tests {
 
         assert_eq!(loaded.name, app.name);
         assert_eq!(loaded.command, app.command);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_cache_keys_remain_readable_after_upgrade() {
+        let dir = test_temp_dir("legacy-cache");
+        let db_path = dir.join("desktop-cache.redb");
+        let db = Arc::new(redb::Database::create(&db_path).expect("database should be created"));
+        let cache = DesktopCache::new(Arc::clone(&db)).expect("desktop cache should initialize");
+
+        let desktop_path = dir.join("legacy.desktop");
+        fs::write(
+            &desktop_path,
+            "[Desktop Entry]\nType=Application\nName=LegacyCache\nExec=/bin/true\n",
+        )
+        .expect("desktop entry should be written");
+
+        let metadata = fs::metadata(&desktop_path).expect("desktop metadata should be readable");
+        let mtime = metadata
+            .modified()
+            .expect("desktop mtime should be readable");
+        let app = sample_app("LegacyCache");
+        let legacy_key = desktop_path.to_string_lossy().to_string();
+        let legacy_entry = LegacyCacheEntry {
+            app: app.clone(),
+            mtime,
+            path: desktop_path.clone(),
+        };
+        let data = postcard::to_allocvec(&legacy_entry).expect("legacy cache entry should encode");
+
+        let write_txn = db.begin_write().expect("write transaction should open");
+        {
+            let mut cache_table = write_txn
+                .open_table(super::DESKTOP_CACHE_TABLE)
+                .expect("cache table should open");
+            let mut index_table = write_txn
+                .open_table(super::NAME_INDEX_TABLE)
+                .expect("name index should open");
+            cache_table
+                .insert(legacy_key.as_str(), data.as_slice())
+                .expect("legacy cache row should insert");
+            index_table
+                .insert(app.name.as_str(), legacy_key.as_bytes())
+                .expect("legacy name index should insert");
+        }
+        write_txn
+            .commit()
+            .expect("legacy cache write should commit");
+
+        let loaded_by_name = cache
+            .get_by_name("LegacyCache")
+            .expect("legacy name lookup should succeed")
+            .expect("legacy cached app should exist");
+        let loaded_by_path = cache
+            .get(&desktop_path)
+            .expect("legacy path lookup should succeed")
+            .expect("legacy cached app should exist by path");
+
+        assert_eq!(loaded_by_name.name, app.name);
+        assert_eq!(loaded_by_path.command, app.command);
 
         let _ = fs::remove_dir_all(dir);
     }

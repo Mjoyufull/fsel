@@ -1,9 +1,10 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use std::str::FromStr;
 
 use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
 use crate::ui::PanelPosition;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct FselConfig {
     #[serde(flatten)]
     pub general: GeneralConfig,
@@ -26,14 +27,17 @@ pub struct AppLauncherConfig {
     pub list_executables_in_path: Option<bool>,
     pub hide_before_typing: Option<bool>,
     pub launch_prefix: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub match_mode: Option<MatchMode>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub ranking_mode: Option<RankingMode>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub pinned_order: Option<PinnedOrderMode>,
     pub confirm_first_launch: Option<bool>,
     pub prefix_depth: Option<usize>,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct GeneralConfig {
     #[serde(default = "super::defaults::default_terminal_launcher")]
     pub terminal_launcher: String,
@@ -43,11 +47,20 @@ pub struct GeneralConfig {
     pub list_executables_in_path: bool,
     #[serde(default)]
     pub hide_before_typing: bool,
-    #[serde(default = "super::defaults::default_match_mode")]
+    #[serde(
+        default = "super::defaults::default_match_mode",
+        deserialize_with = "deserialize_parsed_or_default"
+    )]
     pub match_mode: MatchMode,
-    #[serde(default = "super::defaults::default_ranking_mode")]
+    #[serde(
+        default = "super::defaults::default_ranking_mode",
+        deserialize_with = "deserialize_parsed_or_default"
+    )]
     pub ranking_mode: RankingMode,
-    #[serde(default = "super::defaults::default_pinned_order")]
+    #[serde(
+        default = "super::defaults::default_pinned_order",
+        deserialize_with = "deserialize_parsed_or_default"
+    )]
     pub pinned_order: PinnedOrderMode,
     #[serde(default)]
     pub systemd_run: bool,
@@ -63,7 +76,7 @@ pub struct GeneralConfig {
     pub prefix_depth: usize,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct UiConfig {
     #[serde(default = "super::defaults::default_highlight_color")]
     pub highlight_color: String,
@@ -99,13 +112,16 @@ pub struct UiConfig {
     pub keybinds: crate::ui::Keybinds,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct LayoutConfig {
     #[serde(default = "super::defaults::default_title_panel_height")]
     pub title_panel_height_percent: u16,
     #[serde(default = "super::defaults::default_input_panel_height")]
     pub input_panel_height: u16,
-    #[serde(default = "super::defaults::default_title_panel_position")]
+    #[serde(
+        default = "super::defaults::default_title_panel_position",
+        deserialize_with = "deserialize_parsed_or_default"
+    )]
     pub title_panel_position: PanelPosition,
 }
 
@@ -130,6 +146,7 @@ pub struct DmenuConfig {
     pub header_title_color: Option<String>,
     pub title_panel_height_percent: Option<u16>,
     pub input_panel_height: Option<u16>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub title_panel_position: Option<PanelPosition>,
 }
 
@@ -154,5 +171,24 @@ pub struct CclipConfig {
     pub header_title_color: Option<String>,
     pub title_panel_height_percent: Option<u16>,
     pub input_panel_height: Option<u16>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub title_panel_position: Option<PanelPosition>,
+}
+
+fn deserialize_parsed_or_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + FromStr,
+{
+    let value = String::deserialize(deserializer)?;
+    Ok(value.parse().unwrap_or_default())
+}
+
+fn deserialize_optional_parsed<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: FromStr,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.and_then(|entry| entry.parse().ok()))
 }

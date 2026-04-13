@@ -9,13 +9,12 @@ use ratatui::widgets::ListState;
 use scopeguard::defer;
 use std::io;
 
-use super::commands::{handle_noninteractive_mode, load_history, validate_environment};
+use super::commands::{handle_noninteractive_mode, load_history};
 use super::items::build_items;
 use super::state::CclipOptions;
 
 /// Run cclip mode - async TUI event loop for clipboard history.
 pub async fn run(cli: &Opts) -> Result<()> {
-    validate_environment()?;
     if handle_noninteractive_mode(cli)? {
         return Ok(());
     }

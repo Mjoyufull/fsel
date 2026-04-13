@@ -201,11 +201,27 @@ fn parse_optional_color(value: Option<&str>) -> Option<ratatui::style::Color> {
     value.and_then(|color| string_to_color(color).ok())
 }
 
-// Preserve the historical mode-specific override behavior: only `bottom` is
-// accepted for dmenu/cclip-specific layout overrides today.
 fn parse_mode_panel_position(value: Option<PanelPosition>) -> Option<PanelPosition> {
-    match value {
-        Some(PanelPosition::Bottom) => Some(PanelPosition::Bottom),
-        _ => None,
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_config_defaults;
+    use crate::cli::Opts;
+    use crate::config::FselConfig;
+    use crate::ui::PanelPosition;
+
+    #[test]
+    fn mode_specific_panel_positions_preserve_all_explicit_values() {
+        let mut config = FselConfig::default();
+        config.dmenu.title_panel_position = Some(PanelPosition::Middle);
+        config.cclip.title_panel_position = Some(PanelPosition::Top);
+
+        let mut opts = Opts::default();
+        apply_config_defaults(&mut opts, &config);
+
+        assert_eq!(opts.dmenu_title_panel_position, Some(PanelPosition::Middle));
+        assert_eq!(opts.cclip_title_panel_position, Some(PanelPosition::Top));
     }
 }
