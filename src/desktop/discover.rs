@@ -9,6 +9,17 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 
+/// Options that control desktop application discovery.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DiscoverOptions {
+    /// Respect OnlyShowIn/NotShowIn fields for the current desktop.
+    pub filter_desktop: bool,
+    /// Hide desktop action entries such as "New Window".
+    pub filter_actions: bool,
+    /// Include raw executables discovered from `$PATH`.
+    pub list_executables: bool,
+}
+
 fn current_desktop(filter_desktop: bool) -> Option<Vec<String>> {
     if !filter_desktop {
         return None;
@@ -180,14 +191,12 @@ fn send_path_executables(sender: &mpsc::Sender<App>, history_cache: &HistoryCach
 pub fn read_with_options(
     dirs: Vec<impl Into<PathBuf>>,
     db: &std::sync::Arc<redb::Database>,
-    filter_desktop: bool,
-    filter_actions: bool,
-    list_executables: bool,
+    options: DiscoverOptions,
 ) -> mpsc::Receiver<App> {
     let (sender, receiver) = mpsc::channel();
     let dirs: Vec<PathBuf> = dirs.into_iter().map(Into::into).collect();
     let db_clone = std::sync::Arc::clone(db);
-    let current_desktop = current_desktop(filter_desktop);
+    let current_desktop = current_desktop(options.filter_desktop);
 
     let _worker = thread::spawn(move || {
         let history_cache = HistoryCache::load(&db_clone).unwrap_or_else(|_| HistoryCache {
@@ -205,7 +214,7 @@ pub fn read_with_options(
             .filter_map(|file_path| {
                 let file_path_ref = file_path.as_path();
                 let (mut app, file_contents) =
-                    load_app_from_path(file_path_ref, desktop_cache_ref, filter_desktop)?;
+                    load_app_from_path(file_path_ref, desktop_cache_ref, options.filter_desktop)?;
                 attach_desktop_id(&mut app, file_path_ref, None);
 
                 if !should_keep_for_desktop(&app, current_desktop_ref) {
@@ -214,7 +223,9 @@ pub fn read_with_options(
 
                 let app_with_history = history_cache_ref.apply_to_app(app.clone());
 
-                if !filter_actions && let Some(actions) = &app.actions {
+                if !options.filter_actions
+                    && let Some(actions) = &app.actions
+                {
                     let contents = match &file_contents {
                         Some(contents) => Some(contents.clone()),
                         None => fs::read_to_string(file_path_ref).ok(),
@@ -224,7 +235,7 @@ pub fn read_with_options(
                         for action in actions {
                             let action = Action::default().name(action).from(app.name.clone());
                             if let Ok(mut action_app) =
-                                App::parse_action(&contents, &action, filter_desktop)
+                                App::parse_action(&contents, &action, options.filter_desktop)
                             {
                                 attach_desktop_id(
                                     &mut action_app,
@@ -256,7 +267,7 @@ pub fn read_with_options(
             let _ = cache.batch_set(apps_to_cache);
         }
 
-        if list_executables {
+        if options.list_executables {
             let _ = send_path_executables(&sender, &history_cache);
         }
     });
@@ -266,7 +277,7 @@ pub fn read_with_options(
 
 #[cfg(test)]
 mod tests {
-    use super::read_with_options;
+    use super::{DiscoverOptions, read_with_options};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -296,7 +307,15 @@ mod tests {
         .expect("desktop entry should be written");
 
         let db = Arc::new(redb::Database::create(&db_path).expect("database should be created"));
-        let receiver = read_with_options(vec![dir.clone()], &db, false, filter_actions, false);
+        let receiver = read_with_options(
+            vec![dir.clone()],
+            &db,
+            DiscoverOptions {
+                filter_desktop: false,
+                filter_actions,
+                list_executables: false,
+            },
+        );
         let mut names = Vec::new();
         while let Ok(app) = receiver.recv() {
             names.push(app.name);

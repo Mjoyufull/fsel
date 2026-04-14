@@ -7,7 +7,7 @@ mod discover;
 mod parse;
 
 pub(crate) use dirs::application_dirs;
-pub use discover::read_with_options;
+pub use discover::{DiscoverOptions, read_with_options};
 
 /// An XDG Specification app with full desktop-entry metadata.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]

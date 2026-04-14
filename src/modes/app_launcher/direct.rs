@@ -29,9 +29,11 @@ pub(crate) fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> Re
     let apps_receiver = desktop::read_with_options(
         desktop::application_dirs(),
         &db,
-        cli.filter_desktop,
-        cli.filter_actions,
-        cli.list_executables_in_path,
+        desktop::DiscoverOptions {
+            filter_desktop: cli.filter_desktop,
+            filter_actions: cli.filter_actions,
+            list_executables: cli.list_executables_in_path,
+        },
     );
 
     let mut all_apps = Vec::new();
