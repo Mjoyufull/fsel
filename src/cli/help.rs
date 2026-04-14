@@ -5,7 +5,7 @@ Usage:
   {program_name} [OPTIONS]
 
 ├─ Core Modes
-│  ├─ -p, --program <NAME>         Launch one app immediately and skip the TUI
+│  ├─ -p, --program <NAME>         Launch one app immediately; exact mode refuses near matches
 │  ├─ --dmenu                      Read choices from stdin and print the selection
 │  └─ --cclip                      Browse clipboard history and copy the selection
 │
@@ -56,7 +56,7 @@ Usage:
   {program_name} [OPTIONS]
 
 ├─ Core Modes
-│  ├─ -p, --program <NAME>         Launch one app immediately and skip the TUI
+│  ├─ -p, --program <NAME>         Launch one app immediately; exact mode requires an exact hit
 │  ├─ --cclip                      Browse clipboard history and copy the selected item
 │  └─ --dmenu                      Read choices from stdin and print the selection to stdout
 │
@@ -117,6 +117,7 @@ Usage:
 └─ Notes
    ├─ Pick only one launch method: --launch-prefix, --systemd-run, or --uwsm
    ├─ --dmenu and --cclip both imply --no-exec
+   ├─ --program respects --match-mode: exact requires an exact app or executable name
    ├─ --select and --select-index cannot be combined
    └─ Default config path: ~/.config/fsel/config.toml
 "
