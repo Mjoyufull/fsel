@@ -2,8 +2,8 @@
 
 > A Manual for Maintaining Sensible Git Discipline Without Sacrificing Productive Chaos
 
-**Document Version:** 1.4.0  
-**Last Updated:** 2026-02-23  
+**Document Version:** 1.4.1  
+**Last Updated:** 2026-04-14  
 **Audience:** Future me, contributors, and anyone brave enough to work on these projects
 
 ---
@@ -117,7 +117,7 @@ Hotfix branches are created from main, go through a PR to main, and are **except
 
 ### Documentation-Only Changes
 
-**Docs go through main.** Documentation-only changes (typo fixes, clarifications, formatting, correctness updates like fixing example syntax) are made against **main**, not dev. Contributors and anyone else open a PR **targeting main** for docs; after merge, main is merged into dev so dev has the latest docs. Everything that gets merged into dev from main is either docs (from docs PRs) or hotfix code — release branches only bring version bumps and release-related doc updates when they merge back to dev, so keeping docs on main keeps "living docs" in one place.
+**Docs-only changes go through main.** Documentation-only changes (typo fixes, clarifications, formatting, correctness updates like fixing example syntax) are made against **main**, not dev. Contributors and anyone else open a PR **targeting main** for docs; after merge, main is merged into dev so dev has the latest docs. Exception: docs that are directly tied to a user-visible `feat/*` or `fix/*` must be included in that code PR to `dev`.
 
 **Criteria for docs-only:**
 - Changes only to `.md` files (README, USAGE, CONTRIBUTING, etc.) or other doc assets
@@ -275,6 +275,21 @@ chore: update flake.nix to use naersk
 
 Code changes enter via pull requests to dev; documentation changes enter via pull requests to main (or maintainer push to main for trivial docs). No direct code pushes to main or dev.
 
+### User-Facing Docs for `feat/*` and `fix/*` PRs
+
+If a feature or bug fix changes behavior, flags, config, output, setup flow, or anything a user would notice, the contributor is responsible for the docs update as part of that same change effort.
+
+**Default rule:**
+- Do not ship user-visible code changes without matching user-facing docs updates.
+- Do not assume the maintainer will invent missing docs later on the release branch.
+- If docs are missing, the PR is not ready to merge.
+
+**How this fits the branch model:**
+- User-visible `feat/*` and `fix/*` PRs to `dev` must include their doc changes in the same PR.
+- Docs-only updates (no behavior/config/output changes) still go in a docs PR to `main`.
+
+Maintainers may polish wording during release prep, but that is refinement; first-write responsibility for user-facing docs remains with the contributor making the behavior change.
+
 ### Opening a Pull Request
 
 1. Push feature branch:
@@ -302,6 +317,7 @@ Brief description of what this PR does and why.
 
 - [ ] I did basic linting
 - [ ] I'm a clown who can't code 🤡
+- [ ] User-facing impact assessed (if yes, docs are updated in this PR)
 
 ## Changes
 - Added tag filtering UI
