@@ -92,6 +92,7 @@ hide_before_typing = false
 # Match mode: "fuzzy" or "exact"
 # fuzzy = fzf-style matching (fire matches Firefox)
 # exact = only exact/starts-with/contains matches
+# note: in -p/--program mode, exact requires an exact app or executable name
 match_mode = "fuzzy"
 
 # Ranking mode for initial app order and score boost tie-breaking:

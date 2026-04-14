@@ -27,7 +27,7 @@ Clear desktop file cache
 Force refresh of desktop file list (rescan for new apps)
 .TP
 .BR \-p ", " \-\-program " " \fINAME\fR
-Launch program directly, bypassing TUI (requires at least 2 characters)
+Launch program directly, bypassing TUI. Respects \fB\-\-match-mode\fR; exact mode requires an exact app or executable name.
 .TP
 .BR \-ss " " \fISEARCH\fR
 Pre-fill search in TUI (works with app launcher, dmenu, and cclip modes; must be last option)
@@ -297,10 +297,17 @@ fsel -p firefox
 .RE
 .fi
 .TP
-Launch first match for "terminal":
+Launch the best fuzzy match for "terminal":
 .nf
 .RS
 fsel -p term
+.RE
+.fi
+.TP
+Require an exact app or executable name for direct launch:
+.nf
+.RS
+fsel --match-mode=exact -p firefox
 .RE
 .fi
 .TP

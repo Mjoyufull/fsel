@@ -39,6 +39,10 @@ fsel --hide-before-typing
 # Exact matching only
 fsel --match-mode=exact
 
+# Direct launch also respects match mode
+fsel --match-mode=exact -p firefox
+fsel --match-mode=exact -p fire   # Fails: no exact match
+
 # Cache management
 fsel --clear-cache      # Clear all caches (full rebuild)
 fsel --refresh-cache    # Refresh file list (pick up new apps)

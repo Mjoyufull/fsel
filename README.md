@@ -190,11 +190,15 @@ Launch applications directly from the command line without opening the TUI:
 # Launch Firefox directly
 fsel -p firefox
 
-# Launch first match for "terminal"
+# Launch the best fuzzy match for "terminal" (default match mode)
 fsel -p terminal
 
-# Works with partial names
+# Partial names work while match_mode is fuzzy
 fsel -p fire  # Finds Firefox
+
+# Exact mode requires an exact app or executable name
+fsel --match-mode=exact -p firefox
+fsel --match-mode=exact -p fire   # Fails: no exact match
 
 # Combine with launch options
 fsel --launch-prefix="runapp --" -p discord
@@ -296,6 +300,7 @@ pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned",
 
 Field placement matters. Root-level UI options and `[app_launcher]` / `[dmenu]` / `[cclip]` sections are validated separately.
 See [config.toml](./config.toml) and [keybinds.toml](./keybinds.toml) for all options with detailed comments.
+`[app_launcher].match_mode = "exact"` also applies to `-p/--program`, where it requires an exact app or executable name.
 
 ### Environment variable overrides
 
