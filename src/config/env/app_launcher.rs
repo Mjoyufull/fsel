@@ -16,7 +16,7 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         source,
         "FSEL_APP_LAUNCHER_FILTER_ACTIONS",
         &mut cfg.app_launcher.filter_actions,
-        cfg.general.filter_actions,
+        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(

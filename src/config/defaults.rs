@@ -63,7 +63,6 @@ impl Default for GeneralConfig {
         Self {
             terminal_launcher: default_terminal_launcher(),
             filter_desktop: true,
-            filter_actions: false,
             list_executables_in_path: false,
             hide_before_typing: false,
             match_mode: default_match_mode(),

@@ -18,12 +18,6 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
     )?;
     set_parsed(
         source,
-        "FSEL_FILTER_ACTIONS",
-        &mut cfg.general.filter_actions,
-        BOOLEAN_EXPECTED,
-    )?;
-    set_parsed(
-        source,
         "FSEL_LIST_EXECUTABLES_IN_PATH",
         &mut cfg.general.list_executables_in_path,
         BOOLEAN_EXPECTED,

@@ -211,7 +211,6 @@ title_panel_position = "upside_down"
         assert_eq!(general.ranking_mode, RankingMode::Frecency);
         assert_eq!(general.pinned_order, PinnedOrderMode::Ranking);
         assert_eq!(general.prefix_depth, 3);
-        assert!(!general.filter_actions);
 
         assert_eq!(ui.highlight_color, "LightBlue");
         assert_eq!(ui.cursor, "█");
@@ -223,7 +222,7 @@ title_panel_position = "upside_down"
     }
 
     #[test]
-    fn missing_filter_actions_key_keeps_runtime_default() {
+    fn missing_app_launcher_filter_actions_key_stays_unset() {
         let config: FselConfig = toml::from_str(
             r#"
 terminal_launcher = "kitty -e"
@@ -231,7 +230,7 @@ terminal_launcher = "kitty -e"
         )
         .expect("config should deserialize");
 
-        assert!(!config.general.filter_actions);
+        assert_eq!(config.app_launcher.filter_actions, None);
     }
 
     #[test]
