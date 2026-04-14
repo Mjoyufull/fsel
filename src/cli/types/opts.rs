@@ -169,7 +169,7 @@ impl Default for Opts {
             cclip_clear_tags: false,
             cclip_wipe_tags: false,
             filter_desktop: true,
-            filter_actions: true,
+            filter_actions: false,
             list_executables_in_path: false,
             hide_before_typing: false,
             match_mode: MatchMode::Fuzzy,

@@ -44,7 +44,7 @@ pub struct GeneralConfig {
     pub terminal_launcher: String,
     #[serde(default = "super::defaults::default_true")]
     pub filter_desktop: bool,
-    #[serde(default = "super::defaults::default_true")]
+    #[serde(default)]
     pub filter_actions: bool,
     #[serde(default)]
     pub list_executables_in_path: bool,

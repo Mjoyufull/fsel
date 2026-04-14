@@ -211,7 +211,7 @@ title_panel_position = "upside_down"
         assert_eq!(general.ranking_mode, RankingMode::Frecency);
         assert_eq!(general.pinned_order, PinnedOrderMode::Ranking);
         assert_eq!(general.prefix_depth, 3);
-        assert!(general.filter_actions);
+        assert!(!general.filter_actions);
 
         assert_eq!(ui.highlight_color, "LightBlue");
         assert_eq!(ui.cursor, "█");
@@ -231,7 +231,7 @@ terminal_launcher = "kitty -e"
         )
         .expect("config should deserialize");
 
-        assert!(config.general.filter_actions);
+        assert!(!config.general.filter_actions);
     }
 
     #[test]
