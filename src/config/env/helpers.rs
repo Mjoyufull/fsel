@@ -62,7 +62,6 @@ pub(super) fn set_optional_parsed<T>(
     source: &impl OverrideSource,
     key: &str,
     target: &mut Option<T>,
-    _fallback: T,
     expected: &'static str,
 ) -> Result<(), ConfigError>
 where

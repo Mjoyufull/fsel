@@ -9,28 +9,24 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         source,
         "FSEL_APP_LAUNCHER_FILTER_DESKTOP",
         &mut cfg.app_launcher.filter_desktop,
-        cfg.general.filter_desktop,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_APP_LAUNCHER_FILTER_ACTIONS",
         &mut cfg.app_launcher.filter_actions,
-        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_APP_LAUNCHER_LIST_EXECUTABLES_IN_PATH",
         &mut cfg.app_launcher.list_executables_in_path,
-        cfg.general.list_executables_in_path,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_APP_LAUNCHER_HIDE_BEFORE_TYPING",
         &mut cfg.app_launcher.hide_before_typing,
-        cfg.general.hide_before_typing,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_launch_prefix(
@@ -42,35 +38,30 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         source,
         "FSEL_APP_LAUNCHER_MATCH_MODE",
         &mut cfg.app_launcher.match_mode,
-        cfg.general.match_mode,
         MATCH_MODE_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_APP_LAUNCHER_RANKING_MODE",
         &mut cfg.app_launcher.ranking_mode,
-        cfg.general.ranking_mode,
         RANKING_MODE_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_APP_LAUNCHER_PINNED_ORDER",
         &mut cfg.app_launcher.pinned_order,
-        cfg.general.pinned_order,
         PINNED_ORDER_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_APP_LAUNCHER_CONFIRM_FIRST_LAUNCH",
         &mut cfg.app_launcher.confirm_first_launch,
-        cfg.general.confirm_first_launch,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_APP_LAUNCHER_PREFIX_DEPTH",
         &mut cfg.app_launcher.prefix_depth,
-        cfg.general.prefix_depth,
         INTEGER_EXPECTED,
     )?;
     Ok(())

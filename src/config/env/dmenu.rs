@@ -15,42 +15,36 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         source,
         "FSEL_DMENU_SHOW_LINE_NUMBERS",
         &mut cfg.dmenu.show_line_numbers,
-        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_DMENU_WRAP_LONG_LINES",
         &mut cfg.dmenu.wrap_long_lines,
-        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_DMENU_EXIT_IF_EMPTY",
         &mut cfg.dmenu.exit_if_empty,
-        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_DMENU_DISABLE_MOUSE",
         &mut cfg.dmenu.disable_mouse,
-        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_DMENU_HARD_STOP",
         &mut cfg.dmenu.hard_stop,
-        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_DMENU_ROUNDED_BORDERS",
         &mut cfg.dmenu.rounded_borders,
-        false,
         BOOLEAN_EXPECTED,
     )?;
     set_optional_string(source, "FSEL_DMENU_CURSOR", &mut cfg.dmenu.cursor);
@@ -98,21 +92,18 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         source,
         "FSEL_DMENU_TITLE_PANEL_HEIGHT_PERCENT",
         &mut cfg.dmenu.title_panel_height_percent,
-        cfg.layout.title_panel_height_percent,
         INTEGER_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_DMENU_INPUT_PANEL_HEIGHT",
         &mut cfg.dmenu.input_panel_height,
-        cfg.layout.input_panel_height,
         INTEGER_EXPECTED,
     )?;
     set_optional_parsed(
         source,
         "FSEL_DMENU_TITLE_PANEL_POSITION",
         &mut cfg.dmenu.title_panel_position,
-        cfg.layout.title_panel_position,
         PANEL_POSITION_EXPECTED,
     )?;
     Ok(())
