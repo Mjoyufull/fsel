@@ -436,6 +436,7 @@ terminal_launcher = "kitty -e"  # or "tty" for TTY mode (-t/--tty)
 # App launcher specific options
 [app_launcher]
 filter_desktop = true
+filter_actions = false
 list_executables_in_path = false
 ranking_mode = "frecency"
 pinned_order = "ranking"
@@ -463,7 +464,7 @@ Variable names use the `FSEL_` prefix and match config field names in `SCREAMING
 | `[cclip]` | `FSEL_CCLIP_` | `image_preview` | `FSEL_CCLIP_IMAGE_PREVIEW` |
 | `[app_launcher]` | `FSEL_APP_LAUNCHER_` | `ranking_mode` | `FSEL_APP_LAUNCHER_RANKING_MODE` |
 
-**Types:** Use `true` / `false` for booleans and decimal integers for numeric fields (e.g. `FSEL_PREFIX_DEPTH=3`). If parsing fails, fsel keeps the current value; for `FSEL_APP_LAUNCHER_*` booleans/numbers, fallback is the corresponding general setting. Strings (colors, modes, paths) are taken as-is.
+**Types:** Use `true` / `false` for booleans and decimal integers for numeric fields (e.g. `FSEL_PREFIX_DEPTH=3`). If parsing fails, fsel reports an invalid environment override and exits. Strings (colors, modes, paths) are taken as-is.
 
 **`FSEL_APP_LAUNCHER_LAUNCH_PREFIX`:** Parsed like shell words (quoted segments allowed), same idea as a command-line prefix.
 
@@ -473,9 +474,12 @@ fsel
 
 # One-shot
 FSEL_FILTER_DESKTOP=false FSEL_MATCH_MODE=exact fsel -p nvim
+
+# Hide desktop action entries for launcher mode only
+FSEL_APP_LAUNCHER_FILTER_ACTIONS=true fsel
 ```
 
-Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config.toml` or `FSEL_APP_LAUNCHER_*` overrides them for the app launcher.
+Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config.toml` or `FSEL_APP_LAUNCHER_*` overrides them for the app launcher. `filter_actions` is launcher-only, so it is configured only under `[app_launcher]` or with `FSEL_APP_LAUNCHER_FILTER_ACTIONS`.
 
 **General / launcher (root-level and shared launcher behavior):**
 
@@ -495,7 +499,7 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 
 **`[app_launcher]` overrides (`FSEL_APP_LAUNCHER_*`):**
 
-`FILTER_DESKTOP`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH` (each prefixed with `FSEL_APP_LAUNCHER_`)
+`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH` (each prefixed with `FSEL_APP_LAUNCHER_`)
 
 Keybinds are not configurable via environment variables; use `keybinds.toml` or the `[keybinds]` section in `config.toml`.
 
@@ -505,9 +509,11 @@ Keybinds are not configurable via environment variables; use `keybinds.toml` or 
 [app_launcher]
 main_border_color = "White"  # This will crash!
 filter_desktop = true
+filter_actions = true
 
 # WRONG - App launcher options at root level
 filter_desktop = true  # This should be in [app_launcher]
+filter_actions = true  # This should be in [app_launcher]
 ```
 
 ### Error Messages
@@ -528,7 +534,7 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`
+- `filter_desktop`, `filter_actions`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`

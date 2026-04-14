@@ -50,6 +50,9 @@ Launch applications using uwsm app (pairs with -d/--detach)
 .BR \-\-filter-desktop [=\fIno\fR]
 Filter apps by OnlyShowIn/NotShowIn fields (default: yes)
 .TP
+.BR \-\-filter-actions [=\fIno\fR]
+Hide desktop action entries such as "New Window" and "Open Private Window" (default: no)
+.TP
 .B \-\-list-executables-in-path
 Include executables from $PATH alongside desktop apps
 .TP
@@ -182,6 +185,7 @@ pin_color = "rgb(255,165,0)"
 # App launcher specific options (must be in section)
 [app_launcher]
 filter_desktop = true
+filter_actions = false
 list_executables_in_path = false
 hide_before_typing = false
 match_mode = "fuzzy"
@@ -297,6 +301,13 @@ Launch first match for "terminal":
 .nf
 .RS
 fsel -p term
+.RE
+.fi
+.TP
+Hide desktop action entries in launcher mode:
+.nf
+.RS
+fsel --filter-actions
 .RE
 .fi
 .TP
@@ -436,6 +447,9 @@ Used to detect Wayland vs X11 for clipboard operations
 .TP
 .B FSEL_*
 Environment variables with FSEL_ prefix override config file settings
+.TP
+.B FSEL_APP_LAUNCHER_FILTER_ACTIONS
+Set to \fBtrue\fR to hide desktop action entries in app launcher mode, or \fBfalse\fR to keep them visible
 .SH FILES
 .TP
 .I ~/.config/fsel/config.toml
