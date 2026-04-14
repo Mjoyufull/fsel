@@ -222,6 +222,18 @@ title_panel_position = "upside_down"
     }
 
     #[test]
+    fn missing_app_launcher_filter_actions_key_stays_unset() {
+        let config: FselConfig = toml::from_str(
+            r#"
+terminal_launcher = "kitty -e"
+"#,
+        )
+        .expect("config should deserialize");
+
+        assert_eq!(config.app_launcher.filter_actions, None);
+    }
+
+    #[test]
     fn validate_rejects_conflicting_launch_methods() {
         let mut config = FselConfig::default();
         config.general.systemd_run = true;

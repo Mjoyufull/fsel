@@ -75,6 +75,10 @@ title_panel_position = "top"
 # Hides apps not meant for your desktop environment
 filter_desktop = true
 
+# Hide desktop action entries such as "New Window" and "Open Private Window"
+# false = keep action entries visible, true = show only main app entries
+filter_actions = false
+
 # Include raw executables from $PATH (ls, grep, etc.)
 list_executables_in_path = false
 

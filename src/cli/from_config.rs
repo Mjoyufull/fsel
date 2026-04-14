@@ -44,6 +44,9 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(filter) = fsel_config.app_launcher.filter_desktop {
         default.filter_desktop = filter;
     }
+    if let Some(filter) = fsel_config.app_launcher.filter_actions {
+        default.filter_actions = filter;
+    }
     if let Some(list_exec) = fsel_config.app_launcher.list_executables_in_path {
         default.list_executables_in_path = list_exec;
     }
@@ -223,5 +226,16 @@ mod tests {
 
         assert_eq!(opts.dmenu_title_panel_position, Some(PanelPosition::Middle));
         assert_eq!(opts.cclip_title_panel_position, Some(PanelPosition::Top));
+    }
+
+    #[test]
+    fn app_launcher_filter_actions_override_beats_general_default() {
+        let mut config = FselConfig::default();
+        config.app_launcher.filter_actions = Some(true);
+
+        let mut opts = Opts::default();
+        apply_config_defaults(&mut opts, &config);
+
+        assert!(opts.filter_actions);
     }
 }

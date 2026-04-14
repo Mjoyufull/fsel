@@ -287,6 +287,7 @@ pin_icon = "📌"                     # Icon for pinned apps
 
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment
+filter_actions = false            # Keep desktop actions visible; set true to hide them
 list_executables_in_path = false   # Show CLI tools from $PATH
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
@@ -305,6 +306,7 @@ After the config file is loaded, any `FSEL_*` variable set in the process enviro
 
 ```sh
 FSEL_MATCH_MODE=exact fsel
+FSEL_APP_LAUNCHER_FILTER_ACTIONS=true fsel
 FSEL_HIGHLIGHT_COLOR=Cyan FSEL_DMENU_DELIMITER=: fsel --dmenu < items.txt
 ```
 
@@ -405,6 +407,10 @@ fsel is a **unified TUI workflow tool** built for terminal-centric setups. It co
 **Fuzzy matching too loose?**
 - Try `--match-mode=exact` for stricter matching
 - Or set `match_mode = "exact"` in config
+
+**Too many desktop action entries?**
+- Use `--filter-actions` to hide desktop actions like "New Window"
+- Or set `filter_actions = true` under `[app_launcher]`
 
 **Terminal apps not launching?**
 - Set `terminal_launcher` in config

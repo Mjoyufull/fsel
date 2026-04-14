@@ -81,6 +81,7 @@ pub fn log_startup_info(cli: &crate::cli::Opts, app_count: usize, frecency_count
         let _ = writeln!(file, "  Ranking mode: {}", cli.ranking_mode.as_str());
         let _ = writeln!(file, "  Pinned order: {}", cli.pinned_order_mode.as_str());
         let _ = writeln!(file, "  Filter desktop: {}", cli.filter_desktop);
+        let _ = writeln!(file, "  Filter actions: {}", cli.filter_actions);
         let _ = writeln!(
             file,
             "  List executables in PATH: {}",

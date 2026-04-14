@@ -46,8 +46,11 @@ pub async fn run(cli: Opts) -> Result<()> {
     let apps_rx = crate::desktop::read_with_options(
         crate::desktop::application_dirs(),
         &db,
-        cli.filter_desktop,
-        cli.list_executables_in_path,
+        crate::desktop::DiscoverOptions {
+            filter_desktop: cli.filter_desktop,
+            filter_actions: cli.filter_actions,
+            list_executables: cli.list_executables_in_path,
+        },
     );
 
     let mut all_apps = Vec::with_capacity(500);
