@@ -1,6 +1,9 @@
 // Dmenu mode - verb-based organization
 
+mod events;
+mod options;
 pub mod parse;
+mod render;
 pub mod run;
 
 // Re-export the run function

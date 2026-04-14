@@ -176,9 +176,11 @@ impl Input {
         let _input_handle = {
             let tx = tx.clone();
 
-            thread::spawn(move || loop {
-                if let Ok(true) = crossterm::event::poll(Duration::from_millis(100)) {
-                    if let Ok(event) = crossterm::event::read() {
+            thread::spawn(move || {
+                loop {
+                    if let Ok(true) = crossterm::event::poll(Duration::from_millis(100))
+                        && let Ok(event) = crossterm::event::read()
+                    {
                         match event {
                             CrosstermEvent::Key(key) => {
                                 if tx.send(Event::Input(key)).is_err() {
@@ -201,11 +203,13 @@ impl Input {
         };
 
         let _tick_handle = {
-            thread::spawn(move || loop {
-                if tx.send(Event::Tick).is_err() {
-                    break;
+            thread::spawn(move || {
+                loop {
+                    if tx.send(Event::Tick).is_err() {
+                        break;
+                    }
+                    thread::sleep(config.tick_rate);
                 }
-                thread::sleep(config.tick_rate);
             })
         };
 
