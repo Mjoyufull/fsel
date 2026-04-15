@@ -1,25 +1,14 @@
-use directories::ProjectDirs;
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr};
 use redb::{ReadableDatabase, ReadableTable};
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
 /// open the database, creating the directory if needed
 /// returns the database and the data directory path
 pub fn open_history_db() -> Result<(std::sync::Arc<redb::Database>, PathBuf)> {
-    let project_dirs = ProjectDirs::from("ch", "forkbomb9", env!("CARGO_PKG_NAME"))
-        .ok_or_else(|| eyre!("can't find data dir for {}", env!("CARGO_PKG_NAME")))?;
-
-    let mut db_path = project_dirs.data_local_dir().to_path_buf();
-
-    if !db_path.exists() {
-        fs::create_dir_all(&db_path)?;
-    }
-
-    let data_dir = db_path.clone();
-    db_path.push("hist_db.redb");
+    let data_dir = crate::app::paths::runtime_data_dir()?;
+    let db_path = crate::app::paths::history_db_path()?;
 
     let db = redb::Database::create(&db_path)
         .wrap_err_with(|| format!(
@@ -181,10 +170,8 @@ pub fn load_pin_timestamps(db: &std::sync::Arc<redb::Database>) -> HashMap<Strin
         }
     }
 
-    if changed {
-        if let Err(e) = save_pinned_state(db, &pinned, &pin_timestamps) {
-            eprintln!("Warning: Failed to persist pin timestamps: {}", e);
-        }
+    if changed && let Err(e) = save_pinned_state(db, &pinned, &pin_timestamps) {
+        eprintln!("Warning: Failed to persist pin timestamps: {}", e);
     }
 
     pin_timestamps
@@ -211,7 +198,7 @@ pub fn toggle_pin(db: &std::sync::Arc<redb::Database>, app_name: &str) -> Result
 // FRECENCY STORAGE
 // =============================================================================
 
-use crate::core::state::FrecencyEntry;
+use crate::core::ranking::FrecencyEntry;
 
 /// Load frecency data from database
 pub fn load_frecency(db: &std::sync::Arc<redb::Database>) -> HashMap<String, FrecencyEntry> {
@@ -270,7 +257,7 @@ pub fn record_access(db: &std::sync::Arc<redb::Database>, app_name: &str) -> Res
         .or_default();
 
     // Age entries if total exceeds max (10000 by default, like zoxide)
-    crate::core::state::age_entries(&mut frecency, 10000);
+    crate::core::ranking::age_entries(&mut frecency, 10000);
 
     save_frecency(db, &frecency)?;
     Ok(())

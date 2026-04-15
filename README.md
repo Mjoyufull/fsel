@@ -33,7 +33,7 @@
 ## Requirements
 
 **Build Requirements:**
-- Rust 1.90+ **stable** (NOT nightly)
+- Rust 1.94+ **stable** (NOT nightly)
   - Install: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
   - Verify: `rustc --version` (should show stable, not nightly)
   - If using nightly: `rustup default stable`
@@ -58,7 +58,7 @@ Get up and running in 30 seconds:
 nix run github:Mjoyufull/fsel
 
 # Or install from Cargo
-cargo install fsel@3.3.1-kiwicrab
+cargo install fsel@3.4.0-kiwicrab
 
 # Launch fsel
 fsel
@@ -101,11 +101,11 @@ Need install variants, launch methods, or mode-specific examples? See [USAGE.md]
 
 * Install from [crates.io](https://crates.io/crates/fsel):
     ```sh
-    $ cargo install fsel@3.3.1-kiwicrab
+    $ cargo install fsel@3.4.0-kiwicrab
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@3.3.1-kiwicrab --force
+    $ cargo install fsel@3.4.0-kiwicrab --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -190,11 +190,15 @@ Launch applications directly from the command line without opening the TUI:
 # Launch Firefox directly
 fsel -p firefox
 
-# Launch first match for "terminal"
+# Launch the best fuzzy match for "terminal" (default match mode)
 fsel -p terminal
 
-# Works with partial names
+# Partial names work while match_mode is fuzzy
 fsel -p fire  # Finds Firefox
+
+# Exact mode requires an exact app or executable name
+fsel --match-mode=exact -p firefox
+fsel --match-mode=exact -p fire   # Fails: no exact match
 
 # Combine with launch options
 fsel --launch-prefix="runapp --" -p discord
@@ -287,6 +291,7 @@ pin_icon = "📌"                     # Icon for pinned apps
 
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment
+filter_actions = false            # Keep desktop actions visible; set true to hide them
 list_executables_in_path = false   # Show CLI tools from $PATH
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
@@ -295,6 +300,7 @@ pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned",
 
 Field placement matters. Root-level UI options and `[app_launcher]` / `[dmenu]` / `[cclip]` sections are validated separately.
 See [config.toml](./config.toml) and [keybinds.toml](./keybinds.toml) for all options with detailed comments.
+`[app_launcher].match_mode = "exact"` also applies to `-p/--program`, where it requires an exact app or executable name.
 
 ### Environment variable overrides
 
@@ -305,6 +311,7 @@ After the config file is loaded, any `FSEL_*` variable set in the process enviro
 
 ```sh
 FSEL_MATCH_MODE=exact fsel
+FSEL_APP_LAUNCHER_FILTER_ACTIONS=true fsel
 FSEL_HIGHLIGHT_COLOR=Cyan FSEL_DMENU_DELIMITER=: fsel --dmenu < items.txt
 ```
 
@@ -405,6 +412,10 @@ fsel is a **unified TUI workflow tool** built for terminal-centric setups. It co
 **Fuzzy matching too loose?**
 - Try `--match-mode=exact` for stricter matching
 - Or set `match_mode = "exact"` in config
+
+**Too many desktop action entries?**
+- Use `--filter-actions` to hide desktop actions like "New Window"
+- Or set `filter_actions = true` under `[app_launcher]`
 
 **Terminal apps not launching?**
 - Set `terminal_launcher` in config

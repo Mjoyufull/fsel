@@ -1,0 +1,247 @@
+use super::helpers::{parse_column_list, value_as_string};
+use crate::cli::error::CliError;
+use crate::cli::help::unknown_argument_help;
+use crate::cli::launch::{parse_launch_prefix, set_launch_prefix, set_systemd_run, set_uwsm};
+use crate::cli::{CliCommand, MatchMode, Opts};
+use lexopt::prelude::*;
+
+pub(super) enum OverridesResult {
+    Continue(usize),
+    Command(CliCommand),
+}
+
+pub(super) fn parse_cli_overrides(
+    parser: &mut lexopt::Parser,
+    default: &mut Opts,
+    program_name: &str,
+) -> Result<OverridesResult, CliError> {
+    let mut cli_launch_methods = 0;
+
+    while let Some(arg) = parser.next()? {
+        match arg {
+            Short('t') | Long("tty") => {
+                default.tty = true;
+                default.terminal_launcher.clear();
+            }
+            Short('r') | Long("replace") => {
+                default.replace = true;
+            }
+            Short('c') | Long("config") => {
+                let _ = parser.value()?;
+            }
+            Long("clear-history") => {
+                default.clear_history = true;
+            }
+            Long("clear-cache") => {
+                default.clear_cache = true;
+            }
+            Long("refresh-cache") => {
+                default.refresh_cache = true;
+            }
+            Long("no-exec") => {
+                default.no_exec = true;
+            }
+            Long("launch-prefix") => {
+                cli_launch_methods += 1;
+                let prefix = value_as_string(parser, "Launch prefix must be valid UTF-8")?;
+                set_launch_prefix(
+                    default,
+                    parse_launch_prefix(&prefix).map_err(CliError::message)?,
+                );
+            }
+            Long("systemd-run") => {
+                cli_launch_methods += 1;
+                set_systemd_run(default);
+            }
+            Long("uwsm") => {
+                cli_launch_methods += 1;
+                set_uwsm(default);
+            }
+            Short('d') | Long("detach") => {
+                default.detach = true;
+            }
+            Long("dmenu") => {
+                default.dmenu_mode = true;
+            }
+            Long("cclip") => {
+                default.cclip_mode = true;
+            }
+            Long("tag") => parse_tag(parser, default)?,
+            Long("cclip-show-tag-color-names") => {
+                default.cclip_show_tag_color_names = Some(true);
+            }
+            Long("dmenu0") => {
+                default.dmenu_mode = true;
+                default.dmenu_null_separated = true;
+            }
+            Long("password") => {
+                default.dmenu_password_mode = true;
+                if let Some(value) = parser.optional_value() {
+                    default.dmenu_password_character = value
+                        .into_string()
+                        .map_err(|_| CliError::message("Password character must be valid UTF-8"))?;
+                }
+            }
+            Long("index") => {
+                default.dmenu_index_mode = true;
+            }
+            Long("accept-nth") => {
+                default.dmenu_accept_nth =
+                    Some(parse_column_list(parser, "Invalid column specification")?);
+            }
+            Long("match-nth") => {
+                default.dmenu_match_nth =
+                    Some(parse_column_list(parser, "Invalid column specification")?);
+            }
+            Long("only-match") => {
+                default.dmenu_only_match = true;
+            }
+            Long("exit-if-empty") => {
+                default.dmenu_exit_if_empty = true;
+            }
+            Long("select") => {
+                default.dmenu_select = Some(value_as_string(
+                    parser,
+                    "Select string must be valid UTF-8",
+                )?);
+            }
+            Long("select-index") => {
+                let index = value_as_string(parser, "Index must be valid UTF-8")?;
+                default.dmenu_select_index = Some(
+                    index
+                        .parse::<usize>()
+                        .map_err(|_| CliError::message("Invalid index"))?,
+                );
+            }
+            Long("auto-select") => {
+                default.dmenu_auto_select = true;
+            }
+            Long("prompt-only") => {
+                default.dmenu_prompt_only = true;
+            }
+            Long("hide-before-typing") => {
+                default.hide_before_typing = true;
+            }
+            Long("filter-desktop") => {
+                if let Some(value) = parser.optional_value() {
+                    let value = value.into_string().map_err(|_| {
+                        CliError::message("filter-desktop value must be valid UTF-8")
+                    })?;
+                    default.filter_desktop = value != "no";
+                } else {
+                    default.filter_desktop = true;
+                }
+            }
+            Long("filter-actions") => {
+                if let Some(value) = parser.optional_value() {
+                    let value = value.into_string().map_err(|_| {
+                        CliError::message("filter-actions value must be valid UTF-8")
+                    })?;
+                    default.filter_actions = value != "no";
+                } else {
+                    default.filter_actions = true;
+                }
+            }
+            Long("list-executables-in-path") => {
+                default.list_executables_in_path = true;
+            }
+            Long("match-mode") => {
+                let mode = value_as_string(parser, "Match mode must be valid UTF-8")?;
+                default.match_mode = mode
+                    .parse::<MatchMode>()
+                    .map_err(|_| CliError::message("Invalid match mode. Use 'exact' or 'fuzzy'"))?;
+            }
+            Long("prefix-depth") => {
+                let depth = value_as_string(parser, "Prefix depth must be valid UTF-8")?;
+                default.prefix_depth = depth
+                    .parse::<usize>()
+                    .map_err(|_| CliError::message("Invalid prefix depth"))?;
+            }
+            Short('T') | Long("test") => {
+                default.test_mode = true;
+                default.verbose = Some(3);
+            }
+            Long("with-nth") => {
+                default.dmenu_with_nth = Some(parse_column_list(
+                    parser,
+                    "Invalid column specification. Use comma-separated numbers like: 1,2,4",
+                )?);
+            }
+            Long("delimiter") => {
+                default.dmenu_delimiter = value_as_string(parser, "Delimiter must be valid UTF-8")?;
+            }
+            Short('p') | Long("program") => {
+                default.program =
+                    Some(value_as_string(parser, "Program name must be valid UTF-8")?);
+            }
+            Short('v') | Long("verbose") => {
+                default.verbose = Some(default.verbose.unwrap_or(0) + 1);
+            }
+            Short('h') => {
+                return Ok(OverridesResult::Command(CliCommand::PrintShortHelp {
+                    program_name: program_name.to_string(),
+                }));
+            }
+            Short('H') | Long("help") => {
+                return Ok(OverridesResult::Command(CliCommand::PrintLongHelp {
+                    program_name: program_name.to_string(),
+                }));
+            }
+            Short('V') | Long("version") => {
+                return Ok(OverridesResult::Command(CliCommand::PrintVersion));
+            }
+            Value(_) => return Err(arg.unexpected().into()),
+            _ => return Err(report_unknown_argument(arg)),
+        }
+    }
+
+    Ok(OverridesResult::Continue(cli_launch_methods))
+}
+
+fn parse_tag(parser: &mut lexopt::Parser, default: &mut Opts) -> Result<(), CliError> {
+    let tag_arg = value_as_string(parser, "Tag argument must be valid UTF-8")?;
+    match tag_arg.as_str() {
+        "list" => {
+            default.cclip_tag_list = true;
+            if let Some(value) = parser.optional_value() {
+                default.cclip_tag = Some(
+                    value
+                        .into_string()
+                        .map_err(|_| CliError::message("Tag name must be valid UTF-8"))?,
+                );
+            }
+        }
+        "clear" => {
+            default.cclip_clear_tags = true;
+        }
+        "wipe" => {
+            default.cclip_wipe_tags = true;
+        }
+        _ => {
+            default.cclip_tag = Some(tag_arg);
+        }
+    }
+
+    Ok(())
+}
+
+fn report_unknown_argument(arg: lexopt::Arg<'_>) -> CliError {
+    let error_msg = match arg {
+        Long(name) => match name {
+            "clip" => "Unknown option '--clip'. Did you mean '--cclip'?",
+            "menu" => "Unknown option '--menu'. Did you mean '--dmenu'?",
+            "dme" | "dmen" => "Unknown option. Did you mean '--dmenu'?",
+            "cc" | "ccli" => "Unknown option. Did you mean '--cclip'?",
+            _ => "Unknown option. Use '-h' or '--help' to see available options.",
+        },
+        Short(c) => match c {
+            'C' => "Unknown option '-C'. Did you mean '-c' for --config?",
+            'P' => "Unknown option '-P'. Did you mean '-p' for --program?",
+            'R' => "Unknown option '-R'. Did you mean '-r' for --replace?",
+            _ => "Unknown option. Use '-h' or '--help' to see available options.",
+        },
+        Value(_) => unreachable!(),
+    };
+
+    CliError::message(unknown_argument_help(error_msg))
+}

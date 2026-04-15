@@ -1,7 +1,7 @@
 // Selection, copying, and tagging functionality
 
 use super::CclipItem;
-use eyre::{eyre, Result};
+use eyre::{Result, eyre};
 use std::process::{Command, Stdio};
 
 impl CclipItem {

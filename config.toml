@@ -75,6 +75,10 @@ title_panel_position = "top"
 # Hides apps not meant for your desktop environment
 filter_desktop = true
 
+# Hide desktop action entries such as "New Window" and "Open Private Window"
+# false = keep action entries visible, true = show only main app entries
+filter_actions = false
+
 # Include raw executables from $PATH (ls, grep, etc.)
 list_executables_in_path = false
 
@@ -88,6 +92,7 @@ hide_before_typing = false
 # Match mode: "fuzzy" or "exact"
 # fuzzy = fzf-style matching (fire matches Firefox)
 # exact = only exact/starts-with/contains matches
+# note: in -p/--program mode, exact requires an exact app or executable name
 match_mode = "fuzzy"
 
 # Ranking mode for initial app order and score boost tie-breaking:

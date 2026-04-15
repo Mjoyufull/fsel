@@ -1,0 +1,15 @@
+terminal_launcher = "kitty -e"
+match_mode = "fuzzy"
+ranking_mode = "frequency"
+pinned_order = "newest"
+title_panel_position = "middle"
+
+[dmenu]
+delimiter = "|"
+title_panel_position = "bottom"
+
+[app_launcher]
+match_mode = "exact"
+ranking_mode = "recency"
+pinned_order = "oldest"
+prefix_depth = 4

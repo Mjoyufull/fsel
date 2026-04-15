@@ -83,11 +83,11 @@ pub fn launch_app(
                             #[cfg(unix)]
                             {
                                 use std::os::unix::fs::PermissionsExt;
-                                if let Ok(md) = candidate.metadata() {
-                                    if (md.permissions().mode() & 0o111) != 0 {
-                                        found = Some(candidate);
-                                        break;
-                                    }
+                                if let Ok(md) = candidate.metadata()
+                                    && (md.permissions().mode() & 0o111) != 0
+                                {
+                                    found = Some(candidate);
+                                    break;
                                 }
                             }
                             #[cfg(not(unix))]
@@ -110,7 +110,7 @@ pub fn launch_app(
                 return Err(eyre::eyre!(
                     "Executable not found or not executable: {}",
                     commands[0]
-                ))
+                ));
             }
         };
 
@@ -234,8 +234,10 @@ mod tests {
 
     #[test]
     fn split_command_allows_empty_strings() {
-        assert!(split_command("   ", "terminal_launcher")
-            .unwrap()
-            .is_empty());
+        assert!(
+            split_command("   ", "terminal_launcher")
+                .unwrap()
+                .is_empty()
+        );
     }
 }

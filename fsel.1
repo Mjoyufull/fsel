@@ -1,4 +1,4 @@
-.TH FSEL 1 "2026-03-23" "3.3.1-kiwicrab" "User Commands"
+.TH FSEL 1 "2026-04-14" "3.4.0-kiwicrab" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -27,7 +27,7 @@ Clear desktop file cache
 Force refresh of desktop file list (rescan for new apps)
 .TP
 .BR \-p ", " \-\-program " " \fINAME\fR
-Launch program directly, bypassing TUI (requires at least 2 characters)
+Launch program directly, bypassing TUI. Respects \fB\-\-match-mode\fR; exact mode requires an exact app or executable name.
 .TP
 .BR \-ss " " \fISEARCH\fR
 Pre-fill search in TUI (works with app launcher, dmenu, and cclip modes; must be last option)
@@ -49,6 +49,9 @@ Launch applications using uwsm app (pairs with -d/--detach)
 .TP
 .BR \-\-filter-desktop [=\fIno\fR]
 Filter apps by OnlyShowIn/NotShowIn fields (default: yes)
+.TP
+.BR \-\-filter-actions [=\fIno\fR]
+Hide desktop action entries such as "New Window" and "Open Private Window" (default: no)
 .TP
 .B \-\-list-executables-in-path
 Include executables from $PATH alongside desktop apps
@@ -182,6 +185,7 @@ pin_color = "rgb(255,165,0)"
 # App launcher specific options (must be in section)
 [app_launcher]
 filter_desktop = true
+filter_actions = false
 list_executables_in_path = false
 hide_before_typing = false
 match_mode = "fuzzy"
@@ -293,10 +297,24 @@ fsel -p firefox
 .RE
 .fi
 .TP
-Launch first match for "terminal":
+Launch the best fuzzy match for "terminal":
 .nf
 .RS
 fsel -p term
+.RE
+.fi
+.TP
+Require an exact app or executable name for direct launch:
+.nf
+.RS
+fsel --match-mode=exact -p firefox
+.RE
+.fi
+.TP
+Hide desktop action entries in launcher mode:
+.nf
+.RS
+fsel --filter-actions
 .RE
 .fi
 .TP
@@ -436,6 +454,9 @@ Used to detect Wayland vs X11 for clipboard operations
 .TP
 .B FSEL_*
 Environment variables with FSEL_ prefix override config file settings
+.TP
+.B FSEL_APP_LAUNCHER_FILTER_ACTIONS
+Set to \fBtrue\fR to hide desktop action entries in app launcher mode, or \fBfalse\fR to keep them visible
 .SH FILES
 .TP
 .I ~/.config/fsel/config.toml
