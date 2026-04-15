@@ -143,7 +143,6 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Install or update Rust to meet MSRV
-        if: ${{ matrix.container }}
         run: |
           MSRV=$(awk -F'"' '/^rust-version/ {print $2}' Cargo.toml)
           if ! command -v cargo > /dev/null 2>&1; then
