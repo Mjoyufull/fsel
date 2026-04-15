@@ -142,12 +142,19 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install Rust non-interactively if not already installed
+      - name: Install or update Rust to meet MSRV
         if: ${{ matrix.container }}
         run: |
+          MSRV=$(awk -F'"' '/^rust-version/ {print $2}' Cargo.toml)
           if ! command -v cargo > /dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain "$MSRV"
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          else
+            CURRENT=$(rustc --version | awk '{print $2}')
+            if [ "$(printf '%s\n' "$MSRV" "$CURRENT" | sort -V | head -n1)" != "$MSRV" ] 2>/dev/null; then
+              rustup update "$MSRV"
+              rustup default "$MSRV"
+            fi
           fi
       - name: Install dist
         run: ${{ matrix.install_dist.run }}
