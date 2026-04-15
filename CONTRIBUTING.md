@@ -33,7 +33,7 @@ Use GitHub issues and pull requests:
 
 ## Setup
 
-fsel currently targets stable Rust `1.90+`.
+fsel currently targets stable Rust `1.94+`.
 
 ```sh
 git clone https://github.com/YOUR_USERNAME/fsel.git
@@ -52,28 +52,33 @@ cd fsel
 
 ## Current Repo Map
 
-The current `main` branch is still fairly flat. Do not assume older refactor trees match this branch.
+The current release branch ships the split refactor layout. Keep that in mind when navigating the codebase.
 
-- `src/main.rs`: entry point, mode routing, top-level terminal setup/shutdown
-- `src/cli.rs`: CLI parsing and runtime option shaping
-- `src/config.rs`: config structs, defaults, and config/env loading
-- `src/core/`: cache, database, debug logging, shared runtime state
-- `src/desktop/`: desktop entry parsing and application discovery
-- `src/modes/app_launcher/`: main launcher behavior, search, run, launch flow
-- `src/modes/cclip/`: clipboard mode
-- `src/modes/dmenu/`: dmenu mode
-- `src/ui/`: TUI state, rendering, input, keybinds, graphics helpers
-- `src/process.rs`: process and lockfile-related helpers
+- `src/lib.rs`: library entrypoint exported by the binary
+- `src/app/`: app bootstrap, runtime paths, and shared app-level helpers
+- `src/cli/`: CLI types, parsing, help text, config mapping, and validation
+- `src/common/`: shared item/model helpers used across modes
+- `src/config/`: typed config schema, defaults, env overrides, and validation
+- `src/core/`: cache, database, ranking, debug logging, and shared runtime state
+- `src/desktop/`: application directories, desktop discovery, and desktop-entry parsing
+- `src/modes/app_launcher/`: launcher admin flow, direct launch, run loop, search, and session handling
+- `src/modes/cclip/`: clipboard commands, events, image handling, rendering, session, state, and tags
+- `src/modes/dmenu/`: dmenu events, options, rendering, and run loop
+- `src/platform/`: OS-specific process boundaries
+- `src/ui/`: TUI state, panel layout, terminal helpers, graphics, keybinds, and dmenu UI helpers
 - `src/strings.rs`: shared string parsing helpers
 
 ## Module Responsibility Notes
 
 Keep changes near the boundary that owns the behavior:
 
-- CLI flags, parsing, and help text belong in `src/cli.rs`
-- Config file and env override behavior belong in `src/config.rs`
+- App bootstrap, runtime path construction, and terminal lifecycle helpers belong in `src/app/`
+- CLI flags, parsing, help text, and config-to-CLI mapping belong in `src/cli/`
+- Config file and env override behavior belong in `src/config/`
+- Cache, database, ranking, and shared state belong in `src/core/`
 - `.desktop` parsing and discovery belong in `src/desktop/`
 - Mode-specific behavior belongs under that mode in `src/modes/`
+- Platform-specific process and OS boundaries belong in `src/platform/`
 - Shared UI behavior belongs in `src/ui/`
 - Cross-cutting helpers should stay small and justified
 
