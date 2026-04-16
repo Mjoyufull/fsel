@@ -41,6 +41,7 @@
               license = licenses.bsd2;
               maintainers = [ ];
               platforms = platforms.linux ++ platforms.darwin;
+              mainProgram = "fsel";
             };
           };
         };
