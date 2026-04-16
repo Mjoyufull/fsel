@@ -75,9 +75,10 @@ fn ensure_single_launcher_instance(
         if holder_pids.is_empty() {
             match owner_state {
                 LauncherOwner::Stale => {
-                    if lock_contents.is_empty()
-                        || remove_lockfile_if_unchanged(lock_path, &lock_contents)?
-                    {
+                    if lock_contents.is_empty() {
+                        let _ = fs::remove_file(lock_path);
+                        continue;
+                    } else if remove_lockfile_if_unchanged(lock_path, &lock_contents)? {
                         continue;
                     }
                 }
