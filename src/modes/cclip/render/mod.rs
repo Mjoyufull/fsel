@@ -104,6 +104,14 @@ pub(super) fn draw(
         list_state.select(visible_selection);
 
         let (input_line, input_title) = input::input_line_and_title(ui, options);
+        let text_len = input_line.width();
+        let available_width = chunks[input_panel_index].width.saturating_sub(2) as usize;
+        let scroll_x = if text_len > available_width {
+            (text_len - available_width) as u16
+        } else {
+            0
+        };
+
         let input_paragraph = Paragraph::new(input_line)
             .block(panels::panel_block(
                 input_title,
@@ -113,7 +121,7 @@ pub(super) fn draw(
             ))
             .style(ratatui::style::Style::default().fg(options.input_text_color))
             .alignment(Alignment::Left)
-            .wrap(Wrap { trim: false });
+            .scroll((0, scroll_x));
 
         let is_kitty = matches!(options.graphics_adapter, crate::ui::GraphicsAdapter::Kitty);
         if is_kitty || needs_sixel_clear || force_buffer_sync {
