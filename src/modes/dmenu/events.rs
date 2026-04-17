@@ -33,25 +33,23 @@ pub(super) fn handle_key_event(
             ui.filter();
             auto_select_if_single_match(ui, options);
         }
-        (KeyCode::Left, _) => {
-            if !ui.shown.is_empty() {
-                ui.selected = Some(0);
+        (KeyCode::Left, _) if !ui.shown.is_empty() => {
+            ui.selected = Some(0);
+            ui.scroll_offset = 0;
+        }
+        (KeyCode::Left, _) => {}
+        (KeyCode::Right, _) if !ui.shown.is_empty() => {
+            let last_index = ui.shown.len() - 1;
+            ui.selected = Some(last_index);
+
+            let max_visible = options.max_visible_items(terminal_height);
+            if max_visible > 0 && ui.shown.len() > max_visible {
+                ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
+            } else {
                 ui.scroll_offset = 0;
             }
         }
-        (KeyCode::Right, _) => {
-            if !ui.shown.is_empty() {
-                let last_index = ui.shown.len() - 1;
-                ui.selected = Some(last_index);
-
-                let max_visible = options.max_visible_items(terminal_height);
-                if max_visible > 0 && ui.shown.len() > max_visible {
-                    ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
-                } else {
-                    ui.scroll_offset = 0;
-                }
-            }
-        }
+        (KeyCode::Right, _) => {}
         (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
             move_selection(ui, options, terminal_height, 1);
         }
@@ -93,32 +91,27 @@ pub(super) fn handle_mouse_event(
         MouseEventKind::Moved => {
             update_selection_for_mouse_pos(ui, mouse_row);
         }
-        MouseEventKind::Down(MouseButton::Left) => {
+        MouseEventKind::Down(MouseButton::Left)
             if mouse_row >= items_content_start
                 && mouse_row < items_content_end
-                && !ui.shown.is_empty()
-            {
-                let row_in_content = mouse_row - items_content_start;
-                let clicked_item_index = ui.scroll_offset + row_in_content as usize;
+                && !ui.shown.is_empty() =>
+        {
+            let row_in_content = mouse_row - items_content_start;
+            let clicked_item_index = ui.scroll_offset + row_in_content as usize;
 
-                if clicked_item_index < ui.shown.len() {
-                    return LoopOutcome::Print(selected_output(ui, options, clicked_item_index));
-                }
+            if clicked_item_index < ui.shown.len() {
+                return LoopOutcome::Print(selected_output(ui, options, clicked_item_index));
             }
         }
-        MouseEventKind::ScrollUp => {
-            if !ui.shown.is_empty() && ui.scroll_offset > 0 {
-                ui.scroll_offset -= 1;
+        MouseEventKind::ScrollUp if !ui.shown.is_empty() && ui.scroll_offset > 0 => {
+            ui.scroll_offset -= 1;
+            update_selection_for_mouse_pos(ui, mouse_row);
+        }
+        MouseEventKind::ScrollDown if !ui.shown.is_empty() => {
+            let max_visible = max_visible_rows as usize;
+            if ui.scroll_offset + max_visible < ui.shown.len() {
+                ui.scroll_offset += 1;
                 update_selection_for_mouse_pos(ui, mouse_row);
-            }
-        }
-        MouseEventKind::ScrollDown => {
-            if !ui.shown.is_empty() {
-                let max_visible = max_visible_rows as usize;
-                if ui.scroll_offset + max_visible < ui.shown.len() {
-                    ui.scroll_offset += 1;
-                    update_selection_for_mouse_pos(ui, mouse_row);
-                }
             }
         }
         _ => {}

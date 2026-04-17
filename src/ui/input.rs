@@ -67,27 +67,21 @@ impl AsyncInput {
         config: Config,
     ) -> bool {
         match event {
-            CrosstermEvent::Key(key) => {
-                // Filter for KeyPress only (avoid duplicate events on some platforms)
-                if key.kind == crossterm::event::KeyEventKind::Press {
-                    if tx.send(Event::Input(key)).is_err() {
-                        return true;
-                    }
-                    if key.code == config.exit_key {
-                        return true;
-                    }
+            CrosstermEvent::Key(key) if key.kind == crossterm::event::KeyEventKind::Press => {
+                if tx.send(Event::Input(key)).is_err() {
+                    return true;
                 }
-            }
-            CrosstermEvent::Mouse(mouse) => {
-                if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
+                if key.code == config.exit_key {
                     return true;
                 }
             }
-            CrosstermEvent::Resize(_, _) => {
-                // Trigger a render on resize
-                if tx.send(Event::Render).is_err() {
-                    return true;
-                }
+            CrosstermEvent::Mouse(mouse)
+                if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() =>
+            {
+                return true;
+            }
+            CrosstermEvent::Resize(_, _) if tx.send(Event::Render).is_err() => {
+                return true;
             }
             _ => {}
         }
@@ -190,10 +184,10 @@ impl Input {
                                     return;
                                 }
                             }
-                            CrosstermEvent::Mouse(mouse) => {
-                                if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() {
-                                    return;
-                                }
+                            CrosstermEvent::Mouse(mouse)
+                                if !config.disable_mouse && tx.send(Event::Mouse(mouse)).is_err() =>
+                            {
+                                return;
                             }
                             _ => {}
                         }
