@@ -75,9 +75,13 @@ fn ensure_single_launcher_instance(
         if holder_pids.is_empty() {
             match owner_state {
                 LauncherOwner::Stale => {
-                    if lock_contents.is_empty()
-                        || remove_lockfile_if_unchanged(lock_path, &lock_contents)?
-                    {
+                    if lock_contents.is_empty() {
+                        fs::remove_file(lock_path)
+                            .wrap_err("Failed to remove empty launcher lockfile")?;
+                        continue;
+                    }
+
+                    if remove_lockfile_if_unchanged(lock_path, &lock_contents)? {
                         continue;
                     }
                 }
@@ -381,6 +385,24 @@ mod tests {
                 crate::platform::process::get_current_pid()
             )));
             assert!(lock_contents.contains("mode=launcher"));
+            assert!(session.db().begin_read().is_ok());
+        }
+
+        assert!(!lock_path.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn start_clears_empty_stale_lockfile_before_acquiring_session() {
+        let dir = test_temp_dir("empty-lock");
+        let history_db_path = dir.join("history.db");
+        let lock_path = dir.join("launcher.lock");
+        fs::write(&lock_path, "").expect("empty lockfile should be written");
+
+        {
+            let session = LauncherSession::start(&history_db_path, &lock_path, false)
+                .expect("session should replace empty stale lockfile");
+            assert!(lock_path.exists());
             assert!(session.db().begin_read().is_ok());
         }
 
