@@ -75,14 +75,7 @@ fn ensure_single_launcher_instance(
         if holder_pids.is_empty() {
             match owner_state {
                 LauncherOwner::Stale => {
-                    if lock_contents.is_empty() {
-                        if let Err(error) = fs::remove_file(lock_path)
-                            && error.kind() != io::ErrorKind::NotFound
-                        {
-                            return Err(error).wrap_err("Failed to remove empty launcher lockfile");
-                        }
-                        continue;
-                    } else if remove_lockfile_if_unchanged(lock_path, &lock_contents)? {
+                    if remove_lockfile_if_unchanged(lock_path, &lock_contents)? {
                         continue;
                     }
                 }
