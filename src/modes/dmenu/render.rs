@@ -94,7 +94,7 @@ pub(super) fn draw_frame(
     });
     list_state.select(visible_selection);
 
-    let input_paragraph = Paragraph::new(Line::from(vec![
+    let input_line = Line::from(vec![
         Span::styled("(", Style::default().fg(options.input_text_color)),
         Span::styled(
             (ui.selected.map_or(0, |index| index + 1)).to_string(),
@@ -116,22 +116,32 @@ pub(super) fn draw_frame(
             &options.cursor,
             Style::default().fg(options.highlight_color),
         ),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(Span::styled(
-                options.input_title(),
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(options.header_title_color),
-            ))
-            .border_type(border_type)
-            .border_style(Style::default().fg(options.input_border_color)),
-    )
-    .style(Style::default().fg(options.input_text_color))
-    .alignment(Alignment::Left)
-    .wrap(Wrap { trim: false });
+    ]);
+
+    let text_len = input_line.width();
+    let available_width = chunks[input_panel_index].width.saturating_sub(2) as usize;
+    let scroll_x = if text_len > available_width {
+        (text_len - available_width) as u16
+    } else {
+        0
+    };
+
+    let input_paragraph = Paragraph::new(input_line)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(Span::styled(
+                    options.input_title(),
+                    Style::default()
+                        .add_modifier(Modifier::BOLD)
+                        .fg(options.header_title_color),
+                ))
+                .border_type(border_type)
+                .border_style(Style::default().fg(options.input_border_color)),
+        )
+        .style(Style::default().fg(options.input_text_color))
+        .alignment(Alignment::Left)
+        .scroll((0, scroll_x));
 
     if matches!(options.graphics_adapter, crate::ui::GraphicsAdapter::Kitty) {
         if show_content_panel && (!options.hide_before_typing || !ui.query.is_empty()) {
