@@ -23,6 +23,9 @@ fsel -ss firefox
 # Direct launch (no UI)
 fsel -p firefox
 
+# Print JSON to stdout (no UI)
+fsel --stdout -ss firefox
+
 # Use custom config
 fsel -c ~/.config/fsel/test-config.toml
 fsel --config ~/.config/fsel/test-config.toml
