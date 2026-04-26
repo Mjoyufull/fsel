@@ -41,6 +41,9 @@ pub(super) fn parse_cli_overrides(
             Long("no-exec") => {
                 default.no_exec = true;
             }
+            Long("stdout") => {
+                default.stdout = true;
+            }
             Long("launch-prefix") => {
                 cli_launch_methods += 1;
                 let prefix = value_as_string(parser, "Launch prefix must be valid UTF-8")?;
