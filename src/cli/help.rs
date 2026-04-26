@@ -68,6 +68,7 @@ Usage:
 │  ├─ -t, --tty                    Run terminal apps in this TTY and replace the fsel process
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging, write logs under ~/.config/fsel/logs/, and imply -vvv
+│  ├─ --stdout                     Print filtered desktop entries to stdout in json form
 │  ├─ --no-exec                    Print the selected item instead of launching it
 │  └─ -ss <SEARCH>                 Pre-fill the search box; place this last so it captures the rest
 │
