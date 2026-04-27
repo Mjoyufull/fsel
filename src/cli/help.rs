@@ -31,6 +31,7 @@ Usage:
 │  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn; pass =no to ignore them
 │  ├─ --filter-actions[=no]        Hide desktop actions; pass =no to keep entries like new window
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
+│  ├─ --stdout                     Print filtered desktop entries to stdout in json form
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching
 │  └─ --prefix-depth <N>           Tune how long prefix matches outrank fuzzy matches
@@ -67,6 +68,7 @@ Usage:
 │  ├─ -t, --tty                    Run terminal apps in this TTY and replace the fsel process
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging, write logs under ~/.config/fsel/logs/, and imply -vvv
+│  ├─ --stdout                     Print filtered desktop entries to stdout in json form
 │  ├─ --no-exec                    Print the selected item instead of launching it
 │  └─ -ss <SEARCH>                 Pre-fill the search box; place this last so it captures the rest
 │

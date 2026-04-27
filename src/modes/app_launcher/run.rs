@@ -22,14 +22,6 @@ pub async fn run(cli: Opts) -> Result<()> {
         return super::direct::launch_program_directly(&cli, program_name);
     }
 
-    crate::ui::terminal::setup_terminal(cli.disable_mouse)?;
-    let terminal_active = Cell::new(true);
-    defer! {
-        if terminal_active.get() {
-            let _ = crate::ui::terminal::shutdown_terminal(cli.disable_mouse);
-        }
-    }
-
     let data_dir = crate::app::paths::runtime_data_dir()?;
     let history_db_path = crate::app::paths::history_db_path()?;
     let lock_path = crate::app::paths::launcher_lock_path()?;
@@ -71,11 +63,6 @@ pub async fn run(cli: Opts) -> Result<()> {
 
     super::admin::log_startup_if_enabled(&cli, all_apps.len(), frecency_data.len());
 
-    let backend = CrosstermBackend::new(io::stderr());
-    let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
-    terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
-    terminal.clear().wrap_err("Failed to clear terminal")?;
-
     let mut state = State::new(
         all_apps,
         cli.match_mode,
@@ -97,6 +84,15 @@ pub async fn run(cli: Opts) -> Result<()> {
         cli.verbose.unwrap_or(0),
     );
 
+    if cli.stdout {
+        println!(
+            "{}",
+            serde_json::to_string(&state.shown)
+                .expect("Desktop entries should be serializable to json")
+        );
+        return Ok(());
+    }
+
     let mut input = InputConfig {
         disable_mouse: cli.disable_mouse,
         tick_rate: Duration::from_millis(16),
@@ -104,6 +100,19 @@ pub async fn run(cli: Opts) -> Result<()> {
         ..InputConfig::default()
     }
     .init_async();
+
+    crate::ui::terminal::setup_terminal(cli.disable_mouse)?;
+    let terminal_active = Cell::new(true);
+    defer! {
+        if terminal_active.get() {
+            let _ = crate::ui::terminal::shutdown_terminal(cli.disable_mouse);
+        }
+    }
+
+    let backend = CrosstermBackend::new(io::stderr());
+    let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
+    terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
+    terminal.clear().wrap_err("Failed to clear terminal")?;
 
     loop {
         terminal.draw(|frame| {
