@@ -16,18 +16,18 @@ use std::time::Duration;
 pub async fn run(cli: Opts) -> Result<()> {
     use crossterm::event::KeyCode;
 
-    if let Some(ref program_name) = cli.program
-        && program_name.len() >= 2
-    {
-        return super::direct::launch_program_directly(&cli, program_name);
-    }
-
     let data_dir = crate::app::paths::runtime_data_dir()?;
     let history_db_path = crate::app::paths::history_db_path()?;
     let lock_path = crate::app::paths::launcher_lock_path()?;
     let session =
         super::session::LauncherSession::start(&history_db_path, &lock_path, cli.replace)?;
     let db = std::sync::Arc::clone(session.db());
+
+    if let Some(ref program_name) = cli.program
+        && program_name.len() >= 2
+    {
+        return super::direct::launch_program_directly(&cli, program_name, &session);
+    }
 
     if super::admin::handle_maintenance_command(&cli, &db, data_dir.as_path())? {
         return Ok(());

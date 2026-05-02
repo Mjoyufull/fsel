@@ -1,27 +1,32 @@
 use crate::cli;
-use crate::core::{cache, database};
+use crate::core::cache;
 use crate::desktop;
+use crate::modes::app_launcher::session::LauncherSession;
 use crate::strings;
 use eyre::{Result, eyre};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use std::io::{self, Write};
 
 /// Launches a program directly by name, bypassing the TUI.
-pub(crate) fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> Result<()> {
-    let (db, _) = database::open_history_db()?;
-    let history_cache = cache::HistoryCache::load(&db)?;
+pub(crate) fn launch_program_directly(
+    cli: &cli::Opts,
+    program_name: &str,
+    session: &LauncherSession,
+) -> Result<()> {
+    let db = session.db();
+    let history_cache = cache::HistoryCache::load(db)?;
 
-    if let Some(app) = find_history_exact_name_match(&db, &history_cache, program_name, cli)? {
-        return launch_or_print(cli, &db, &app);
+    if let Some(app) = find_history_exact_name_match(db, &history_cache, program_name, cli)? {
+        return launch_or_print(cli, db, &app);
     }
 
     if matches!(cli.match_mode, cli::MatchMode::Fuzzy)
-        && let Some(app) = find_history_best_match(&db, &history_cache, program_name, cli)?
+        && let Some(app) = find_history_best_match(db, &history_cache, program_name, cli)?
     {
-        return launch_or_print(cli, &db, &app);
+        return launch_or_print(cli, db, &app);
     }
 
-    let all_apps = load_available_apps(&db, cli);
+    let all_apps = load_available_apps(db, cli);
     let app_to_run =
         select_match_for_mode(all_apps, program_name, cli.match_mode).ok_or_else(|| {
             if matches!(cli.match_mode, cli::MatchMode::Exact) {
@@ -46,7 +51,7 @@ pub(crate) fn launch_program_directly(cli: &cli::Opts, program_name: &str) -> Re
         eprintln!("Launching: {} ({})", app_to_run.name, app_to_run.command);
     }
 
-    launch_or_print(cli, &db, &app_to_run)
+    launch_or_print(cli, db, &app_to_run)
 }
 
 fn launch_or_print(
