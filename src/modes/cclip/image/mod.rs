@@ -6,6 +6,7 @@ use crate::ui::{DISPLAY_STATE, DisplayState, DmenuUI, ImageManager, TagMode};
 use eyre::Result;
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui_image::picker::{Picker, ProtocolType};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -26,28 +27,24 @@ pub(super) struct ImageRuntime {
 
 impl ImageRuntime {
     pub(super) async fn new(options: &CclipOptions, ui: &mut DmenuUI<'_>) -> Self {
-        let picker = ratatui_image::picker::Picker::from_query_stdio().ok();
-        let image_manager = Some(Arc::new(Mutex::new(ImageManager::new(
-            picker
-                .clone()
-                .unwrap_or_else(ratatui_image::picker::Picker::halfblocks),
-        ))));
+        let detected_adapter = crate::ui::GraphicsAdapter::detect(None);
+        let image_preview_enabled = options.image_preview_enabled(!matches!(
+            detected_adapter,
+            crate::ui::GraphicsAdapter::None
+        ));
+        let image_manager = image_preview_enabled.then(|| {
+            Arc::new(Mutex::new(ImageManager::new(picker_for_adapter(
+                detected_adapter,
+            ))))
+        });
         let failed_rowids = Arc::new(Mutex::new(HashSet::<String>::new()));
         let (redraw_tx, redraw_rx) = mpsc::unbounded_channel::<()>();
 
-        let mut image_preview_enabled = false;
-        let mut cached_is_sixel = false;
-        let mut detected_adapter = crate::ui::GraphicsAdapter::None;
-        if let Some(manager) = &image_manager {
-            let manager_lock = manager.lock().await;
-            image_preview_enabled = options.image_preview_enabled(manager_lock.supports_graphics());
-            cached_is_sixel = manager_lock.is_sixel();
-            detected_adapter = crate::ui::GraphicsAdapter::detect(Some(manager_lock.picker()));
-        }
+        let cached_is_sixel = matches!(detected_adapter, crate::ui::GraphicsAdapter::Sixel);
 
-        if picker.is_none() && image_preview_enabled {
+        if matches!(detected_adapter, crate::ui::GraphicsAdapter::None) && image_preview_enabled {
             ui.set_temp_message(
-                "image_preview enabled but terminal graphics detection failed (using half-block fallback)".to_string(),
+                "image_preview enabled but terminal graphics detection found no high-resolution protocol (using half-block fallback)".to_string(),
             );
         }
 
@@ -173,13 +170,66 @@ impl ImageRuntime {
     }
 }
 
+fn picker_for_adapter(adapter: crate::ui::GraphicsAdapter) -> Picker {
+    let mut picker = Picker::halfblocks();
+    match adapter {
+        crate::ui::GraphicsAdapter::Kitty => picker.set_protocol_type(ProtocolType::Kitty),
+        crate::ui::GraphicsAdapter::Sixel => picker.set_protocol_type(ProtocolType::Sixel),
+        crate::ui::GraphicsAdapter::None => {}
+    }
+    picker
+}
+
 #[cfg(test)]
 mod tests {
     use super::ImageRuntime;
-    use crate::ui::{DISPLAY_STATE, DisplayState, GraphicsAdapter};
+    use crate::cli::PanelPosition;
+    use crate::ui::{DISPLAY_STATE, DisplayState, DmenuUI, GraphicsAdapter};
+    use ratatui::style::Color;
     use std::collections::HashSet;
     use std::sync::Arc;
     use tokio::sync::{Mutex, mpsc};
+
+    fn options_with_image_preview(
+        explicit_image_preview: Option<bool>,
+    ) -> super::super::state::CclipOptions {
+        super::super::state::CclipOptions {
+            disable_mouse: false,
+            hard_stop: false,
+            wrap_long_lines: true,
+            show_line_numbers: false,
+            show_tag_color_names: false,
+            hide_image_message: false,
+            highlight_color: Color::LightBlue,
+            main_border_color: Color::White,
+            items_border_color: Color::White,
+            input_border_color: Color::White,
+            main_text_color: Color::White,
+            items_text_color: Color::White,
+            input_text_color: Color::White,
+            header_title_color: Color::White,
+            rounded_borders: true,
+            content_panel_height_percent: 30,
+            input_panel_height: 3,
+            content_panel_position: PanelPosition::Top,
+            cursor: String::new(),
+            term_is_foot: false,
+            graphics_adapter: GraphicsAdapter::None,
+            explicit_image_preview,
+        }
+    }
+
+    #[tokio::test]
+    async fn new_skips_image_manager_when_preview_is_explicitly_disabled() {
+        let options = options_with_image_preview(Some(false));
+        let mut ui = DmenuUI::new(Vec::new(), true, false);
+
+        let runtime = ImageRuntime::new(&options, &mut ui).await;
+
+        assert!(!runtime.preview_enabled());
+        assert!(runtime.image_manager.is_none());
+        assert_eq!(runtime.detected_adapter(), GraphicsAdapter::None);
+    }
 
     #[test]
     fn restore_display_state_keeps_loading_state_for_uncached_selection() {

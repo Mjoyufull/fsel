@@ -34,8 +34,7 @@ pub struct ImageManager {
 }
 
 impl ImageManager {
-    /// Initialize the image manager by detecting terminal capabilities
-    /// This should be called after entering alternate screen
+    /// Initialize the image manager with the picker chosen by the caller.
     pub fn new(picker: Picker) -> Self {
         Self {
             picker,
@@ -46,22 +45,9 @@ impl ImageManager {
         }
     }
 
-    pub fn is_sixel(&self) -> bool {
-        matches!(self.picker.protocol_type(), ProtocolType::Sixel)
-    }
-
-    pub fn picker(&self) -> &Picker {
-        &self.picker
-    }
-
     /// Check if an image is already in cache
     pub fn is_cached(&self, rowid: &str) -> bool {
         self.cache.contains_key(rowid)
-    }
-
-    /// Check if the terminal supports any high-resolution graphics protocol
-    pub fn supports_graphics(&self) -> bool {
-        !matches!(self.picker.protocol_type(), ProtocolType::Halfblocks)
     }
 
     /// Set current image to display (must be in cache)
