@@ -107,6 +107,7 @@ impl ImageRuntime {
         self.image_manager = self
             .image_preview_enabled
             .then(|| Arc::new(Mutex::new(ImageManager::new(picker))));
+        self.reset_display_state_for_manager_replacement();
         self.force_buffer_sync = true;
 
         if self.image_preview_forced && !supports_graphics {
@@ -211,6 +212,13 @@ impl ImageRuntime {
             *state = DisplayState::Empty;
         }
     }
+
+    fn reset_display_state_for_manager_replacement(&self) {
+        let mut state = DISPLAY_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *state = DisplayState::Empty;
+    }
 }
 
 fn picker_for_adapter(adapter: crate::ui::GraphicsAdapter) -> Picker {
@@ -308,6 +316,41 @@ mod tests {
         let runtime = ImageRuntime::new(&options, &mut ui).await;
 
         assert!(!runtime.needs_stdio_picker_detection_for_selection(&ui));
+    }
+
+    #[test]
+    fn manager_replacement_resets_display_state_for_current_image() {
+        let (redraw_tx, redraw_rx) = mpsc::unbounded_channel();
+        let runtime = ImageRuntime {
+            image_manager: None,
+            failed_rowids: Arc::new(Mutex::new(HashSet::new())),
+            redraw_tx,
+            redraw_rx,
+            image_preview_enabled: true,
+            image_preview_allowed: true,
+            image_preview_forced: false,
+            stdio_picker_detection_attempted: false,
+            cached_is_sixel: false,
+            detected_adapter: GraphicsAdapter::None,
+            previous_was_image: false,
+            current_is_image: true,
+            current_rowid: Some("42".to_string()),
+            force_buffer_sync: false,
+        };
+
+        {
+            let mut state = DISPLAY_STATE
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            *state = DisplayState::Loading("42".to_string());
+        }
+
+        runtime.reset_display_state_for_manager_replacement();
+
+        let state = DISPLAY_STATE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        assert_eq!(*state, DisplayState::Empty);
     }
 
     #[test]
