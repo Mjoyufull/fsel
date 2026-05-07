@@ -2,15 +2,79 @@
 
 use super::CclipItem;
 use eyre::{Result, eyre};
+use std::io;
 use std::process::{Command, Stdio};
 
 impl CclipItem {
     /// Copy this item back to the clipboard (Wayland)
     fn copy_to_clipboard_wayland(&self) -> Result<()> {
+        if command_is_available("wl-copy")
+            && let Ok(()) = self.copy_to_clipboard_wayland_with_wl_copy()
+        {
+            return Ok(());
+        }
+
         let status = Command::new("cclip").args(["copy", &self.rowid]).status()?;
 
         if !status.success() {
             return Err(eyre!("cclip copy failed"));
+        }
+
+        Ok(())
+    }
+
+    fn copy_to_clipboard_wayland_with_wl_copy(&self) -> Result<()> {
+        let mut cclip_child = Command::new("cclip")
+            .args(["get", &self.rowid])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let cclip_stdout = cclip_child
+            .stdout
+            .take()
+            .ok_or_else(|| eyre!("failed to capture cclip stdout"))?;
+
+        let mut wl_copy_child = Command::new("wl-copy")
+            .args(["--type", &self.mime_type])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        let wl_copy_stdin = wl_copy_child
+            .stdin
+            .take()
+            .ok_or_else(|| eyre!("failed to open wl-copy stdin"))?;
+
+        let pipe_handle = std::thread::spawn(move || {
+            let mut source = cclip_stdout;
+            let mut sink = wl_copy_stdin;
+            io::copy(&mut source, &mut sink)
+        });
+
+        let cclip_output = cclip_child.wait_with_output()?;
+        let copied_bytes = pipe_handle
+            .join()
+            .map_err(|_| eyre!("clipboard pipe thread panicked"))??;
+        let wl_copy_output = wl_copy_child.wait_with_output()?;
+
+        if !cclip_output.status.success() {
+            return Err(eyre!(
+                "cclip get failed: {}",
+                String::from_utf8_lossy(&cclip_output.stderr)
+            ));
+        }
+
+        if copied_bytes == 0 {
+            return Err(eyre!("cclip get returned no data"));
+        }
+
+        if !wl_copy_output.status.success() {
+            return Err(eyre!(
+                "wl-copy failed: {}",
+                String::from_utf8_lossy(&wl_copy_output.stderr)
+            ));
         }
 
         Ok(())
@@ -89,6 +153,16 @@ impl CclipItem {
             self.copy_to_clipboard_x11()
         }
     }
+}
+
+fn command_is_available(command: &str) -> bool {
+    Command::new(command)
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 /// Tag a cclip item using cclip's tag command

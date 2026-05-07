@@ -56,8 +56,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
     let mut ui = DmenuUI::new(items, options.wrap_long_lines, options.show_line_numbers);
     if let Some(search) = &cli.search_string {
         ui.query = search.clone();
+        ui.filter();
     }
-    ui.filter();
     if !ui.shown.is_empty() && ui.selected.is_none() {
         ui.selected = Some(0);
     }
