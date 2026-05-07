@@ -147,6 +147,18 @@ impl AsyncInput {
     pub async fn next(&mut self) -> Option<Event<KeyEvent>> {
         self.rx.recv().await
     }
+
+    /// Stop the background event reader before code temporarily reads terminal stdio directly.
+    pub async fn shutdown(mut self) {
+        self._task.abort();
+        let _ = (&mut self._task).await;
+    }
+}
+
+impl Drop for AsyncInput {
+    fn drop(&mut self) {
+        self._task.abort();
+    }
 }
 
 // =============================================================================

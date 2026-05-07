@@ -17,6 +17,9 @@ pub(super) struct ImageRuntime {
     redraw_tx: mpsc::UnboundedSender<()>,
     pub(super) redraw_rx: mpsc::UnboundedReceiver<()>,
     image_preview_enabled: bool,
+    image_preview_allowed: bool,
+    image_preview_forced: bool,
+    stdio_picker_detection_attempted: bool,
     cached_is_sixel: bool,
     detected_adapter: crate::ui::GraphicsAdapter,
     previous_was_image: bool,
@@ -28,6 +31,8 @@ pub(super) struct ImageRuntime {
 impl ImageRuntime {
     pub(super) async fn new(options: &CclipOptions, ui: &mut DmenuUI<'_>) -> Self {
         let detected_adapter = crate::ui::GraphicsAdapter::detect(None);
+        let image_preview_allowed = options.explicit_image_preview != Some(false);
+        let image_preview_forced = options.explicit_image_preview == Some(true);
         let image_preview_enabled = options.image_preview_enabled(!matches!(
             detected_adapter,
             crate::ui::GraphicsAdapter::None
@@ -54,6 +59,9 @@ impl ImageRuntime {
             redraw_tx,
             redraw_rx,
             image_preview_enabled,
+            image_preview_allowed,
+            image_preview_forced,
+            stdio_picker_detection_attempted: false,
             cached_is_sixel,
             detected_adapter,
             previous_was_image: false,
@@ -73,6 +81,41 @@ impl ImageRuntime {
 
     pub(super) fn current_is_image(&self) -> bool {
         self.current_is_image
+    }
+
+    pub(super) fn needs_stdio_picker_detection_for_selection(&self, ui: &DmenuUI<'_>) -> bool {
+        self.image_preview_allowed
+            && !self.stdio_picker_detection_attempted
+            && selected_image_rowid(ui).is_some()
+    }
+
+    pub(super) fn detect_stdio_picker_for_selection(&mut self, ui: &mut DmenuUI<'_>) -> bool {
+        if !self.needs_stdio_picker_detection_for_selection(ui) {
+            return false;
+        }
+
+        self.stdio_picker_detection_attempted = true;
+        let Ok(picker) = Picker::from_query_stdio() else {
+            return false;
+        };
+
+        let detected_adapter = crate::ui::GraphicsAdapter::detect(Some(&picker));
+        let supports_graphics = !matches!(detected_adapter, crate::ui::GraphicsAdapter::None);
+        self.image_preview_enabled = self.image_preview_forced || supports_graphics;
+        self.cached_is_sixel = matches!(detected_adapter, crate::ui::GraphicsAdapter::Sixel);
+        self.detected_adapter = detected_adapter;
+        self.image_manager = self
+            .image_preview_enabled
+            .then(|| Arc::new(Mutex::new(ImageManager::new(picker))));
+        self.force_buffer_sync = true;
+
+        if self.image_preview_forced && !supports_graphics {
+            ui.set_temp_message(
+                "image_preview enabled but terminal graphics detection found no high-resolution protocol (using half-block fallback)".to_string(),
+            );
+        }
+
+        true
     }
 
     pub(super) fn request_buffer_sync(&mut self) {
@@ -180,10 +223,18 @@ fn picker_for_adapter(adapter: crate::ui::GraphicsAdapter) -> Picker {
     picker
 }
 
+fn selected_image_rowid(ui: &DmenuUI<'_>) -> Option<String> {
+    let selected = ui.selected?;
+    let item = ui.shown.get(selected)?;
+    ui.is_cclip_image_item(item)
+        .then(|| ui.get_cclip_rowid(item))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::ImageRuntime;
     use crate::cli::PanelPosition;
+    use crate::common::Item;
     use crate::ui::{DISPLAY_STATE, DisplayState, DmenuUI, GraphicsAdapter};
     use ratatui::style::Color;
     use std::collections::HashSet;
@@ -219,6 +270,14 @@ mod tests {
         }
     }
 
+    fn cclip_item(rowid: &str, mime_type: &str, preview: &str) -> Item {
+        Item::new_simple(
+            format!("{rowid}\t{mime_type}\t{preview}"),
+            preview.to_string(),
+            rowid.parse().expect("rowid should be numeric"),
+        )
+    }
+
     #[tokio::test]
     async fn new_skips_image_manager_when_preview_is_explicitly_disabled() {
         let options = options_with_image_preview(Some(false));
@@ -231,6 +290,26 @@ mod tests {
         assert_eq!(runtime.detected_adapter(), GraphicsAdapter::None);
     }
 
+    #[tokio::test]
+    async fn picker_detection_is_needed_for_selected_image_items() {
+        let options = options_with_image_preview(Some(true));
+        let mut ui = DmenuUI::new(vec![cclip_item("1", "image/png", "image")], true, false);
+        ui.selected = Some(0);
+        let runtime = ImageRuntime::new(&options, &mut ui).await;
+
+        assert!(runtime.needs_stdio_picker_detection_for_selection(&ui));
+    }
+
+    #[tokio::test]
+    async fn picker_detection_is_skipped_for_selected_text_items() {
+        let options = options_with_image_preview(Some(true));
+        let mut ui = DmenuUI::new(vec![cclip_item("1", "text/plain", "text")], true, false);
+        ui.selected = Some(0);
+        let runtime = ImageRuntime::new(&options, &mut ui).await;
+
+        assert!(!runtime.needs_stdio_picker_detection_for_selection(&ui));
+    }
+
     #[test]
     fn restore_display_state_keeps_loading_state_for_uncached_selection() {
         let (redraw_tx, redraw_rx) = mpsc::unbounded_channel();
@@ -240,6 +319,9 @@ mod tests {
             redraw_tx,
             redraw_rx,
             image_preview_enabled: true,
+            image_preview_allowed: true,
+            image_preview_forced: false,
+            stdio_picker_detection_attempted: false,
             cached_is_sixel: false,
             detected_adapter: GraphicsAdapter::None,
             previous_was_image: false,

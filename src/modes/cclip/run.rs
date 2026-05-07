@@ -52,7 +52,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
-    let mut input = options.input_config().init_async();
     let mut ui = DmenuUI::new(items, options.wrap_long_lines, options.show_line_numbers);
     if let Some(search) = &cli.search_string {
         ui.query = search.clone();
@@ -67,6 +66,26 @@ pub async fn run(cli: &Opts) -> Result<()> {
     let mut list_state = ListState::default();
     let mut max_visible = 0usize;
     let mut needs_redraw = true;
+
+    if needs_redraw {
+        ui.clear_expired_message();
+        image_runtime.prepare_for_draw(&ui).await;
+        max_visible = super::render::draw(
+            &mut terminal,
+            &mut ui,
+            &options,
+            &tag_metadata_formatter,
+            &mut list_state,
+            &mut image_runtime,
+        )?;
+        needs_redraw = false;
+    }
+    if image_runtime.detect_stdio_picker_for_selection(&mut ui) {
+        options.set_graphics_adapter(image_runtime.detected_adapter());
+        needs_redraw = true;
+    }
+
+    let mut input = options.input_config().init_async();
 
     loop {
         if needs_redraw {
@@ -110,6 +129,14 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 needs_redraw = outcome.needs_redraw;
                 if matches!(outcome.control, super::events::LoopControl::Exit) {
                     return Ok(());
+                }
+                if image_runtime.needs_stdio_picker_detection_for_selection(&ui) {
+                    input.shutdown().await;
+                    if image_runtime.detect_stdio_picker_for_selection(&mut ui) {
+                        options.set_graphics_adapter(image_runtime.detected_adapter());
+                        needs_redraw = true;
+                    }
+                    input = options.input_config().init_async();
                 }
             }
         }
