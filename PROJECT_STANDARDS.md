@@ -479,10 +479,10 @@ A maintainer creates a release branch when:
 ### Process
 
 ```bash
-# 1. Merge release branch to main
+# 1. Merge release branch to main (prefer fast-forward)
 git checkout main
 git pull origin main
-git merge release/v3.0.0-kiwicrab
+git merge --ff-only release/v3.0.0-kiwicrab
 
 # 2. Tag the release (tag = version number only, no codename)
 git tag -a 3.0.0 -m "3.0.0"
@@ -499,6 +499,7 @@ git push origin --delete release/v3.0.0-kiwicrab
 ```
 
 **Always merge the release branch to both main and dev before deleting it.** If you already deleted the release branch, merge main into dev once as a one-off recovery.
+If `--ff-only` fails, rebase the **release branch** onto latest `main`, then retry; do not rebase `main`.
 
 **Why this workflow:**
 - main and dev stay independent; only release branches (and hotfixes) connect them
@@ -707,10 +708,10 @@ git commit -am "chore: bump version to 3.0.0-kiwicrab"
 cargo build --release
 cargo test
 
-# 4. Merge to main, tag (version number only), then create GitHub release
+# 4. Merge to main (prefer fast-forward), tag (version number only), then create GitHub release
 git checkout main
 git pull origin main
-git merge release/3.0.0-kiwicrab
+git merge --ff-only release/3.0.0-kiwicrab
 git tag -a 3.0.0 -m "3.0.0"
 git push origin main --tags
 # Create GitHub release: tag 3.0.0, title [3.0.0-kiwicrab], body = release notes from template
