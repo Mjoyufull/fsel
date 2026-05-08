@@ -300,9 +300,29 @@ jobs:
           ANNOUNCEMENT_TITLE: "${{ fromJson(steps.host.outputs.manifest).announcement_title }}"
           ANNOUNCEMENT_BODY: "${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}"
           RELEASE_COMMIT: "${{ github.sha }}"
+          RELEASE_TAG: "${{ needs.plan.outputs.tag }}"
         run: |
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
+
+          DIST_PACKAGE="$(awk -F'"' '/^name = "/ { print $2; exit }' Cargo.toml)"
+          DIST_VERSION="$(awk -F'"' '/^version = "/ { print $2; exit }' Cargo.toml)"
+          DIST_TAG="${DIST_PACKAGE}-v${DIST_VERSION}"
+          python3 - "$RUNNER_TEMP/notes.txt" "$DIST_TAG" "$RELEASE_TAG" <<'PY'
+          import pathlib
+          import sys
+
+          notes_path = pathlib.Path(sys.argv[1])
+          dist_tag = sys.argv[2]
+          release_tag = sys.argv[3]
+
+          notes = notes_path.read_text()
+          notes = notes.replace(
+              f"/releases/download/{dist_tag}/",
+              f"/releases/download/{release_tag}/",
+          )
+          notes_path.write_text(notes)
+          PY
 
           gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
