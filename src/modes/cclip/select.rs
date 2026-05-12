@@ -3,7 +3,16 @@
 use super::CclipItem;
 use eyre::{Result, eyre};
 use std::io;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+const CLIPBOARD_PROVIDER_STARTUP_TIMEOUT: Duration = Duration::from_millis(500);
+
+#[derive(Debug, Eq, PartialEq)]
+enum ClipboardProviderState {
+    Exited,
+    StillRunning,
+}
 
 impl CclipItem {
     /// Copy this item back to the clipboard (Wayland)
@@ -14,11 +23,18 @@ impl CclipItem {
             return Ok(());
         }
 
-        let status = Command::new("cclip").args(["copy", &self.rowid]).status()?;
+        let mut child = Command::new("cclip")
+            .args(["copy", &self.rowid])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
 
-        if !status.success() {
-            return Err(eyre!("cclip copy failed"));
-        }
+        wait_for_clipboard_provider_start(
+            &mut child,
+            "cclip copy",
+            CLIPBOARD_PROVIDER_STARTUP_TIMEOUT,
+        )?;
 
         Ok(())
     }
@@ -39,7 +55,7 @@ impl CclipItem {
             .args(["--type", &self.mime_type])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()?;
 
         let wl_copy_stdin = wl_copy_child
@@ -57,7 +73,11 @@ impl CclipItem {
         let copied_bytes = pipe_handle
             .join()
             .map_err(|_| eyre!("clipboard pipe thread panicked"))??;
-        let wl_copy_output = wl_copy_child.wait_with_output()?;
+        wait_for_clipboard_provider_start(
+            &mut wl_copy_child,
+            "wl-copy",
+            CLIPBOARD_PROVIDER_STARTUP_TIMEOUT,
+        )?;
 
         if !cclip_output.status.success() {
             return Err(eyre!(
@@ -70,88 +90,39 @@ impl CclipItem {
             return Err(eyre!("cclip get returned no data"));
         }
 
-        if !wl_copy_output.status.success() {
-            return Err(eyre!(
-                "wl-copy failed: {}",
-                String::from_utf8_lossy(&wl_copy_output.stderr)
-            ));
-        }
-
         Ok(())
     }
 
-    /// Copy this item back to the clipboard (X11)
-    fn copy_to_clipboard_x11(&self) -> Result<()> {
-        // try xclip first, then xsel as fallback
-        let x11_tools = ["xclip", "xsel"];
-
-        for tool in &x11_tools {
-            if !Command::new(tool)
-                .arg("--version")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
-            let mut cclip_child = Command::new("cclip")
-                .args(["get", &self.rowid])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()?;
-
-            let args = match *tool {
-                "xclip" => vec!["-selection", "clipboard", "-t", &self.mime_type],
-                "xsel" => vec!["--clipboard", "--input"],
-                _ => unreachable!(),
-            };
-
-            let mut x11_child = Command::new(tool)
-                .args(&args)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?;
-
-            // pipe cclip output to x11 tool
-            if let (Some(cclip_stdout), Some(x11_stdin)) =
-                (cclip_child.stdout.take(), x11_child.stdin.take())
-            {
-                std::thread::spawn(move || {
-                    let mut cclip_stdout = cclip_stdout;
-                    let mut x11_stdin = x11_stdin;
-                    std::io::copy(&mut cclip_stdout, &mut x11_stdin).ok();
-                });
-            }
-
-            let cclip_status = cclip_child.wait()?;
-            let x11_status = x11_child.wait()?;
-
-            if !cclip_status.success() {
-                return Err(eyre!("cclip get failed"));
-            }
-
-            if !x11_status.success() {
-                continue; // try next tool
-            }
-
-            return Ok(());
-        }
-
-        Err(eyre!("no X11 clipboard tool found (tried xclip, xsel)"))
-    }
-
-    /// Copy this item back to the clipboard (auto-detect Wayland/X11)
+    /// Copy this item back to the clipboard.
     pub fn copy_to_clipboard(&self) -> Result<()> {
-        // check if we're on wayland
-        if std::env::var("WAYLAND_DISPLAY").is_ok() {
-            self.copy_to_clipboard_wayland()
-        } else {
-            self.copy_to_clipboard_x11()
+        if std::env::var("WAYLAND_DISPLAY").is_err() {
+            return Err(eyre!("cclip mode requires a Wayland session"));
         }
+
+        self.copy_to_clipboard_wayland()
+    }
+}
+
+fn wait_for_clipboard_provider_start(
+    child: &mut Child,
+    command: &str,
+    timeout: Duration,
+) -> Result<ClipboardProviderState> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        if let Some(status) = child.try_wait()? {
+            if status.success() {
+                return Ok(ClipboardProviderState::Exited);
+            }
+            return Err(eyre!("{} failed", command));
+        }
+
+        if Instant::now() >= deadline {
+            return Ok(ClipboardProviderState::StillRunning);
+        }
+
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -242,4 +213,49 @@ pub fn delete_tag(tag: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ClipboardProviderState, wait_for_clipboard_provider_start};
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    #[test]
+    fn provider_start_wait_returns_while_clipboard_owner_stays_running() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("test process should spawn");
+
+        let state = wait_for_clipboard_provider_start(
+            &mut child,
+            "test-provider",
+            Duration::from_millis(20),
+        )
+        .expect("running provider should be accepted");
+
+        assert_eq!(state, ClipboardProviderState::StillRunning);
+        child.kill().expect("test process should be killable");
+        let _ = child.wait();
+    }
+
+    #[test]
+    fn provider_start_wait_rejects_fast_failures() {
+        let mut child = Command::new("sh")
+            .args(["-c", "exit 7"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("test process should spawn");
+
+        let result =
+            wait_for_clipboard_provider_start(&mut child, "test-provider", Duration::from_secs(1));
+
+        assert!(result.is_err());
+    }
 }

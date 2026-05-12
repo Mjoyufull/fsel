@@ -30,13 +30,16 @@ pub(super) struct ImageRuntime {
 
 impl ImageRuntime {
     pub(super) async fn new(options: &CclipOptions, ui: &mut DmenuUI<'_>) -> Self {
-        let detected_adapter = crate::ui::GraphicsAdapter::detect(None);
         let image_preview_allowed = options.explicit_image_preview != Some(false);
         let image_preview_forced = options.explicit_image_preview == Some(true);
-        let image_preview_enabled = options.image_preview_enabled(!matches!(
-            detected_adapter,
+        let detected_adapter = if image_preview_allowed {
+            crate::ui::GraphicsAdapter::detect(None)
+        } else {
             crate::ui::GraphicsAdapter::None
-        ));
+        };
+        let supports_graphics = !matches!(detected_adapter, crate::ui::GraphicsAdapter::None);
+        let image_preview_enabled =
+            image_preview_allowed && options.image_preview_enabled(supports_graphics);
         let image_manager = image_preview_enabled.then(|| {
             Arc::new(Mutex::new(ImageManager::new(picker_for_adapter(
                 detected_adapter,
