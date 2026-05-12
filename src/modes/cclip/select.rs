@@ -93,93 +93,13 @@ impl CclipItem {
         Ok(())
     }
 
-    /// Copy this item back to the clipboard (X11)
-    fn copy_to_clipboard_x11(&self) -> Result<()> {
-        // try xclip first, then xsel as fallback
-        let x11_tools = ["xclip", "xsel"];
-
-        for tool in &x11_tools {
-            if !Command::new(tool)
-                .arg("--version")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
-            let mut cclip_child = Command::new("cclip")
-                .args(["get", &self.rowid])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()?;
-
-            let args = match *tool {
-                "xclip" => vec!["-selection", "clipboard", "-t", &self.mime_type],
-                "xsel" => vec!["--clipboard", "--input"],
-                _ => unreachable!(),
-            };
-
-            let mut x11_child = Command::new(tool)
-                .args(&args)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()?;
-
-            let cclip_stdout = cclip_child
-                .stdout
-                .take()
-                .ok_or_else(|| eyre!("failed to capture cclip stdout"))?;
-            let x11_stdin = x11_child
-                .stdin
-                .take()
-                .ok_or_else(|| eyre!("failed to open {} stdin", tool))?;
-            let pipe_handle = std::thread::spawn(move || {
-                let mut source = cclip_stdout;
-                let mut sink = x11_stdin;
-                io::copy(&mut source, &mut sink)
-            });
-
-            let cclip_status = cclip_child.wait()?;
-            let copied_bytes = pipe_handle
-                .join()
-                .map_err(|_| eyre!("clipboard pipe thread panicked"))??;
-
-            if !cclip_status.success() {
-                return Err(eyre!("cclip get failed"));
-            }
-
-            if copied_bytes == 0 {
-                return Err(eyre!("cclip get returned no data"));
-            }
-
-            if wait_for_clipboard_provider_start(
-                &mut x11_child,
-                tool,
-                CLIPBOARD_PROVIDER_STARTUP_TIMEOUT,
-            )
-            .is_err()
-            {
-                continue; // try next tool
-            }
-
-            return Ok(());
-        }
-
-        Err(eyre!("no X11 clipboard tool found (tried xclip, xsel)"))
-    }
-
-    /// Copy this item back to the clipboard (auto-detect Wayland/X11)
+    /// Copy this item back to the clipboard.
     pub fn copy_to_clipboard(&self) -> Result<()> {
-        // check if we're on wayland
-        if std::env::var("WAYLAND_DISPLAY").is_ok() {
-            self.copy_to_clipboard_wayland()
-        } else {
-            self.copy_to_clipboard_x11()
+        if std::env::var("WAYLAND_DISPLAY").is_err() {
+            return Err(eyre!("cclip mode requires a Wayland session"));
         }
+
+        self.copy_to_clipboard_wayland()
     }
 }
 
