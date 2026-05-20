@@ -333,13 +333,14 @@ bindsym $mod+v exec 'alacritty --title clipboard -e fsel --cclip'
 **Hyprland:**
 ```sh
 # ~/.config/hypr/hyprland.conf
-bind = $mod, D, exec, alacritty --title launcher -e fsel
-windowrule {
-    match:title = launcher
-    float = on 
-    center = on 
-    size = 500 430
-}
+hl.bind(mainMod .. " + D", hl.dsp.exec_cmd("alacritty --title launcher -e fsel"))
+hl.window_rule ({
+    name = "otter-launcher",
+    match = { title = "launcher"},
+    float = true,
+    center = true,
+    size = {500, 430},
+})
 ```
 
 **Niri:**
