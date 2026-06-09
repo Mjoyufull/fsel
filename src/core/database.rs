@@ -72,9 +72,29 @@ fn load_pinned_apps_internal(db: &std::sync::Arc<redb::Database>) -> (HashSet<St
                     loaded_ok = false;
                 }
             },
-            Err(e) => {
-                eprintln!("Warning: Failed to open pinned table: {}", e);
-                loaded_ok = false;
+            Err(open_err) => {
+                if let Ok(write_txn) = db.begin_write() {
+                    if let Err(create_err) = write_txn.open_table(crate::core::cache::PINNED_TABLE)
+                    {
+                        eprintln!(
+                            "Error: failed to create pinned table after open failure: {} (open error: {})",
+                            create_err, open_err
+                        );
+                        loaded_ok = false;
+                    } else if let Err(e) = write_txn.commit() {
+                        eprintln!(
+                            "Error: failed to commit tx when creating pinned table: {} (open error: {})",
+                            e, open_err
+                        );
+                        loaded_ok = false;
+                    }
+                } else {
+                    eprintln!(
+                        "Warning: failed to begin write transaction to create pinned table: {}",
+                        open_err
+                    );
+                    loaded_ok = false;
+                }
             }
         },
         Err(e) => {
@@ -117,12 +137,30 @@ pub fn load_pin_timestamps(db: &std::sync::Arc<redb::Database>) -> HashMap<Strin
                         timestamps_loaded_ok = false;
                     }
                 },
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to open pinned table for pin timestamps: {}",
-                        e
-                    );
-                    timestamps_loaded_ok = false;
+                Err(open_err) => {
+                    if let Ok(write_txn) = db.begin_write() {
+                        if let Err(create_err) =
+                            write_txn.open_table(crate::core::cache::PINNED_TABLE)
+                        {
+                            eprintln!(
+                                "Error: failed to create pinned table after open failure: {} (open error: {})",
+                                create_err, open_err
+                            );
+                            timestamps_loaded_ok = false;
+                        } else if let Err(e) = write_txn.commit() {
+                            eprintln!(
+                                "Error: failed to commit tx when creating pinned table: {} (open error: {})",
+                                e, open_err
+                            );
+                            timestamps_loaded_ok = false;
+                        }
+                    } else {
+                        eprintln!(
+                            "Warning: failed to begin write transaction to create pinned table: {}",
+                            open_err
+                        );
+                        timestamps_loaded_ok = false;
+                    }
                 }
             }
         }
