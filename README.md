@@ -124,7 +124,7 @@ Need install variants, launch methods, or mode-specific examples? See [USAGE.md]
 * Or manually:
     ```sh
     $ git clone https://aur.archlinux.org/fsel-bin.git
-    $ cd fsel-bin
+    $ cd fsel-bi
     $ makepkg -si
     ```
 #### Option 4: Void linux (Unoffical Repo)
