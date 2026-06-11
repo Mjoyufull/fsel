@@ -52,6 +52,40 @@ fn save_pinned_state(
     Ok(())
 }
 
+/// Attempts to create the pinned table after a failed open, consuming the original open error
+/// for context. Returns true if creation succeeded, false otherwise (error already printed).
+fn ensure_pinned_table(
+    db: &std::sync::Arc<redb::Database>,
+    open_err: &dyn std::fmt::Display,
+) -> bool {
+    match db.begin_write() {
+        Ok(write_txn) => {
+            if let Err(create_err) = write_txn.open_table(crate::core::cache::PINNED_TABLE) {
+                eprintln!(
+                    "Error: failed to create pinned table after open failure: {} (open error: {})",
+                    create_err, open_err
+                );
+                false
+            } else if let Err(e) = write_txn.commit() {
+                eprintln!(
+                    "Error: failed to commit tx when creating pinned table: {} (open error: {})",
+                    e, open_err
+                );
+                false
+            } else {
+                true
+            }
+        }
+        Err(write_err) => {
+            eprintln!(
+                "Warning: failed to begin write transaction to create pinned table: {} (open error: {})",
+                write_err, open_err
+            );
+            false
+        }
+    }
+}
+
 fn load_pinned_apps_internal(db: &std::sync::Arc<redb::Database>) -> (HashSet<String>, bool) {
     let mut pinned = HashSet::new();
     let mut loaded_ok = true;
@@ -72,9 +106,10 @@ fn load_pinned_apps_internal(db: &std::sync::Arc<redb::Database>) -> (HashSet<St
                     loaded_ok = false;
                 }
             },
-            Err(e) => {
-                eprintln!("Warning: Failed to open pinned table: {}", e);
-                loaded_ok = false;
+            Err(open_err) => {
+                if !ensure_pinned_table(db, &open_err) {
+                    loaded_ok = false;
+                }
             }
         },
         Err(e) => {
@@ -117,12 +152,10 @@ pub fn load_pin_timestamps(db: &std::sync::Arc<redb::Database>) -> HashMap<Strin
                         timestamps_loaded_ok = false;
                     }
                 },
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to open pinned table for pin timestamps: {}",
-                        e
-                    );
-                    timestamps_loaded_ok = false;
+                Err(open_err) => {
+                    if !ensure_pinned_table(db, &open_err) {
+                        timestamps_loaded_ok = false;
+                    }
                 }
             }
         }
@@ -139,6 +172,11 @@ pub fn load_pin_timestamps(db: &std::sync::Arc<redb::Database>) -> HashMap<Strin
     if !(pinned_loaded_ok && timestamps_loaded_ok) {
         return pin_timestamps;
     }
+    // When the pinned table was just created via the recovery path both `pinned` and
+    // `pin_timestamps` are empty and both ok-flags are true. Reconciliation still runs
+    // below; it is a no-op on empty sets but will backfill timestamps once real apps are
+    // pinned on a subsequent call. This is intentional — the recovery path is transparent
+    // to callers.
 
     let mut changed = false;
 
