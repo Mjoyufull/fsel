@@ -97,11 +97,11 @@ Need install variants, launch methods, or mode-specific examples? See [USAGE.md]
     }
     ```
 
-#### Option 2: Cargo
+#### Option 2: Cargo (Latest Release)
 
-* Install from [crates.io](https://crates.io/crates/fsel):
+* Build and install via Cargo:
     ```sh
-    $ cargo install fsel@3.5.1-kiwicrab
+    $ cargo install fsel@3.5.2-kiwicrab
     ```
 * To update later:
     ```sh
