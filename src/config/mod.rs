@@ -21,12 +21,11 @@ impl FselConfig {
         let config_path = cli_config_path.or_else(crate::app::paths::legacy_config_file_path);
         let loaded_config = load_config_file(config_path.as_deref(), cli_provided)?;
         let mut cfg = loaded_config.config;
-        if !cli_provided && !loaded_config.has_embedded_keybinds {
-            load_standalone_keybinds(
-                &mut cfg,
-                crate::app::paths::legacy_keybinds_file_path().as_deref(),
-            )?;
-        }
+        load_standalone_keybinds(
+            &mut cfg,
+            loaded_config.has_embedded_keybinds,
+            crate::app::paths::legacy_keybinds_file_path().as_deref(),
+        )?;
         env::apply_env_overrides(&mut cfg)?;
         cfg.validate()?;
         Ok(cfg)
@@ -74,8 +73,13 @@ fn load_config_file(
 
 fn load_standalone_keybinds(
     config: &mut FselConfig,
+    has_embedded_keybinds: bool,
     keybinds_path: Option<&Path>,
 ) -> Result<(), ConfigError> {
+    if has_embedded_keybinds {
+        return Ok(());
+    }
+
     let Some(path) = keybinds_path.filter(|path| path.exists()) else {
         return Ok(());
     };
@@ -167,7 +171,7 @@ up = [{ key = "k", modifiers = "alt" }]
         .unwrap();
         let mut config = FselConfig::default();
 
-        load_standalone_keybinds(&mut config, Some(path.as_path())).unwrap();
+        load_standalone_keybinds(&mut config, false, Some(path.as_path())).unwrap();
 
         assert!(
             config
@@ -180,6 +184,36 @@ up = [{ key = "k", modifiers = "alt" }]
                 .ui
                 .keybinds
                 .matches_up(KeyCode::Char('k'), KeyModifiers::ALT)
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn embedded_keybinds_take_precedence_over_standalone_file() {
+        let path = temp_config_path("standalone-keybind-precedence");
+        fs::write(&path, r#"down = [{ key = "j", modifiers = "alt" }]"#).unwrap();
+        let mut config: FselConfig = toml::from_str(
+            r#"
+[keybinds]
+down = [{ key = "n", modifiers = "ctrl" }]
+"#,
+        )
+        .unwrap();
+
+        load_standalone_keybinds(&mut config, true, Some(path.as_path())).unwrap();
+
+        assert!(
+            config
+                .ui
+                .keybinds
+                .matches_down(KeyCode::Char('n'), KeyModifiers::CONTROL)
+        );
+        assert!(
+            !config
+                .ui
+                .keybinds
+                .matches_down(KeyCode::Char('j'), KeyModifiers::ALT)
         );
 
         let _ = fs::remove_file(path);

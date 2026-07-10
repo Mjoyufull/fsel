@@ -59,19 +59,24 @@ impl KeyBind {
         match self {
             KeyBind::Simple(key) => {
                 let parsed = parse_key(key);
-                key_codes_match(parsed.0, code) && mods == KeyModifiers::NONE
+                key_codes_match(parsed.0, code, KeyModifiers::NONE) && mods == KeyModifiers::NONE
             }
             KeyBind::WithMod { key, modifiers } => {
                 let parsed = parse_key(key);
                 let parsed_mods = parse_modifiers(modifiers);
-                key_codes_match(parsed.0, code) && mods == parsed_mods
+                key_codes_match(parsed.0, code, parsed_mods) && mods == parsed_mods
             }
         }
     }
 }
 
-fn key_codes_match(configured_code: KeyCode, input_code: KeyCode) -> bool {
+fn key_codes_match(
+    configured_code: KeyCode,
+    input_code: KeyCode,
+    configured_modifiers: KeyModifiers,
+) -> bool {
     match (configured_code, input_code) {
+        (KeyCode::Tab, KeyCode::BackTab) => configured_modifiers.contains(KeyModifiers::SHIFT),
         (KeyCode::Char(configured_char), KeyCode::Char(input_char)) => {
             configured_char.eq_ignore_ascii_case(&input_char)
         }
@@ -303,5 +308,14 @@ mod tests {
             toml::from_str(r#"down = [{ key = "j", modifiers = "shift" }]"#).unwrap();
 
         assert!(keybinds.matches_down(KeyCode::Char('J'), KeyModifiers::SHIFT));
+    }
+
+    #[test]
+    fn shifted_tab_matches_crossterm_backtab_events() {
+        let keybinds: Keybinds =
+            toml::from_str(r#"up = [{ key = "tab", modifiers = "shift" }]"#).unwrap();
+
+        assert!(keybinds.matches_up(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert!(!keybinds.matches_up(KeyCode::Tab, KeyModifiers::NONE));
     }
 }
