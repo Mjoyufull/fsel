@@ -64,10 +64,24 @@ impl KeyBind {
             KeyBind::WithMod { key, modifiers } => {
                 let parsed = parse_key(key);
                 let parsed_mods = parse_modifiers(modifiers);
-                key_codes_match(parsed.0, code, parsed_mods) && mods == parsed_mods
+                key_codes_match(parsed.0, code, parsed_mods)
+                    && modifiers_match(parsed.0, code, parsed_mods, mods)
             }
         }
     }
+}
+
+fn modifiers_match(
+    configured_code: KeyCode,
+    input_code: KeyCode,
+    configured_modifiers: KeyModifiers,
+    input_modifiers: KeyModifiers,
+) -> bool {
+    input_modifiers == configured_modifiers
+        || (configured_code == KeyCode::Tab
+            && input_code == KeyCode::BackTab
+            && configured_modifiers.contains(KeyModifiers::SHIFT)
+            && input_modifiers == configured_modifiers.difference(KeyModifiers::SHIFT))
 }
 
 fn key_codes_match(
@@ -316,6 +330,7 @@ mod tests {
             toml::from_str(r#"up = [{ key = "tab", modifiers = "shift" }]"#).unwrap();
 
         assert!(keybinds.matches_up(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert!(keybinds.matches_up(KeyCode::BackTab, KeyModifiers::NONE));
         assert!(!keybinds.matches_up(KeyCode::Tab, KeyModifiers::NONE));
     }
 }
