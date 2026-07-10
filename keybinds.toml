@@ -41,6 +41,9 @@ image_preview = [{ key = "i", modifiers = "alt" }]
 # Note: Press Esc to cancel tag creation/editing
 tag = [{ key = "t", modifiers = "ctrl" }]
 
+# Delete selected clipboard entry
+cclip_delete = [{ key = "delete", modifiers = "alt" }]
+
 # Remove tag from clipboard item (hardcoded, not configurable)
 # Keybind: Alt+T
 # Note: This prompts which tag to remove if item has multiple tags

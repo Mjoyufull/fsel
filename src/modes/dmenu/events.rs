@@ -17,50 +17,60 @@ pub(super) fn handle_key_event(
     terminal_height: u16,
 ) -> LoopOutcome {
     match (key.code, key.modifiers) {
-        (KeyCode::Esc, _)
-        | (KeyCode::Char('q'), KeyModifiers::CONTROL)
-        | (KeyCode::Char('c'), KeyModifiers::CONTROL) => return LoopOutcome::Exit,
-        (KeyCode::Enter, _) | (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+        (code, modifiers) if options.keybinds.matches_exit(code, modifiers) => {
+            return LoopOutcome::Exit;
+        }
+        (code, modifiers) if options.keybinds.matches_select(code, modifiers) => {
             return handle_submit(ui, options);
+        }
+        (code, modifiers) if options.keybinds.matches_backspace(code, modifiers) => {
+            ui.query.pop();
+            ui.filter();
+            auto_select_if_single_match(ui, options);
+        }
+        (code, modifiers) if options.keybinds.matches_left(code, modifiers) => {
+            move_to_first(ui);
+        }
+        (code, modifiers) if options.keybinds.matches_right(code, modifiers) => {
+            move_to_last(ui, options, terminal_height);
+        }
+        (code, modifiers) if options.keybinds.matches_down(code, modifiers) => {
+            move_selection(ui, options, terminal_height, 1);
+        }
+        (code, modifiers) if options.keybinds.matches_up(code, modifiers) => {
+            move_selection(ui, options, terminal_height, -1);
         }
         (KeyCode::Char(ch), KeyModifiers::NONE) | (KeyCode::Char(ch), KeyModifiers::SHIFT) => {
             ui.query.push(ch);
             ui.filter();
             auto_select_if_single_match(ui, options);
         }
-        (KeyCode::Backspace, _) => {
-            ui.query.pop();
-            ui.filter();
-            auto_select_if_single_match(ui, options);
-        }
-        (KeyCode::Left, _) if !ui.shown.is_empty() => {
-            ui.selected = Some(0);
-            ui.scroll_offset = 0;
-        }
-        (KeyCode::Left, _) => {}
-        (KeyCode::Right, _) if !ui.shown.is_empty() => {
-            let last_index = ui.shown.len() - 1;
-            ui.selected = Some(last_index);
-
-            let max_visible = options.max_visible_items(terminal_height);
-            if max_visible > 0 && ui.shown.len() > max_visible {
-                ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
-            } else {
-                ui.scroll_offset = 0;
-            }
-        }
-        (KeyCode::Right, _) => {}
-        (KeyCode::Down, _) | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-            move_selection(ui, options, terminal_height, 1);
-        }
-        (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-            move_selection(ui, options, terminal_height, -1);
-        }
         _ => {}
     }
 
     ui.info(options.highlight_color);
     LoopOutcome::Continue
+}
+
+fn move_to_first(ui: &mut DmenuUI<'_>) {
+    if !ui.shown.is_empty() {
+        ui.selected = Some(0);
+        ui.scroll_offset = 0;
+    }
+}
+
+fn move_to_last(ui: &mut DmenuUI<'_>, options: &DmenuOptions, terminal_height: u16) {
+    let Some(last_index) = ui.shown.len().checked_sub(1) else {
+        return;
+    };
+
+    ui.selected = Some(last_index);
+    let max_visible = options.max_visible_items(terminal_height);
+    if max_visible > 0 && ui.shown.len() > max_visible {
+        ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
+    } else {
+        ui.scroll_offset = 0;
+    }
 }
 
 pub(super) fn handle_mouse_event(
@@ -199,7 +209,8 @@ fn move_selection(ui: &mut DmenuUI, options: &DmenuOptions, terminal_height: u16
 mod tests {
     use crate::cli::Opts;
     use crate::common::Item;
-    use crate::ui::DmenuUI;
+    use crate::ui::{DmenuUI, Keybinds};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::{DmenuOptions, LoopOutcome, handle_key_event};
 
@@ -256,5 +267,41 @@ mod tests {
         );
 
         assert!(matches!(outcome, LoopOutcome::Print(output) if output == "left:right"));
+    }
+
+    #[test]
+    fn configured_navigation_moves_selection_without_typing() {
+        let keybinds: Keybinds = toml::from_str(
+            r#"
+down = [{ key = "j", modifiers = "alt" }]
+up = [{ key = "k", modifiers = "alt" }]
+"#,
+        )
+        .expect("valid keybind config");
+        let cli = Opts {
+            keybinds,
+            ..Opts::default()
+        };
+        let options = DmenuOptions::from_cli(&cli);
+        let mut ui = DmenuUI::new(
+            vec![
+                Item::new_simple("one".into(), "one".into(), 1),
+                Item::new_simple("two".into(), "two".into(), 2),
+            ],
+            false,
+            false,
+        );
+        ui.selected = Some(0);
+
+        let outcome = handle_key_event(
+            &mut ui,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::ALT),
+            &options,
+            20,
+        );
+
+        assert!(matches!(outcome, LoopOutcome::Continue));
+        assert_eq!(ui.selected, Some(1));
+        assert!(ui.query.is_empty());
     }
 }

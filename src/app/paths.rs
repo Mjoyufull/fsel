@@ -60,3 +60,11 @@ pub(crate) fn legacy_config_file_path() -> Option<PathBuf> {
         path
     })
 }
+
+pub(crate) fn legacy_keybinds_file_path() -> Option<PathBuf> {
+    ProjectDirs::from("", "", "fsel").map(|proj_dirs| {
+        let mut path = proj_dirs.config_dir().to_path_buf();
+        path.push("keybinds.toml");
+        path
+    })
+}

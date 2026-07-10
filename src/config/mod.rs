@@ -9,11 +9,24 @@ use std::path::{Path, PathBuf};
 pub use error::{ConfigError, ConfigValidationError};
 pub use schema::FselConfig;
 
+#[derive(Debug)]
+struct LoadedConfig {
+    config: FselConfig,
+    has_embedded_keybinds: bool,
+}
+
 impl FselConfig {
     pub fn new(cli_config_path: Option<PathBuf>) -> Result<Self, ConfigError> {
         let cli_provided = cli_config_path.is_some();
         let config_path = cli_config_path.or_else(crate::app::paths::legacy_config_file_path);
-        let mut cfg = load_config_file(config_path.as_deref(), cli_provided)?;
+        let loaded_config = load_config_file(config_path.as_deref(), cli_provided)?;
+        let mut cfg = loaded_config.config;
+        if !cli_provided && !loaded_config.has_embedded_keybinds {
+            load_standalone_keybinds(
+                &mut cfg,
+                crate::app::paths::legacy_keybinds_file_path().as_deref(),
+            )?;
+        }
         env::apply_env_overrides(&mut cfg)?;
         cfg.validate()?;
         Ok(cfg)
@@ -31,11 +44,17 @@ impl FselConfig {
 fn load_config_file(
     config_path: Option<&Path>,
     cli_provided: bool,
-) -> Result<FselConfig, ConfigError> {
+) -> Result<LoadedConfig, ConfigError> {
     if let Some(path) = config_path {
         if path.exists() {
             let contents = fs::read_to_string(path)?;
-            return Ok(toml::from_str(&contents)?);
+            let table: toml::Table = toml::from_str(&contents)?;
+            let has_embedded_keybinds = table.contains_key("keybinds");
+            let config = toml::Value::Table(table).try_into()?;
+            return Ok(LoadedConfig {
+                config,
+                has_embedded_keybinds,
+            });
         }
 
         if cli_provided {
@@ -47,15 +66,34 @@ fn load_config_file(
         }
     }
 
-    Ok(FselConfig::default())
+    Ok(LoadedConfig {
+        config: FselConfig::default(),
+        has_embedded_keybinds: false,
+    })
+}
+
+fn load_standalone_keybinds(
+    config: &mut FselConfig,
+    keybinds_path: Option<&Path>,
+) -> Result<(), ConfigError> {
+    let Some(path) = keybinds_path.filter(|path| path.exists()) else {
+        return Ok(());
+    };
+
+    let contents = fs::read_to_string(path)?;
+    config.ui.keybinds = toml::from_str(&contents)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::schema::{GeneralConfig, LayoutConfig, UiConfig};
-    use super::{ConfigError, ConfigValidationError, FselConfig, load_config_file};
+    use super::{
+        ConfigError, ConfigValidationError, FselConfig, load_config_file, load_standalone_keybinds,
+    };
     use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
     use crate::ui::PanelPosition;
+    use crossterm::event::{KeyCode, KeyModifiers};
     use std::fs;
 
     fn temp_config_path(name: &str) -> std::path::PathBuf {
@@ -82,10 +120,67 @@ delimiter = "|"
 
         fs::write(&path, contents).unwrap();
 
-        let config = load_config_file(Some(path.as_path()), true).unwrap();
+        let config = load_config_file(Some(path.as_path()), true).unwrap().config;
         assert_eq!(config.general.terminal_launcher, "kitty -e");
         assert_eq!(config.general.match_mode, MatchMode::Exact);
         assert_eq!(config.dmenu.delimiter.as_deref(), Some("|"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn detects_and_loads_embedded_keybinds() {
+        let path = temp_config_path("embedded-keybinds");
+        fs::write(
+            &path,
+            r#"
+[keybinds]
+down = [{ key = "j", modifiers = "alt" }]
+"#,
+        )
+        .unwrap();
+
+        let loaded_config = load_config_file(Some(path.as_path()), true).unwrap();
+
+        assert!(loaded_config.has_embedded_keybinds);
+        assert!(
+            loaded_config
+                .config
+                .ui
+                .keybinds
+                .matches_down(KeyCode::Char('j'), KeyModifiers::ALT)
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn loads_documented_standalone_keybinds_file() {
+        let path = temp_config_path("standalone-keybinds");
+        fs::write(
+            &path,
+            r#"
+down = [{ key = "j", modifiers = "alt" }]
+up = [{ key = "k", modifiers = "alt" }]
+"#,
+        )
+        .unwrap();
+        let mut config = FselConfig::default();
+
+        load_standalone_keybinds(&mut config, Some(path.as_path())).unwrap();
+
+        assert!(
+            config
+                .ui
+                .keybinds
+                .matches_down(KeyCode::Char('j'), KeyModifiers::ALT)
+        );
+        assert!(
+            config
+                .ui
+                .keybinds
+                .matches_up(KeyCode::Char('k'), KeyModifiers::ALT)
+        );
 
         let _ = fs::remove_file(path);
     }
@@ -105,7 +200,7 @@ pinned_order = "oldest"
 
         fs::write(&path, contents).unwrap();
 
-        let config = load_config_file(Some(path.as_path()), true).unwrap();
+        let config = load_config_file(Some(path.as_path()), true).unwrap().config;
         assert_eq!(config.general.ranking_mode, RankingMode::Frequency);
         assert_eq!(config.general.pinned_order, PinnedOrderMode::NewestPinned);
         assert_eq!(config.layout.title_panel_position, PanelPosition::Middle);
@@ -141,7 +236,7 @@ title_panel_position = "Middle"
 
         fs::write(&path, contents).unwrap();
 
-        let config = load_config_file(Some(path.as_path()), true).unwrap();
+        let config = load_config_file(Some(path.as_path()), true).unwrap().config;
         assert_eq!(config.general.match_mode, MatchMode::Exact);
         assert_eq!(config.general.ranking_mode, RankingMode::Frecency);
         assert_eq!(config.general.pinned_order, PinnedOrderMode::NewestPinned);
@@ -187,7 +282,7 @@ title_panel_position = "upside_down"
 
         fs::write(&path, contents).unwrap();
 
-        let config = load_config_file(Some(path.as_path()), true).unwrap();
+        let config = load_config_file(Some(path.as_path()), true).unwrap().config;
         assert_eq!(config.general.match_mode, MatchMode::Fuzzy);
         assert_eq!(config.general.ranking_mode, RankingMode::Frecency);
         assert_eq!(config.general.pinned_order, PinnedOrderMode::Ranking);
