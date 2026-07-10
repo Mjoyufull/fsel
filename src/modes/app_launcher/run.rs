@@ -93,14 +93,6 @@ pub async fn run(cli: Opts) -> Result<()> {
         return Ok(());
     }
 
-    let mut input = InputConfig {
-        disable_mouse: cli.disable_mouse,
-        tick_rate: Duration::from_millis(16),
-        exit_key: KeyCode::Null,
-        ..InputConfig::default()
-    }
-    .init_async();
-
     crate::ui::terminal::setup_terminal(cli.disable_mouse)?;
     let terminal_active = Cell::new(true);
     defer! {
@@ -113,6 +105,14 @@ pub async fn run(cli: Opts) -> Result<()> {
     let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
+
+    let mut input = InputConfig {
+        disable_mouse: cli.disable_mouse,
+        tick_rate: Duration::from_millis(16),
+        exit_key: KeyCode::Null,
+        ..InputConfig::default()
+    }
+    .init_async();
 
     loop {
         terminal.draw(|frame| {
