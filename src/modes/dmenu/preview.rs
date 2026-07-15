@@ -20,7 +20,7 @@ pub(super) struct PreviewRuntime {
     active_request: Option<JoinHandle<()>>,
     decode_tx: mpsc::UnboundedSender<()>,
     decode_request: Arc<Mutex<Option<DecodeRequest>>>,
-    decode_worker: JoinHandle<()>,
+    _decode_worker: std::thread::JoinHandle<()>,
     current_signature: Option<PreviewSignature>,
     generation: u64,
     previous_was_image: bool,
@@ -78,7 +78,7 @@ impl PreviewRuntime {
         let worker_request = Arc::clone(&decode_request);
         let picker = adapter.picker();
         let decode_result_tx = result_tx.clone();
-        let decode_worker = tokio::task::spawn_blocking(move || {
+        let decode_worker = std::thread::spawn(move || {
             while decode_rx.blocking_recv().is_some() {
                 while decode_rx.try_recv().is_ok() {}
                 let request = worker_request
@@ -112,7 +112,7 @@ impl PreviewRuntime {
             active_request: None,
             decode_tx,
             decode_request,
-            decode_worker,
+            _decode_worker: decode_worker,
             current_signature: None,
             generation: 0,
             previous_was_image: false,
@@ -176,12 +176,19 @@ impl PreviewRuntime {
         self.content = PreviewContent::Loading;
 
         let generation = self.generation;
-        let command = expand_preview_command(
+        let command = match expand_preview_command(
             command_template,
             &signature.item,
             &signature.query,
             signature.input_ordinal,
-        );
+        ) {
+            Ok(command) => command,
+            Err(error) => {
+                self.content = PreviewContent::Text(error);
+                self.current_signature = Some(signature);
+                return;
+            }
+        };
         let result_tx = self.result_tx.clone();
         self.active_request = Some(tokio::spawn(async move {
             let output = run_preview_command(&command).await;
@@ -302,25 +309,34 @@ impl Drop for PreviewRuntime {
         if let Some(task) = self.active_request.take() {
             task.abort();
         }
-        self.decode_worker.abort();
     }
 }
 
-fn expand_preview_command(template: &str, item: &str, query: &str, selected: usize) -> String {
+fn expand_preview_command(
+    template: &str,
+    item: &str,
+    query: &str,
+    selected: usize,
+) -> Result<String, String> {
     let item = shell_quote(item);
     let query = shell_quote(query);
     let selected = selected.to_string();
     let mut command = String::with_capacity(template.len() + item.len() + query.len());
     let mut remaining = template;
+    let mut quote = ShellQuote::Unquoted;
+    let mut escaped = false;
 
     while !remaining.is_empty() {
-        if let Some(rest) = remaining.strip_prefix("{}") {
+        if !escaped && let Some(rest) = remaining.strip_prefix("{}") {
+            require_unquoted_placeholder(quote)?;
             command.push_str(&item);
             remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix("{q}") {
+        } else if !escaped && let Some(rest) = remaining.strip_prefix("{q}") {
+            require_unquoted_placeholder(quote)?;
             command.push_str(&query);
             remaining = rest;
-        } else if let Some(rest) = remaining.strip_prefix("{n}") {
+        } else if !escaped && let Some(rest) = remaining.strip_prefix("{n}") {
+            require_unquoted_placeholder(quote)?;
             command.push_str(&selected);
             remaining = rest;
         } else {
@@ -329,10 +345,41 @@ fn expand_preview_command(template: &str, item: &str, query: &str, selected: usi
             };
             command.push(character);
             remaining = &remaining[character.len_utf8()..];
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match (quote, character) {
+                (ShellQuote::Unquoted, '\\') | (ShellQuote::Double, '\\') => escaped = true,
+                (ShellQuote::Unquoted, '\'') => quote = ShellQuote::Single,
+                (ShellQuote::Unquoted, '"') => quote = ShellQuote::Double,
+                (ShellQuote::Single, '\'') | (ShellQuote::Double, '"') => {
+                    quote = ShellQuote::Unquoted;
+                }
+                _ => {}
+            }
         }
     }
 
-    command
+    Ok(command)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ShellQuote {
+    Unquoted,
+    Single,
+    Double,
+}
+
+fn require_unquoted_placeholder(quote: ShellQuote) -> Result<(), String> {
+    if quote == ShellQuote::Unquoted {
+        Ok(())
+    } else {
+        Err(
+            "Preview placeholders are shell-quoted automatically and must not appear inside quotes"
+                .to_string(),
+        )
+    }
 }
 
 fn shell_quote(value: &str) -> String {
@@ -460,7 +507,8 @@ mod tests {
     #[test]
     fn command_expansion_quotes_selected_item_and_query() {
         let command =
-            expand_preview_command("printf '%s %s %s' {} {q} {n}", "it's here", "two words", 4);
+            expand_preview_command("printf '%s %s %s' {} {q} {n}", "it's here", "two words", 4)
+                .expect("unquoted placeholders should expand");
 
         assert_eq!(command, "printf '%s %s %s' 'it'\"'\"'s here' 'two words' 4");
     }
@@ -472,9 +520,17 @@ mod tests {
 
     #[test]
     fn command_expansion_does_not_reexpand_placeholder_text_inside_values() {
-        let command = expand_preview_command("printf '%s %s' {} {q}", "{q}", "{}", 0);
+        let command = expand_preview_command("printf '%s %s' {} {q}", "{q}", "{}", 0)
+            .expect("unquoted placeholders should expand");
 
         assert_eq!(command, "printf '%s %s' '{q}' '{}'");
+    }
+
+    #[test]
+    fn quoted_placeholders_are_rejected() {
+        let result = expand_preview_command("printf %s \"{}\"", "\"; touch /tmp/pwn; #", "", 0);
+
+        assert!(result.is_err());
     }
 
     #[test]
