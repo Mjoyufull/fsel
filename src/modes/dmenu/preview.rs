@@ -31,6 +31,7 @@ pub(super) struct PreviewRuntime {
 #[derive(Debug, PartialEq, Eq)]
 struct PreviewSignature {
     selected: usize,
+    input_ordinal: usize,
     item: String,
     query: String,
 }
@@ -160,6 +161,7 @@ impl PreviewRuntime {
 
         let signature = PreviewSignature {
             selected,
+            input_ordinal: item.line_number.saturating_sub(1),
             item: item.original_line.clone(),
             query: ui.query.clone(),
         };
@@ -178,7 +180,7 @@ impl PreviewRuntime {
             command_template,
             &signature.item,
             &signature.query,
-            signature.selected,
+            signature.input_ordinal,
         );
         let result_tx = self.result_tx.clone();
         self.active_request = Some(tokio::spawn(async move {
@@ -367,15 +369,19 @@ async fn run_preview_command(command: &str) -> Result<CommandOutput, String> {
         .take()
         .ok_or_else(|| "Failed to capture preview stderr".to_string())?;
 
-    let (status, stdout_result, stderr_result) =
-        tokio::join!(child.wait(), read_limited(stdout), read_limited(stderr),);
+    let stdout_task = tokio::spawn(read_limited(stdout));
+    let stderr_task = tokio::spawn(read_limited(stderr));
+    let status = child.wait().await;
     #[cfg(unix)]
-    process_group.disarm();
+    process_group.terminate();
     let status = status.map_err(|error| format!("Preview command failed: {error}"))?;
-    let (stdout, stdout_truncated) =
-        stdout_result.map_err(|error| format!("Failed to read preview output: {error}"))?;
-    let (stderr, stderr_truncated) =
-        stderr_result.map_err(|error| format!("Failed to read preview error output: {error}"))?;
+    let (stdout_result, stderr_result) = tokio::join!(stdout_task, stderr_task);
+    let (stdout, stdout_truncated) = stdout_result
+        .map_err(|error| format!("Preview output reader failed: {error}"))?
+        .map_err(|error| format!("Failed to read preview output: {error}"))?;
+    let (stderr, stderr_truncated) = stderr_result
+        .map_err(|error| format!("Preview error reader failed: {error}"))?
+        .map_err(|error| format!("Failed to read preview error output: {error}"))?;
 
     Ok(CommandOutput {
         stdout,
@@ -402,17 +408,17 @@ impl ProcessGroupGuard {
         }
     }
 
-    fn disarm(&mut self) {
-        self.pgid = None;
+    fn terminate(&mut self) {
+        if let Some(pgid) = self.pgid.take() {
+            let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
+        }
     }
 }
 
 #[cfg(unix)]
 impl Drop for ProcessGroupGuard {
     fn drop(&mut self) {
-        if let Some(pgid) = self.pgid {
-            let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
-        }
+        self.terminate();
     }
 }
 
