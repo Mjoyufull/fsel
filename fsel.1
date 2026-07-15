@@ -94,7 +94,7 @@ Dmenu mode: read from stdin, output selection to stdout
 Like --dmenu but null-separated input
 .TP
 .BR \-\-preview " " \fICOMMAND\fR
-Run COMMAND for the selected input row and show its stdout in the preview panel. This option implies --dmenu. The fzf-style placeholders {} (selected row), {q} (query), and {n} (zero-based index) are shell-quoted before execution. Text and common raster image output are supported.
+Run COMMAND for the selected input row and show its stdout in the preview panel. This option implies --dmenu. The fzf-style placeholders {} (selected row), {q} (query), and {n} (zero-based original input ordinal) are shell-quoted before execution. Place placeholders directly in COMMAND, not inside shell quotes. Text and common raster image output are supported.
 .TP
 .BR \-\-password [=\fICHAR\fR]
 Password mode: mask input (default char: *)

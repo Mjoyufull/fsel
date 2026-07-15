@@ -148,7 +148,10 @@ shell-quoted before execution:
 
 - `{}`: selected input row
 - `{q}`: current query
-- `{n}`: zero-based selected index
+- `{n}`: zero-based original input ordinal
+
+Place placeholders directly in the command rather than inside shell quotes. fsel shell-quotes
+placeholder values automatically before execution.
 
 The preview panel renders text output after stripping terminal escape sequences. If stdout contains
 PNG, JPEG, GIF, BMP, or WebP bytes, fsel renders the image using Kitty, Sixel, or its half-block
