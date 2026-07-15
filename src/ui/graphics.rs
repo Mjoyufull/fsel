@@ -6,6 +6,7 @@ use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Cursor, Read};
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -89,6 +90,18 @@ impl ImageManager {
     ) -> Result<StatefulProtocol> {
         let image = decode_image(&bytes)?;
         Ok(picker.new_resize_protocol(image))
+    }
+
+    /// Read, decode, and cache an image file without blocking the async executor.
+    pub async fn load_image_path(&mut self, key: &str, path: &Path) -> Result<()> {
+        if self.cache.contains_key(key) {
+            self.update_lru(key);
+            return Ok(());
+        }
+
+        let path = path.to_path_buf();
+        let bytes = tokio::task::spawn_blocking(move || std::fs::read(path)).await??;
+        self.load_image_bytes(key, bytes).await
     }
 
     /// Return whether bytes have a supported raster signature or contain SVG markup.
