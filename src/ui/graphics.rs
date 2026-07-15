@@ -68,16 +68,17 @@ impl ImageManager {
         picker: Picker,
         bytes: Vec<u8>,
     ) -> Result<StatefulProtocol> {
-        tokio::task::spawn_blocking(move || {
-            let image = image::load_from_memory(&bytes)?;
-            Ok::<_, eyre::Report>(picker.new_resize_protocol(image))
-        })
-        .await?
+        tokio::task::spawn_blocking(move || Self::prepare_image_bytes_blocking(picker, bytes))
+            .await?
     }
 
-    /// Clone the detected picker for an independently polled decode task.
-    pub(crate) fn picker(&self) -> Picker {
-        self.picker.clone()
+    /// Decode bytes and prepare terminal protocol state from a blocking worker.
+    pub(crate) fn prepare_image_bytes_blocking(
+        picker: Picker,
+        bytes: Vec<u8>,
+    ) -> Result<StatefulProtocol> {
+        let image = image::load_from_memory(&bytes)?;
+        Ok(picker.new_resize_protocol(image))
     }
 
     /// Insert a prepared terminal image protocol into the bounded cache.

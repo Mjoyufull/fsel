@@ -17,6 +17,8 @@ pub(super) struct PreviewRuntime {
     adapter: GraphicsAdapter,
     image_manager: ImageManager,
     active_request: Option<JoinHandle<()>>,
+    decode_tx: mpsc::UnboundedSender<DecodeRequest>,
+    decode_worker: JoinHandle<()>,
     current_signature: Option<PreviewSignature>,
     generation: u64,
     previous_was_image: bool,
@@ -38,6 +40,12 @@ enum PreviewContent {
     Image(String),
 }
 
+struct DecodeRequest {
+    generation: u64,
+    key: String,
+    bytes: Vec<u8>,
+}
+
 pub(super) enum PreviewResult {
     Command {
         generation: u64,
@@ -56,17 +64,44 @@ pub(super) struct CommandOutput {
     status: String,
     success: bool,
     truncated: bool,
+    stdout_truncated: bool,
 }
 
 impl PreviewRuntime {
     pub(super) fn new(command_template: Option<String>, adapter: GraphicsAdapter) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
+        let (decode_tx, mut decode_rx) = mpsc::unbounded_channel::<DecodeRequest>();
+        let picker = adapter.picker();
+        let decode_result_tx = result_tx.clone();
+        let decode_worker = tokio::task::spawn_blocking(move || {
+            while let Some(mut request) = decode_rx.blocking_recv() {
+                while let Ok(latest) = decode_rx.try_recv() {
+                    request = latest;
+                }
+                let protocol =
+                    ImageManager::prepare_image_bytes_blocking(picker.clone(), request.bytes)
+                        .map(Box::new)
+                        .map_err(|error| format!("Failed to decode preview image: {error}"));
+                if decode_result_tx
+                    .send(PreviewResult::Image {
+                        generation: request.generation,
+                        key: request.key,
+                        protocol,
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         Self {
             command_template,
             content: PreviewContent::Empty,
             adapter,
             image_manager: ImageManager::new(adapter.picker()),
             active_request: None,
+            decode_tx,
+            decode_worker,
             current_signature: None,
             generation: 0,
             previous_was_image: false,
@@ -164,7 +199,7 @@ impl PreviewRuntime {
             }
         };
 
-        if !output.success {
+        if !output.success && !should_show_truncated_stdout(&output) {
             let stderr = output_text(&output.stderr);
             let mut text = if stderr.trim().is_empty() {
                 format!("Preview command exited with {}", output.status)
@@ -178,19 +213,11 @@ impl PreviewRuntime {
 
         let image_key = format!("dmenu-preview-{generation}");
         if image::guess_format(&output.stdout).is_ok() {
-            let picker = self.image_manager.picker();
-            let result_tx = self.result_tx.clone();
-            self.active_request = Some(tokio::spawn(async move {
-                let protocol = ImageManager::prepare_image_bytes(picker, output.stdout)
-                    .await
-                    .map(Box::new)
-                    .map_err(|error| format!("Failed to decode preview image: {error}"));
-                let _ = result_tx.send(PreviewResult::Image {
-                    generation,
-                    key: image_key,
-                    protocol,
-                });
-            }));
+            let _ = self.decode_tx.send(DecodeRequest {
+                generation,
+                key: image_key,
+                bytes: output.stdout,
+            });
             return;
         }
 
@@ -234,7 +261,13 @@ impl PreviewRuntime {
         let PreviewContent::Image(key) = &self.content else {
             return Ok(false);
         };
-        self.image_manager.render_cached(frame, key, area)
+        let key = key.clone();
+        if self.image_manager.render_cached(frame, &key, area)? {
+            Ok(true)
+        } else {
+            self.content = PreviewContent::Text("Failed to render preview image".to_string());
+            Ok(false)
+        }
     }
 
     fn clear_request(&mut self) {
@@ -252,6 +285,7 @@ impl Drop for PreviewRuntime {
         if let Some(task) = self.active_request.take() {
             task.abort();
         }
+        self.decode_worker.abort();
     }
 }
 
@@ -334,6 +368,7 @@ async fn run_preview_command(command: &str) -> Result<CommandOutput, String> {
         status: status.to_string(),
         success: status.success(),
         truncated: stdout_truncated || stderr_truncated,
+        stdout_truncated,
     })
 }
 
@@ -390,9 +425,16 @@ fn append_truncation_notice(text: &mut String, truncated: bool) {
     }
 }
 
+fn should_show_truncated_stdout(output: &CommandOutput) -> bool {
+    output.stdout_truncated && !output.stdout.is_empty()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{append_truncation_notice, expand_preview_command, shell_quote};
+    use super::{
+        CommandOutput, append_truncation_notice, expand_preview_command, shell_quote,
+        should_show_truncated_stdout,
+    };
 
     #[test]
     fn command_expansion_quotes_selected_item_and_query() {
@@ -421,5 +463,19 @@ mod tests {
         append_truncation_notice(&mut text, true);
 
         assert_eq!(text, "command failed\n\n[preview output truncated]");
+    }
+
+    #[test]
+    fn truncated_stdout_survives_a_producer_sigpipe_failure() {
+        let output = CommandOutput {
+            stdout: b"captured prefix".to_vec(),
+            stderr: Vec::new(),
+            status: "signal: 13 (SIGPIPE)".to_string(),
+            success: false,
+            truncated: true,
+            stdout_truncated: true,
+        };
+
+        assert!(should_show_truncated_stdout(&output));
     }
 }

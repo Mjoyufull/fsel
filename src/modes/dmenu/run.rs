@@ -75,17 +75,26 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     let outcome = loop {
         if needs_redraw {
-            if preview.needs_terminal_clear() {
-                terminal.clear()?;
-            }
             sync_update_mode(options.term_is_foot, true);
-            let mut render_result = Ok(());
-            let draw_result = terminal.draw(|frame| {
-                render_result = draw_frame(frame, &mut ui, &mut list_state, &options, &mut preview);
-            });
+            let frame_result = (|| -> Result<()> {
+                for _ in 0..2 {
+                    if preview.needs_terminal_clear() {
+                        terminal.clear()?;
+                    }
+                    let mut render_result = Ok(());
+                    terminal.draw(|frame| {
+                        render_result =
+                            draw_frame(frame, &mut ui, &mut list_state, &options, &mut preview);
+                    })?;
+                    render_result?;
+                    if !preview.needs_terminal_clear() {
+                        break;
+                    }
+                }
+                Ok(())
+            })();
             sync_update_mode(options.term_is_foot, false);
-            draw_result?;
-            render_result?;
+            frame_result?;
             preview.finish_draw();
             needs_redraw = false;
         }
