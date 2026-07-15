@@ -4,7 +4,7 @@ use ratatui::style::Color;
 
 use crate::cli::{Opts, PanelPosition};
 use crate::ui::{
-    GraphicsAdapter, effective_content_height, items_panel_bounds, items_panel_height,
+    GraphicsAdapter, Keybinds, effective_content_height, items_panel_bounds, items_panel_height,
 };
 
 pub(super) struct DmenuOptions {
@@ -33,6 +33,7 @@ pub(super) struct DmenuOptions {
     pub(super) cursor: String,
     pub(super) term_is_foot: bool,
     pub(super) graphics_adapter: GraphicsAdapter,
+    pub(super) keybinds: Keybinds,
 }
 
 impl DmenuOptions {
@@ -80,6 +81,7 @@ impl DmenuOptions {
                 .unwrap_or_default()
                 .starts_with("foot"),
             graphics_adapter: GraphicsAdapter::detect(None),
+            keybinds: cli.keybinds.clone(),
         }
     }
 

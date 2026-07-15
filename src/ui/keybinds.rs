@@ -59,14 +59,42 @@ impl KeyBind {
         match self {
             KeyBind::Simple(key) => {
                 let parsed = parse_key(key);
-                parsed.0 == code && mods == KeyModifiers::NONE
+                key_codes_match(parsed.0, code, KeyModifiers::NONE) && mods == KeyModifiers::NONE
             }
             KeyBind::WithMod { key, modifiers } => {
                 let parsed = parse_key(key);
                 let parsed_mods = parse_modifiers(modifiers);
-                parsed.0 == code && mods == parsed_mods
+                key_codes_match(parsed.0, code, parsed_mods)
+                    && modifiers_match(parsed.0, code, parsed_mods, mods)
             }
         }
+    }
+}
+
+fn modifiers_match(
+    configured_code: KeyCode,
+    input_code: KeyCode,
+    configured_modifiers: KeyModifiers,
+    input_modifiers: KeyModifiers,
+) -> bool {
+    input_modifiers == configured_modifiers
+        || (configured_code == KeyCode::Tab
+            && input_code == KeyCode::BackTab
+            && configured_modifiers.contains(KeyModifiers::SHIFT)
+            && input_modifiers == configured_modifiers.difference(KeyModifiers::SHIFT))
+}
+
+fn key_codes_match(
+    configured_code: KeyCode,
+    input_code: KeyCode,
+    configured_modifiers: KeyModifiers,
+) -> bool {
+    match (configured_code, input_code) {
+        (KeyCode::Tab, KeyCode::BackTab) => configured_modifiers.contains(KeyModifiers::SHIFT),
+        (KeyCode::Char(configured_char), KeyCode::Char(input_char)) => {
+            configured_char.eq_ignore_ascii_case(&input_char)
+        }
+        _ => configured_code == input_code,
     }
 }
 
@@ -80,6 +108,7 @@ fn parse_key(key: &str) -> (KeyCode, KeyModifiers) {
         "esc" | "escape" => (KeyCode::Esc, KeyModifiers::NONE),
         "backspace" => (KeyCode::Backspace, KeyModifiers::NONE),
         "delete" => (KeyCode::Delete, KeyModifiers::NONE),
+        "tab" => (KeyCode::Tab, KeyModifiers::NONE),
         "space" => (KeyCode::Char(' '), KeyModifiers::NONE),
         s if s.len() == 1 => (KeyCode::Char(s.chars().next().unwrap()), KeyModifiers::NONE),
         _ => (KeyCode::Null, KeyModifiers::NONE),
@@ -261,5 +290,47 @@ mod tests {
 
         assert!(keybinds.matches_tag(KeyCode::Char('t'), KeyModifiers::ALT));
         assert!(!keybinds.matches_tag_removal(KeyCode::Char('t'), KeyModifiers::ALT));
+    }
+
+    #[test]
+    fn documented_tab_key_is_supported() {
+        let keybinds: Keybinds = toml::from_str(r#"down = ["tab"]"#).unwrap();
+
+        assert!(keybinds.matches_down(KeyCode::Tab, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn combined_modifiers_are_matched_exactly() {
+        let keybinds = Keybinds {
+            down: vec![KeyBind::WithMod {
+                key: "j".to_string(),
+                modifiers: "ctrl+alt".to_string(),
+            }],
+            ..Keybinds::default()
+        };
+
+        assert!(keybinds.matches_down(
+            KeyCode::Char('j'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT
+        ));
+        assert!(!keybinds.matches_down(KeyCode::Char('j'), KeyModifiers::ALT));
+    }
+
+    #[test]
+    fn shifted_letters_match_uppercase_terminal_events() {
+        let keybinds: Keybinds =
+            toml::from_str(r#"down = [{ key = "j", modifiers = "shift" }]"#).unwrap();
+
+        assert!(keybinds.matches_down(KeyCode::Char('J'), KeyModifiers::SHIFT));
+    }
+
+    #[test]
+    fn shifted_tab_matches_crossterm_backtab_events() {
+        let keybinds: Keybinds =
+            toml::from_str(r#"up = [{ key = "tab", modifiers = "shift" }]"#).unwrap();
+
+        assert!(keybinds.matches_up(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert!(keybinds.matches_up(KeyCode::BackTab, KeyModifiers::NONE));
+        assert!(!keybinds.matches_up(KeyCode::Tab, KeyModifiers::NONE));
     }
 }
