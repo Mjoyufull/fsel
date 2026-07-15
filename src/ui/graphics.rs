@@ -8,6 +8,8 @@ use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::Mutex;
 
+const MAX_SVG_DIMENSION: f32 = 2048.0;
+
 /// Combined display state to track what's currently on screen
 #[derive(Debug, Clone, PartialEq)]
 pub enum DisplayState {
@@ -77,8 +79,13 @@ impl ImageManager {
         picker: Picker,
         bytes: Vec<u8>,
     ) -> Result<StatefulProtocol> {
-        let image = image::load_from_memory(&bytes)?;
+        let image = decode_image(&bytes)?;
         Ok(picker.new_resize_protocol(image))
+    }
+
+    /// Return whether bytes have a supported raster signature or contain SVG markup.
+    pub fn recognizes_image_bytes(bytes: &[u8]) -> bool {
+        image::guess_format(bytes).is_ok() || looks_like_svg(bytes)
     }
 
     /// Insert a prepared terminal image protocol into the bounded cache.
@@ -214,6 +221,58 @@ impl ImageManager {
     }
 }
 
+fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage> {
+    match image::load_from_memory(bytes) {
+        Ok(image) => Ok(image),
+        Err(raster_error) if looks_like_svg(bytes) => decode_svg(bytes)
+            .map_err(|svg_error| eyre!("Image decode failed: {raster_error}; {svg_error}")),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn contains_svg_markup(bytes: &[u8]) -> bool {
+    let prefix_len = bytes.len().min(4096);
+    String::from_utf8_lossy(&bytes[..prefix_len]).contains("<svg")
+}
+
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    contains_svg_markup(bytes) || bytes.starts_with(&[0x1f, 0x8b])
+}
+
+fn decode_svg(bytes: &[u8]) -> Result<image::DynamicImage> {
+    let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())?;
+    let source_size = tree.size();
+    let scale = (MAX_SVG_DIMENSION / source_size.width())
+        .min(MAX_SVG_DIMENSION / source_size.height())
+        .min(1.0);
+    let width = (source_size.width() * scale).round().max(1.0) as u32;
+    let height = (source_size.height() * scale).round().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
+        .ok_or_else(|| eyre!("Failed to allocate SVG raster buffer"))?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    let mut rgba_bytes = pixmap.take();
+    unpremultiply_rgba(&mut rgba_bytes);
+    let rgba = image::RgbaImage::from_raw(width, height, rgba_bytes)
+        .ok_or_else(|| eyre!("Failed to convert SVG raster buffer"))?;
+    Ok(image::DynamicImage::ImageRgba8(rgba))
+}
+
+fn unpremultiply_rgba(bytes: &mut [u8]) {
+    for pixel in bytes.chunks_exact_mut(4) {
+        let alpha = u16::from(pixel[3]);
+        if alpha == 0 || alpha == 255 {
+            continue;
+        }
+        for channel in &mut pixel[..3] {
+            *channel = ((u16::from(*channel) * 255 + alpha / 2) / alpha).min(255) as u8;
+        }
+    }
+}
+
 /// Legacy GraphicsAdapter enum to minimize breakage in matches
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GraphicsAdapter {
@@ -258,5 +317,49 @@ impl GraphicsAdapter {
             Self::None => {}
         }
         picker
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_image, unpremultiply_rgba};
+
+    #[test]
+    fn decodes_svg_bytes_into_rgba_image() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="8">
+            <rect width="16" height="8" fill="#ff0000"/>
+        </svg>"##;
+
+        let image = decode_image(svg).expect("SVG should decode");
+
+        assert_eq!(image.width(), 16);
+        assert_eq!(image.height(), 8);
+    }
+
+    #[test]
+    fn decodes_gzip_compressed_svg_bytes() {
+        let svgz = [
+            0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xb3, 0x29, 0x2e, 0x4b,
+            0x57, 0xa8, 0xc8, 0xcd, 0xc9, 0x2b, 0xb6, 0x55, 0xca, 0x28, 0x29, 0x29, 0xb0, 0xd2,
+            0xd7, 0x2f, 0x2f, 0x2f, 0xd7, 0x2b, 0x37, 0xd6, 0xcb, 0x2f, 0x4a, 0xd7, 0x37, 0x32,
+            0x30, 0x30, 0xd0, 0x07, 0xaa, 0x50, 0x52, 0x28, 0xcf, 0x4c, 0x29, 0xc9, 0xb0, 0x55,
+            0x32, 0x52, 0x52, 0xc8, 0x48, 0xcd, 0x4c, 0xcf, 0x28, 0xb1, 0x55, 0x32, 0x54, 0xb2,
+            0xb3, 0x29, 0x4a, 0x4d, 0x2e, 0xc1, 0x2a, 0xa5, 0x6f, 0x67, 0x03, 0xd2, 0x67, 0x07,
+            0x00, 0xf9, 0x0f, 0x22, 0x19, 0x5f, 0x00, 0x00, 0x00,
+        ];
+
+        let image = decode_image(&svgz).expect("SVGZ should decode");
+
+        assert_eq!(image.width(), 2);
+        assert_eq!(image.height(), 1);
+    }
+
+    #[test]
+    fn unpremultiply_restores_translucent_channels() {
+        let mut pixel = [64, 32, 16, 128];
+
+        unpremultiply_rgba(&mut pixel);
+
+        assert_eq!(pixel, [128, 64, 32, 128]);
     }
 }
