@@ -7,31 +7,14 @@ struct ThemeSetting {
     key: &'static str,
 }
 
-pub(super) fn detect_icon_theme(config_home: Option<&Path>, home: Option<&Path>) -> Option<String> {
+pub(super) fn detect_icon_theme(
+    config_home: Option<&Path>,
+    home: Option<&Path>,
+    config_dirs: &[PathBuf],
+) -> Option<String> {
     let mut settings = Vec::new();
     if let Some(config_home) = config_home {
-        settings.extend([
-            ThemeSetting {
-                path: config_home.join("gtk-4.0/settings.ini"),
-                section: None,
-                key: "gtk-icon-theme-name",
-            },
-            ThemeSetting {
-                path: config_home.join("gtk-3.0/settings.ini"),
-                section: None,
-                key: "gtk-icon-theme-name",
-            },
-            ThemeSetting {
-                path: config_home.join("kdeglobals"),
-                section: Some("Icons"),
-                key: "Theme",
-            },
-            ThemeSetting {
-                path: config_home.join("lxqt/lxqt.conf"),
-                section: Some("General"),
-                key: "icon_theme",
-            },
-        ]);
+        push_desktop_settings(&mut settings, config_home);
     }
     if let Some(home) = home {
         settings.push(ThemeSetting {
@@ -40,11 +23,39 @@ pub(super) fn detect_icon_theme(config_home: Option<&Path>, home: Option<&Path>)
             key: "gtk-icon-theme-name",
         });
     }
+    for config_dir in config_dirs {
+        push_desktop_settings(&mut settings, config_dir);
+    }
 
     settings.into_iter().find_map(|setting| {
         let contents = fs::read_to_string(setting.path).ok()?;
         find_setting(&contents, setting.section, setting.key)
     })
+}
+
+fn push_desktop_settings(settings: &mut Vec<ThemeSetting>, root: &Path) {
+    settings.extend([
+        ThemeSetting {
+            path: root.join("gtk-4.0/settings.ini"),
+            section: None,
+            key: "gtk-icon-theme-name",
+        },
+        ThemeSetting {
+            path: root.join("gtk-3.0/settings.ini"),
+            section: None,
+            key: "gtk-icon-theme-name",
+        },
+        ThemeSetting {
+            path: root.join("kdeglobals"),
+            section: Some("Icons"),
+            key: "Theme",
+        },
+        ThemeSetting {
+            path: root.join("lxqt/lxqt.conf"),
+            section: Some("General"),
+            key: "icon_theme",
+        },
+    ]);
 }
 
 fn find_setting(contents: &str, required_section: Option<&str>, key: &str) -> Option<String> {
@@ -74,7 +85,8 @@ fn find_setting(contents: &str, required_section: Option<&str>, key: &str) -> Op
 
 #[cfg(test)]
 mod tests {
-    use super::find_setting;
+    use super::{detect_icon_theme, find_setting};
+    use std::fs;
 
     #[test]
     fn reads_kde_icon_theme_only_from_icons_section() {
@@ -94,5 +106,22 @@ mod tests {
             find_setting(contents, None, "gtk-icon-theme-name").as_deref(),
             Some("Papirus-Dark")
         );
+    }
+
+    #[test]
+    fn detects_lxqt_theme_from_system_config_dirs() {
+        let root = std::env::temp_dir().join(format!("fsel-system-theme-{}", std::process::id()));
+        fs::create_dir_all(root.join("lxqt")).expect("LXQt config directory should be created");
+        fs::write(
+            root.join("lxqt/lxqt.conf"),
+            "[General]\nicon_theme=Breeze\n",
+        )
+        .expect("LXQt settings should be written");
+
+        assert_eq!(
+            detect_icon_theme(None, None, std::slice::from_ref(&root)).as_deref(),
+            Some("Breeze")
+        );
+        let _ = fs::remove_dir_all(root);
     }
 }

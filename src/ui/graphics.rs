@@ -92,16 +92,11 @@ impl ImageManager {
         Ok(picker.new_resize_protocol(image))
     }
 
-    /// Read, decode, and cache an image file without blocking the async executor.
-    pub async fn load_image_path(&mut self, key: &str, path: &Path) -> Result<()> {
-        if self.cache.contains_key(key) {
-            self.update_lru(key);
-            return Ok(());
-        }
-
-        let path = path.to_path_buf();
-        let bytes = tokio::task::spawn_blocking(move || std::fs::read(path)).await??;
-        self.load_image_bytes(key, bytes).await
+    /// Read and prepare an image file from a blocking worker.
+    pub(crate) fn prepare_image_path(picker: Picker, path: &Path) -> Result<StatefulProtocol> {
+        let bytes = std::fs::read(path)?;
+        let image = decode_image(&bytes)?;
+        Ok(picker.new_resize_protocol(image))
     }
 
     /// Return whether bytes have a supported raster signature or contain SVG markup.

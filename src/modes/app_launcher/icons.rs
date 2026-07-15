@@ -2,48 +2,77 @@ use crate::cli::Opts;
 use crate::core::state::State;
 use crate::desktop::IconResolver;
 use crate::ui::{AppIconPreview, GraphicsAdapter, ImageManager};
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 pub(super) struct IconRuntime {
     enabled: bool,
     adapter: GraphicsAdapter,
-    resolver: Arc<Mutex<IconResolver>>,
     image_manager: ImageManager,
     selected_icon: Option<String>,
     current_key: Option<String>,
     needs_terminal_clear: bool,
     generation: u64,
-    active_request: Option<JoinHandle<()>>,
-    result_tx: mpsc::UnboundedSender<IconResult>,
+    request_tx: mpsc::UnboundedSender<Option<IconRequest>>,
+    worker: JoinHandle<()>,
     result_rx: mpsc::UnboundedReceiver<IconResult>,
+}
+
+#[derive(Clone)]
+struct IconRequest {
+    generation: u64,
+    icon: String,
 }
 
 pub(super) struct IconResult {
     generation: u64,
-    path: Result<Option<PathBuf>, String>,
+    prepared: Result<Option<PreparedIcon>, String>,
+}
+
+struct PreparedIcon {
+    key: String,
+    protocol: Box<StatefulProtocol>,
 }
 
 impl IconRuntime {
     pub(super) fn new(cli: &Opts) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
+        let (request_tx, mut request_rx) = mpsc::unbounded_channel::<Option<IconRequest>>();
         let adapter = GraphicsAdapter::detect(None);
+        let picker = adapter.picker();
+        let worker_picker = picker.clone();
+        let mut resolver = IconResolver::from_environment(
+            cli.desktop_icon_theme.as_deref(),
+            cli.desktop_icon_size,
+        );
+        let worker = tokio::task::spawn_blocking(move || {
+            while let Some(mut request) = request_rx.blocking_recv() {
+                while let Ok(latest) = request_rx.try_recv() {
+                    request = latest;
+                }
+                let Some(request) = request else {
+                    continue;
+                };
+                let prepared = prepare_icon(&mut resolver, worker_picker.clone(), &request.icon);
+                let _ = result_tx.send(IconResult {
+                    generation: request.generation,
+                    prepared,
+                });
+            }
+        });
         Self {
             enabled: cli.desktop_icon_mode.shows_preview(),
             adapter,
-            resolver: Arc::new(Mutex::new(IconResolver::from_environment(
-                cli.desktop_icon_theme.as_deref(),
-                cli.desktop_icon_size,
-            ))),
-            image_manager: ImageManager::new(adapter.picker()),
+            image_manager: ImageManager::new(picker),
             selected_icon: None,
             current_key: None,
             needs_terminal_clear: false,
             generation: 0,
-            active_request: None,
-            result_tx,
+            request_tx,
+            worker,
             result_rx,
         }
     }
@@ -61,9 +90,6 @@ impl IconRuntime {
             return;
         }
 
-        if let Some(task) = self.active_request.take() {
-            task.abort();
-        }
         self.generation = self.generation.wrapping_add(1);
         self.selected_icon.clone_from(&icon);
         self.needs_terminal_clear =
@@ -71,17 +97,12 @@ impl IconRuntime {
         self.current_key = None;
 
         let Some(icon) = icon else {
+            let _ = self.request_tx.send(None);
             return;
         };
-        let generation = self.generation;
-        let resolver = Arc::clone(&self.resolver);
-        let result_tx = self.result_tx.clone();
-        self.active_request = Some(tokio::task::spawn_blocking(move || {
-            let path = resolver
-                .lock()
-                .map_err(|_| "Desktop icon resolver lock was poisoned".to_string())
-                .map(|mut resolver| resolver.resolve(&icon));
-            let _ = result_tx.send(IconResult { generation, path });
+        let _ = self.request_tx.send(Some(IconRequest {
+            generation: self.generation,
+            icon,
         }));
     }
 
@@ -89,24 +110,16 @@ impl IconRuntime {
         self.result_rx.recv().await
     }
 
-    pub(super) async fn apply_result(&mut self, result: IconResult) {
+    pub(super) fn apply_result(&mut self, result: IconResult) {
         if result.generation != self.generation {
             return;
         }
-        self.active_request = None;
-
-        let Ok(Some(path)) = result.path else {
+        let Ok(Some(prepared)) = result.prepared else {
             return;
         };
-        let key = path.to_string_lossy().into_owned();
-        if self
-            .image_manager
-            .load_image_path(&key, &path)
-            .await
-            .is_ok()
-        {
-            self.current_key = Some(key);
-        }
+        self.image_manager
+            .insert_protocol(prepared.key.clone(), *prepared.protocol);
+        self.current_key = Some(prepared.key);
     }
 
     pub(super) fn preview(&mut self) -> Option<AppIconPreview<'_>> {
@@ -124,8 +137,27 @@ impl IconRuntime {
 
 impl Drop for IconRuntime {
     fn drop(&mut self) {
-        if let Some(task) = self.active_request.take() {
-            task.abort();
-        }
+        self.worker.abort();
     }
+}
+
+fn prepare_icon(
+    resolver: &mut IconResolver,
+    picker: Picker,
+    icon: &str,
+) -> Result<Option<PreparedIcon>, String> {
+    let Some(path) = resolver.resolve(icon) else {
+        return Ok(None);
+    };
+    prepare_resolved_icon(picker, path).map(Some)
+}
+
+fn prepare_resolved_icon(picker: Picker, path: PathBuf) -> Result<PreparedIcon, String> {
+    let key = path.to_string_lossy().into_owned();
+    let protocol = ImageManager::prepare_image_path(picker, &path)
+        .map_err(|error| format!("Failed to load desktop icon {}: {error}", path.display()))?;
+    Ok(PreparedIcon {
+        key,
+        protocol: Box::new(protocol),
+    })
 }

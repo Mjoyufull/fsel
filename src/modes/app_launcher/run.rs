@@ -158,7 +158,7 @@ pub async fn run(cli: Opts) -> Result<()> {
 
         tokio::select! {
             Some(result) = icons.next_result() => {
-                icons.apply_result(result).await;
+                icons.apply_result(result);
                 needs_redraw = true;
             }
             maybe_event = input.next() => {

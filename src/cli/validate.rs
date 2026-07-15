@@ -26,12 +26,12 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
 
     if !(10..=90).contains(&default.desktop_icon_preview_width_percent) {
         return Err(CliError::message(
-            "Error: --icon-preview-width must be between 10 and 90\n",
+            "Error: Desktop icon preview width must be between 10 and 90\n",
         ));
     }
     if default.desktop_icon_size == 0 || default.desktop_icon_size > 4096 {
         return Err(CliError::message(
-            "Error: --icon-size must be between 1 and 4096\n",
+            "Error: Desktop icon size must be between 1 and 4096\n",
         ));
     }
 

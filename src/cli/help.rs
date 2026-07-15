@@ -37,9 +37,9 @@ Usage:
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
 │  ├─ --stdout                     Print filtered desktop entries to stdout in json form
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
-│  ├─ --desktop-icons[=MODE]       Show selected desktop icon preview or disable with =no
+│  ├─ --desktop-icons[=MODE]       Use preview (default) or disable with no/none
 │  ├─ --icon-position <SIDE>       Place the icon preview on the left or right
-│  ├─ --icon-theme <THEME>         Override automatic GTK icon-theme detection
+│  ├─ --icon-theme <THEME>         Override automatic desktop icon-theme detection
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching
 │  └─ --prefix-depth <N>           Tune how long prefix matches outrank fuzzy matches
 │
@@ -100,7 +100,7 @@ Usage:
 │  ├─ --icon-position <SIDE>       Put the title-panel icon on the left or right
 │  ├─ --icon-preview-width <N>     Give the icon 10-90 percent of the title panel
 │  ├─ --icon-size <PX>             Request a themed icon size from 1-4096 pixels
-│  ├─ --icon-theme <THEME>         Override automatic GTK icon-theme detection
+│  ├─ --icon-theme <THEME>         Override automatic desktop icon-theme detection
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching (default: fuzzy)
 │  └─ --prefix-depth <N>           Set how long prefix matches outrank fuzzy matches (default: 3)
 │

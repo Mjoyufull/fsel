@@ -1,11 +1,12 @@
 use jwalk::WalkDir;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 
+mod index;
 mod theme;
 
+use index::{ThemeDirectory, read_theme_metadata};
 use theme::detect_icon_theme;
 
 const ICON_EXTENSIONS: [&str; 2] = ["svg", "png"];
@@ -25,9 +26,11 @@ impl IconResolver {
     pub(crate) fn from_environment(theme: Option<&str>, size: u16) -> Self {
         let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
         let config_home = env::var_os("XDG_CONFIG_HOME")
+            .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .or_else(|| home.as_ref().map(|path| path.join(".config")));
         let data_home = env::var_os("XDG_DATA_HOME")
+            .filter(|value| !value.is_empty())
             .map(PathBuf::from)
             .or_else(|| home.as_ref().map(|path| path.join(".local/share")));
 
@@ -39,19 +42,26 @@ impl IconResolver {
             push_unique(&mut icon_roots, home.join(".icons"));
         }
 
-        let data_dirs =
-            env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
         let mut pixmap_roots = Vec::new();
-        for data_dir in data_dirs.split(':').filter(|entry| !entry.is_empty()) {
-            let data_dir = PathBuf::from(data_dir);
+        let data_dirs = env::var("XDG_DATA_DIRS").ok();
+        for data_dir in super::dirs::system_data_dirs(data_dirs.as_deref()) {
             push_unique(&mut icon_roots, data_dir.join("icons"));
             push_unique(&mut pixmap_roots, data_dir.join("pixmaps"));
         }
 
+        let config_dirs = env::var("XDG_CONFIG_DIRS")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "/etc/xdg".to_string())
+            .split(':')
+            .filter(|entry| !entry.is_empty())
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+
         let theme = theme
             .filter(|value| !value.trim().is_empty())
             .map(str::to_string)
-            .or_else(|| detect_icon_theme(config_home.as_deref(), home.as_deref()))
+            .or_else(|| detect_icon_theme(config_home.as_deref(), home.as_deref(), &config_dirs))
             .unwrap_or_else(|| "hicolor".to_string());
 
         Self {
@@ -114,7 +124,13 @@ impl IconResolver {
             let mut candidates = Vec::new();
             if let Some(metadata) = read_theme_metadata(&theme_root) {
                 for directory in metadata.directories {
-                    collect_named_candidates(&theme_root.join(directory), icon, &mut candidates);
+                    collect_named_candidates(
+                        &theme_root,
+                        &directory,
+                        icon,
+                        self.size,
+                        &mut candidates,
+                    );
                 }
             }
             if candidates.is_empty() {
@@ -126,11 +142,11 @@ impl IconResolver {
                 {
                     let path = entry.path();
                     if path.is_file() && has_icon_name(&path, icon) {
-                        candidates.push(path);
+                        candidates.push(IconCandidate::from_fallback(path, self.size));
                     }
                 }
             }
-            if let Some(path) = best_candidate(candidates, self.size) {
+            if let Some(path) = best_candidate(candidates) {
                 return Some(path);
             }
         }
@@ -150,79 +166,66 @@ impl IconResolver {
     }
 }
 
-struct ThemeMetadata {
-    directories: Vec<PathBuf>,
-    inherits: Vec<String>,
-}
-
-fn read_theme_metadata(theme_root: &Path) -> Option<ThemeMetadata> {
-    let contents = fs::read_to_string(theme_root.join("index.theme")).ok()?;
-    let mut in_icon_theme = false;
-    let mut directories = Vec::new();
-    let mut inherits = Vec::new();
-
-    for line in contents.lines().map(str::trim) {
-        if line.starts_with('[') {
-            in_icon_theme = line.eq_ignore_ascii_case("[Icon Theme]");
-            continue;
-        }
-        if !in_icon_theme {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        match key.trim() {
-            "Directories" | "ScaledDirectories" => directories.extend(
-                value
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|entry| !entry.is_empty())
-                    .map(PathBuf::from),
-            ),
-            "Inherits" => inherits.extend(
-                value
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|entry| !entry.is_empty())
-                    .map(str::to_string),
-            ),
-            _ => {}
-        }
-    }
-
-    Some(ThemeMetadata {
-        directories,
-        inherits,
-    })
-}
-
-fn collect_named_candidates(directory: &Path, icon: &str, candidates: &mut Vec<PathBuf>) {
+fn collect_named_candidates(
+    theme_root: &Path,
+    directory: &ThemeDirectory,
+    icon: &str,
+    requested_size: u16,
+    candidates: &mut Vec<IconCandidate>,
+) {
     for extension in ICON_EXTENSIONS {
-        let path = directory.join(format!("{icon}.{extension}"));
+        let path = theme_root
+            .join(&directory.path)
+            .join(format!("{icon}.{extension}"));
         if path.is_file() {
-            candidates.push(path);
+            candidates.push(IconCandidate {
+                path,
+                directory_score: directory.score(requested_size),
+            });
         }
     }
 }
 
-fn best_candidate(mut candidates: Vec<PathBuf>, requested_size: u16) -> Option<PathBuf> {
-    candidates.sort_by_key(|path| candidate_score(path, requested_size));
-    candidates.into_iter().next()
+struct IconCandidate {
+    path: PathBuf,
+    directory_score: (u32, u8),
 }
 
-fn candidate_score(path: &Path, requested_size: u16) -> (u16, u8) {
-    let size_distance = path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str())
-        .find_map(parse_directory_size)
-        .map_or(0, |size| size.abs_diff(requested_size));
-    let extension_rank = match path.extension().and_then(|value| value.to_str()) {
+impl IconCandidate {
+    fn from_fallback(path: PathBuf, requested_size: u16) -> Self {
+        let distance = path
+            .components()
+            .filter_map(|component| component.as_os_str().to_str())
+            .find_map(parse_directory_size)
+            .map_or(u32::MAX / 2, |size| {
+                u32::from(size.abs_diff(requested_size))
+            });
+        Self {
+            path,
+            directory_score: (distance, 3),
+        }
+    }
+
+    fn score(&self) -> (u32, u8, u8) {
+        let (distance, kind_rank) = self.directory_score;
+        (distance, kind_rank, extension_rank(&self.path))
+    }
+}
+
+fn best_candidate(mut candidates: Vec<IconCandidate>) -> Option<PathBuf> {
+    candidates.sort_by_key(IconCandidate::score);
+    candidates
+        .into_iter()
+        .next()
+        .map(|candidate| candidate.path)
+}
+
+fn extension_rank(path: &Path) -> u8 {
+    match path.extension().and_then(|value| value.to_str()) {
         Some("svg") => 0,
         Some("png") => 1,
         _ => 2,
-    };
-    (size_distance, extension_rank)
+    }
 }
 
 fn parse_directory_size(component: &str) -> Option<u16> {
@@ -290,13 +293,46 @@ mod tests {
             .expect("128px directory should be created");
         fs::write(
             inherited_theme.join("index.theme"),
-            "[Icon Theme]\nDirectories=32x32/apps,128x128/apps\n",
+            "[Icon Theme]\nDirectories=32x32/apps,128x128/apps\n\
+             [32x32/apps]\nSize=32\nType=Fixed\n\
+             [128x128/apps]\nSize=128\nType=Fixed\n",
         )
         .expect("inherited theme metadata should be written");
         fs::write(inherited_theme.join("32x32/apps/editor.png"), b"small")
             .expect("small icon should be written");
         let expected = inherited_theme.join("128x128/apps/editor.png");
         fs::write(&expected, b"large").expect("large icon should be written");
+
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 128,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn exact_fixed_icon_outranks_scalable_svg() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("scalable/apps"))
+            .expect("scalable directory should be created");
+        fs::create_dir_all(theme.join("128x128/apps")).expect("fixed directory should be created");
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=scalable/apps,128x128/apps\n\
+             [scalable/apps]\nSize=48\nType=Scalable\nMinSize=16\nMaxSize=256\n\
+             [128x128/apps]\nSize=128\nType=Fixed\n",
+        )
+        .expect("theme metadata should be written");
+        fs::write(theme.join("scalable/apps/editor.svg"), b"scalable")
+            .expect("scalable icon should be written");
+        let expected = theme.join("128x128/apps/editor.png");
+        fs::write(&expected, b"fixed").expect("fixed icon should be written");
 
         let mut resolver = IconResolver {
             theme: "Selected".to_string(),
