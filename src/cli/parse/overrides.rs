@@ -158,6 +158,16 @@ pub(super) fn parse_cli_overrides(
                     default.filter_actions = true;
                 }
             }
+            Long("auto-hide-duplicates") => {
+                if let Some(value) = parser.optional_value() {
+                    let value = value.into_string().map_err(|_| {
+                        CliError::message("auto-hide-duplicates value must be valid UTF-8")
+                    })?;
+                    default.auto_hide_duplicates = value != "no";
+                } else {
+                    default.auto_hide_duplicates = true;
+                }
+            }
             Long("list-executables-in-path") => {
                 default.list_executables_in_path = true;
             }

@@ -140,6 +140,30 @@ mod tests {
     }
 
     #[test]
+    fn auto_hide_duplicates_flag_parses_yes_and_no_forms() {
+        let enabled = parse_with_config(
+            &args(&["fsel", "--auto-hide-duplicates"]),
+            FselConfig::default(),
+        )
+        .unwrap();
+        let disabled = parse_with_config(
+            &args(&["fsel", "--auto-hide-duplicates=no"]),
+            FselConfig::default(),
+        )
+        .unwrap();
+
+        let CliCommand::Run(enabled_opts) = enabled else {
+            panic!("expected run command");
+        };
+        let CliCommand::Run(disabled_opts) = disabled else {
+            panic!("expected run command");
+        };
+
+        assert!(enabled_opts.auto_hide_duplicates);
+        assert!(!disabled_opts.auto_hide_duplicates);
+    }
+
+    #[test]
     fn hidden_entry_management_flags_parse() {
         let command =
             parse_with_config(&args(&["fsel", "--unhide", "42"]), FselConfig::default()).unwrap();
@@ -160,6 +184,19 @@ mod tests {
 
         assert!(
             matches!(error, CliError::Message(message) if message.contains("cannot be combined"))
+        );
+    }
+
+    #[test]
+    fn hidden_entry_management_does_not_silently_ignore_launch_requests() {
+        let error = parse_with_config(
+            &args(&["fsel", "--unhide", "42", "--program", "firefox"]),
+            FselConfig::default(),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, CliError::Message(message) if message.contains("launch or search"))
         );
     }
 }

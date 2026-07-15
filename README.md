@@ -179,6 +179,7 @@ fsel -p firefox
 - **Smart Matching**: Searches names, descriptions, keywords, and categories
 - **Pin/Favorite Apps**: Press Ctrl-Space to pin apps - pinned apps always appear first
 - **Reversible Hiding**: Press Alt-Delete to hide one exact launcher source and Alt-U to undo
+- **Optional Deduplication**: Enable deterministic XDG-aware duplicate suppression when wanted
 - **Match Modes**: Fuzzy (default) or exact matching
 
 See [USAGE.md - App Launcher](./USAGE.md#app-launcher) for TTY mode, launch prefixes, `--detach`, cache management, `--replace`, and more.
@@ -191,6 +192,10 @@ fsel --list-hidden
 fsel --unhide 12
 fsel --unhide-all
 ```
+
+Set `auto_hide_duplicates = true` under `[app_launcher]` to suppress entries with the same
+desktop-file ID or normalized visible name. It defaults to `false`; manual hiding always targets
+one exact source path, including duplicate entries in the same directory or across Bedrock strata.
 
 ### Direct Launch Mode
 
@@ -302,6 +307,7 @@ pin_icon = "📌"                     # Icon for pinned apps
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment
 filter_actions = false            # Keep desktop actions visible; set true to hide them
+auto_hide_duplicates = false      # Opt in to deterministic duplicate suppression
 list_executables_in_path = false   # Show CLI tools from $PATH
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"

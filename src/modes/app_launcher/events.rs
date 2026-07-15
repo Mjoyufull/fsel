@@ -29,6 +29,7 @@ fn handle_key_event(
     total_height: u16,
 ) {
     let max_visible = max_visible_items(total_height, cli);
+    state.clear_status_message();
 
     let msg = if cli.keybinds.matches_exit(key.code, key.modifiers) {
         Message::Exit
@@ -49,14 +50,27 @@ fn handle_key_event(
         refresh_info(state, cli);
         return;
     } else if cli.keybinds.matches_hide(key.code, key.modifiers) {
-        if let Err(error) = hide_selected_entry(state, hidden_store) {
-            eprintln!("Warning: Failed to hide entry: {error}");
+        match hide_selected_entry(state, hidden_store) {
+            Ok(Some(name)) => {
+                state.set_status_message(format!("Hidden {name}; use the unhide binding to undo"));
+            }
+            Ok(None) => {}
+            Err(error) => {
+                state.set_status_message(format!("Could not hide entry: {error}"));
+            }
         }
         refresh_info(state, cli);
         return;
     } else if cli.keybinds.matches_unhide_last(key.code, key.modifiers) {
-        if let Err(error) = unhide_last_entry(state, hidden_store) {
-            eprintln!("Warning: Failed to restore entry: {error}");
+        match unhide_last_entry(state, hidden_store) {
+            Ok(Some((name, true))) => state.set_status_message(format!("Restored {name}")),
+            Ok(Some((name, false))) => {
+                state.set_status_message(format!("Cleared hidden record for unavailable {name}"));
+            }
+            Ok(None) => state.set_status_message("No manual hides to restore"),
+            Err(error) => {
+                state.set_status_message(format!("Could not restore entry: {error}"));
+            }
         }
         refresh_info(state, cli);
         return;
@@ -174,34 +188,53 @@ fn toggle_selected_pin(state: &mut State, db: &std::sync::Arc<redb::Database>) {
     state.filter();
 }
 
-fn hide_selected_entry(state: &mut State, hidden_store: &HiddenEntryStore) -> eyre::Result<()> {
+fn hide_selected_entry(
+    state: &mut State,
+    hidden_store: &HiddenEntryStore,
+) -> eyre::Result<Option<String>> {
     let Some(index) = state.selected else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(app) = state.shown.get(index).cloned() else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(entry_key) = app.entry_key() else {
-        return Ok(());
+        return Ok(None);
     };
     let Some(source_display) = app.source_display() else {
-        return Ok(());
+        return Ok(None);
     };
     let hidden_at_unix_ms = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or(0);
-    let new_entry = NewHiddenEntry::new(entry_key, app.name, source_display, hidden_at_unix_ms);
+    let new_entry = NewHiddenEntry::new(
+        entry_key,
+        app.name.as_str(),
+        source_display,
+        hidden_at_unix_ms,
+    );
     let hidden_entry = hidden_store.insert(new_entry)?;
     state.hide_entry(hidden_entry.entry_key().clone());
-    Ok(())
+    Ok(Some(app.name))
 }
 
-fn unhide_last_entry(state: &mut State, hidden_store: &HiddenEntryStore) -> eyre::Result<()> {
+fn unhide_last_entry(
+    state: &mut State,
+    hidden_store: &HiddenEntryStore,
+) -> eyre::Result<Option<(String, bool)>> {
     if let Some(hidden_entry) = hidden_store.remove_last()? {
+        let is_available = state
+            .apps
+            .iter()
+            .any(|app| app.entry_key().as_ref() == Some(hidden_entry.entry_key()));
         state.unhide_entry(hidden_entry.entry_key());
+        return Ok(Some((
+            hidden_entry.display_name().to_string(),
+            is_available,
+        )));
     }
-    Ok(())
+    Ok(None)
 }
 
 fn refresh_info(state: &mut State, cli: &Opts) {

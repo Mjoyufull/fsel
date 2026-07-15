@@ -81,6 +81,10 @@ filter_desktop = true
 # false = keep action entries visible, true = show only main app entries
 filter_actions = false
 
+# Suppress duplicate desktop IDs and equal visible names using XDG directory precedence
+# false keeps every discovered source visible unless you hide it manually
+auto_hide_duplicates = false
+
 # Include raw executables from $PATH (ls, grep, etc.)
 list_executables_in_path = false
 

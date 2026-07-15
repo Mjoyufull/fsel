@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub(crate) struct EntryKey(String);
 
 impl EntryKey {
@@ -17,6 +17,19 @@ impl EntryKey {
             "v1:executable:{}",
             crate::core::path_key::encode(source_path)
         ))
+    }
+
+    pub(crate) fn source_path(&self) -> Option<std::path::PathBuf> {
+        let encoded_path = self
+            .0
+            .strip_prefix("v1:desktop:")
+            .and_then(|value| value.split_once(':').map(|(path, _)| path))
+            .or_else(|| self.0.strip_prefix("v1:executable:"))?;
+        crate::core::path_key::decode(encoded_path)
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
     }
 }
 
@@ -83,6 +96,10 @@ impl HiddenEntry {
     pub(crate) fn hidden_at_unix_ms(&self) -> u64 {
         self.data.hidden_at_unix_ms
     }
+
+    pub(crate) fn source_is_available(&self) -> Option<bool> {
+        self.data.entry_key.source_path().map(|path| path.exists())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -127,9 +144,27 @@ mod tests {
 
         let first = EntryKey::desktop(first_path, "editor.desktop");
         let second = EntryKey::desktop(second_path, "editor.desktop");
+        let action = EntryKey::desktop(first_path, "editor.desktop#NewWindow");
         let executable = EntryKey::executable(first_path);
 
         assert_ne!(first, second);
+        assert_ne!(first, action);
         assert_ne!(first, executable);
+    }
+
+    #[test]
+    fn entry_key_recovers_non_utf8_source_path() {
+        #[cfg(unix)]
+        {
+            use std::ffi::OsString;
+            use std::os::unix::ffi::OsStringExt;
+
+            let path = std::path::PathBuf::from(OsString::from_vec(vec![
+                b'/', b't', b'm', b'p', b'/', 0xff, b'.', b'd', b'e', b's', b'k', b't', b'o', b'p',
+            ]));
+            let key = EntryKey::desktop(&path, "editor.desktop");
+
+            assert_eq!(key.source_path().as_deref(), Some(path.as_path()));
+        }
     }
 }

@@ -1,9 +1,11 @@
 use super::{EntryKey, HiddenEntry, HiddenEntryId, NewHiddenEntry};
-use crate::core::cache::HIDDEN_ENTRIES_TABLE;
+use crate::core::cache::{HIDDEN_ENTRIES_TABLE, HIDDEN_ENTRY_META_TABLE};
 use eyre::{Result, WrapErr, eyre};
 use redb::{ReadableDatabase, ReadableTable};
 use std::collections::HashSet;
 use std::sync::Arc;
+
+const NEXT_ID_KEY: &str = "next_id";
 
 pub(crate) struct HiddenEntryStore {
     db: Arc<redb::Database>,
@@ -13,6 +15,7 @@ impl HiddenEntryStore {
     pub(crate) fn new(db: Arc<redb::Database>) -> Result<Self> {
         let write_txn = db.begin_write()?;
         write_txn.open_table(HIDDEN_ENTRIES_TABLE)?;
+        write_txn.open_table(HIDDEN_ENTRY_META_TABLE)?;
         write_txn.commit()?;
         Ok(Self { db })
     }
@@ -20,10 +23,9 @@ impl HiddenEntryStore {
     pub(crate) fn insert(&self, entry: NewHiddenEntry) -> Result<HiddenEntry> {
         let write_txn = self.db.begin_write()?;
         let stored_entry = super::model::StoredHiddenEntry::from_new(entry);
-        let inserted_entry = {
-            let mut table = write_txn.open_table(HIDDEN_ENTRIES_TABLE)?;
-            let mut greatest_id = None;
-
+        let greatest_id = {
+            let table = write_txn.open_table(HIDDEN_ENTRIES_TABLE)?;
+            let mut greatest_id = 0;
             for row in table.iter()? {
                 let (id_guard, value_guard) = row?;
                 let id = id_guard.value();
@@ -31,15 +33,26 @@ impl HiddenEntryStore {
                 if existing.entry_key() == stored_entry.entry_key() {
                     return Ok(existing);
                 }
-                greatest_id = Some(greatest_id.map_or(id, |current: u64| current.max(id)));
+                greatest_id = greatest_id.max(id);
             }
+            greatest_id
+        };
 
-            let next_id = match greatest_id {
-                Some(id) => id
-                    .checked_add(1)
-                    .ok_or_else(|| eyre!("hidden entry ID space is exhausted"))?,
-                None => 1,
-            };
+        let next_id = {
+            let mut meta_table = write_txn.open_table(HIDDEN_ENTRY_META_TABLE)?;
+            let next_id = meta_table
+                .get(NEXT_ID_KEY)?
+                .map(|value| value.value())
+                .unwrap_or_else(|| greatest_id.saturating_add(1).max(1));
+            let following_id = next_id
+                .checked_add(1)
+                .ok_or_else(|| eyre!("hidden entry ID space is exhausted"))?;
+            meta_table.insert(NEXT_ID_KEY, following_id)?;
+            next_id
+        };
+
+        let inserted_entry = {
+            let mut table = write_txn.open_table(HIDDEN_ENTRIES_TABLE)?;
             let encoded = postcard::to_allocvec(&stored_entry)?;
             table.insert(next_id, encoded.as_slice())?;
             stored_entry.into_entry(next_id)
@@ -227,6 +240,46 @@ mod tests {
         assert!(store.list().expect("list should succeed").is_empty());
 
         drop(store);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn record_ids_are_not_reused_after_restore() {
+        let (store, dir) = test_store("monotonic");
+        let first = store
+            .insert(new_entry("/one/example.desktop", "One", 10))
+            .expect("first insert should succeed");
+        store
+            .remove(first.id())
+            .expect("remove should succeed")
+            .expect("record should exist");
+
+        let second = store
+            .insert(new_entry("/two/example.desktop", "Two", 20))
+            .expect("second insert should succeed");
+
+        assert!(second.id() > first.id());
+
+        drop(store);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn records_survive_database_reopen() {
+        let (store, dir) = test_store("reopen");
+        let expected = store
+            .insert(new_entry("/one/example.desktop", "One", 10))
+            .expect("record should be inserted");
+        drop(store);
+
+        let db = Arc::new(
+            redb::Database::open(dir.join("history.redb")).expect("database should reopen"),
+        );
+        let reopened = HiddenEntryStore::new(db).expect("store should reopen");
+
+        assert_eq!(reopened.list().expect("record should load"), vec![expected]);
+
+        drop(reopened);
         fs::remove_dir_all(dir).expect("test directory should be removed");
     }
 }

@@ -47,6 +47,9 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(filter) = fsel_config.app_launcher.filter_actions {
         default.filter_actions = filter;
     }
+    if let Some(auto_hide_duplicates) = fsel_config.app_launcher.auto_hide_duplicates {
+        default.auto_hide_duplicates = auto_hide_duplicates;
+    }
     if let Some(list_exec) = fsel_config.app_launcher.list_executables_in_path {
         default.list_executables_in_path = list_exec;
     }
@@ -237,5 +240,18 @@ mod tests {
         apply_config_defaults(&mut opts, &config);
 
         assert!(opts.filter_actions);
+    }
+
+    #[test]
+    fn app_launcher_auto_hide_duplicates_is_opt_in() {
+        let mut opts = Opts::default();
+        apply_config_defaults(&mut opts, &FselConfig::default());
+        assert!(!opts.auto_hide_duplicates);
+
+        let mut config = FselConfig::default();
+        config.app_launcher.auto_hide_duplicates = Some(true);
+        apply_config_defaults(&mut opts, &config);
+
+        assert!(opts.auto_hide_duplicates);
     }
 }

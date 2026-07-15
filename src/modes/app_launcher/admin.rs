@@ -40,14 +40,20 @@ pub(crate) fn handle_maintenance_command(
         if entries.is_empty() {
             println!("No manually hidden entries.");
         } else {
-            println!("ID\tHIDDEN_MS\tNAME\tSOURCE");
+            println!("ID\tHIDDEN\tNAME\tSOURCE");
             for entry in entries {
+                let availability = if entry.source_is_available() == Some(false) {
+                    " [unavailable]"
+                } else {
+                    ""
+                };
                 println!(
-                    "{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}{}",
                     entry.id().value(),
-                    entry.hidden_at_unix_ms(),
+                    format_hidden_timestamp(entry.hidden_at_unix_ms()),
                     sanitize_table_field(entry.display_name()),
-                    sanitize_table_field(entry.source_display())
+                    sanitize_table_field(entry.source_display()),
+                    availability,
                 );
             }
         }
@@ -87,6 +93,18 @@ fn sanitize_table_field(value: &str) -> String {
         .collect()
 }
 
+fn format_hidden_timestamp(unix_ms: u64) -> String {
+    let unix_nanos = i128::from(unix_ms) * 1_000_000;
+    time::OffsetDateTime::from_unix_timestamp_nanos(unix_nanos)
+        .ok()
+        .and_then(|timestamp| {
+            timestamp
+                .format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| unix_ms.to_string())
+}
+
 pub(crate) fn initialize_test_mode(cli: &Opts) {
     if !cli.test_mode {
         return;
@@ -100,9 +118,19 @@ pub(crate) fn initialize_test_mode(cli: &Opts) {
     }
 }
 
-pub(crate) fn log_startup_if_enabled(cli: &Opts, app_count: usize, frecency_entries: usize) {
+pub(crate) fn log_startup_if_enabled(
+    cli: &Opts,
+    app_count: usize,
+    frecency_entries: usize,
+    hidden_summary: &crate::core::hidden_entries::HiddenSummary,
+) {
     if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
-        crate::core::debug_logger::log_startup_info(cli, app_count, frecency_entries);
+        crate::core::debug_logger::log_startup_info(
+            cli,
+            app_count,
+            frecency_entries,
+            hidden_summary,
+        );
     }
 }
 
@@ -135,7 +163,11 @@ fn clear_history(db: &redb::Database) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_table_field;
+    use super::{clear_history, format_hidden_timestamp, sanitize_table_field};
+    use crate::core::hidden_entries::{EntryKey, HiddenEntryStore, NewHiddenEntry};
+    use std::fs;
+    use std::path::Path;
+    use std::sync::Arc;
 
     #[test]
     fn hidden_entry_table_fields_do_not_emit_terminal_controls() {
@@ -143,5 +175,41 @@ mod tests {
             sanitize_table_field("Unsafe\n\u{1b}[31mName"),
             "Unsafe  [31mName"
         );
+    }
+
+    #[test]
+    fn hidden_timestamps_are_human_readable() {
+        assert_eq!(format_hidden_timestamp(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn clearing_history_and_cache_preserves_manual_hides() {
+        let dir =
+            std::env::temp_dir().join(format!("fsel-hidden-maintenance-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("test directory should be created");
+        let db = Arc::new(
+            redb::Database::create(dir.join("history.redb")).expect("database should be created"),
+        );
+        let store = HiddenEntryStore::new(Arc::clone(&db)).expect("store should initialize");
+        store
+            .insert(NewHiddenEntry::new(
+                EntryKey::desktop(Path::new("/example.desktop"), "example.desktop"),
+                "Example",
+                "/example.desktop",
+                0,
+            ))
+            .expect("record should be inserted");
+
+        clear_history(&db).expect("history should clear");
+        crate::core::cache::DesktopCache::new(Arc::clone(&db))
+            .expect("cache should initialize")
+            .clear()
+            .expect("cache should clear");
+
+        assert_eq!(store.list().expect("records should load").len(), 1);
+        drop(store);
+        drop(db);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
     }
 }

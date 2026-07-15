@@ -5,6 +5,7 @@ use std::time::SystemTime;
 impl State {
     /// Update info text based on the selected app.
     pub fn update_info(&mut self, _highlight_color: Color, fancy_mode: bool, verbose: u64) {
+        self.text.clear();
         if let Some(selected) = self.selected
             && let Some(app) = self.shown.get(selected)
         {
@@ -58,7 +59,30 @@ impl State {
                 }
             }
         }
+
+        if verbose > 2 {
+            append_section(
+                &mut self.text,
+                &format!(
+                    "Hidden entries: {} manual, {} automatic, {} unavailable",
+                    self.hidden_summary.manual,
+                    self.hidden_summary.automatic,
+                    self.hidden_summary.unavailable,
+                ),
+            );
+        }
+
+        if let Some(status_message) = &self.status_message {
+            append_section(&mut self.text, status_message);
+        }
     }
+}
+
+fn append_section(text: &mut String, section: &str) {
+    if !text.is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str(section);
 }
 
 fn format_recency(timestamp: u64) -> String {

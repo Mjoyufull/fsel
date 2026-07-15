@@ -100,6 +100,10 @@ impl App {
     pub(crate) fn set_source_path(&mut self, source_path: &Path) {
         self.source_path = Some(source_path.to_path_buf());
     }
+
+    pub(crate) fn source_path(&self) -> Option<&Path> {
+        self.source_path.as_deref()
+    }
 }
 
 impl PartialEq for App {

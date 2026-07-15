@@ -19,6 +19,7 @@ pub fn find_app_by_name_fast(
     let history_cache = cache::HistoryCache::load(db)?;
 
     if let Ok(Some(app)) = desktop_cache.get_by_name(app_name)
+        && !app.hidden
         && matches_current_desktop(&app, cli)
         && !is_hidden(&app, hidden_entry_keys)
     {
@@ -117,4 +118,54 @@ fn matches_current_desktop(app: &desktop::App, cli: &cli::Opts) -> bool {
             .iter()
             .any(|current| current.eq_ignore_ascii_case(desktop))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_app_by_name_fast;
+    use crate::cli::Opts;
+    use crate::core::hidden_entries::EntryKey;
+    use crate::desktop::App;
+    use std::collections::HashSet;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::Arc;
+
+    #[test]
+    fn cached_name_lookup_does_not_bypass_manual_hides() {
+        let dir = std::env::temp_dir().join(format!("fsel-hidden-fast-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("test directory should be created");
+        let desktop_path = dir.join("fixture.desktop");
+        fs::write(
+            &desktop_path,
+            "[Desktop Entry]\nType=Application\nName=FselHiddenFixtureExact\nExec=/bin/true\n",
+        )
+        .expect("desktop entry should be written");
+        let db = Arc::new(
+            redb::Database::create(dir.join("history.redb")).expect("database should be created"),
+        );
+        let mut app = App::parse(
+            fs::read_to_string(&desktop_path).expect("fixture should be readable"),
+            false,
+        )
+        .expect("fixture should parse");
+        app.desktop_id = Some("fixture.desktop".to_string());
+        app.set_source_path(&desktop_path);
+        crate::core::cache::DesktopCache::new(Arc::clone(&db))
+            .expect("cache should initialize")
+            .set(&desktop_path, app)
+            .expect("cache should store fixture");
+        let hidden = HashSet::from([EntryKey::desktop(
+            Path::new(&desktop_path),
+            "fixture.desktop",
+        )]);
+
+        let found = find_app_by_name_fast(&db, "FselHiddenFixtureExact", &Opts::default(), &hidden)
+            .expect("lookup should succeed");
+
+        assert!(found.is_none());
+        drop(db);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
 }

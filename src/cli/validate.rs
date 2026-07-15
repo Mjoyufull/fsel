@@ -11,6 +11,18 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
             "Error: --list-hidden, --unhide, and --unhide-all cannot be combined\n",
         ));
     }
+    if hidden_commands > 0
+        && (default.clear_history || default.clear_cache || default.refresh_cache)
+    {
+        return Err(CliError::message(
+            "Error: hidden-entry commands cannot be combined with cache/history maintenance\n",
+        ));
+    }
+    if hidden_commands > 0 && (default.program.is_some() || default.search_string.is_some()) {
+        return Err(CliError::message(
+            "Error: hidden-entry commands cannot be combined with launch or search requests\n",
+        ));
+    }
 
     if default.program.is_some() && default.search_string.is_some() {
         return Err(CliError::message(

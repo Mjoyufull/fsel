@@ -5,12 +5,12 @@ impl State {
     pub fn filter(&mut self) {
         use std::time::Instant;
 
-        let eligible_apps = self
-            .apps
-            .iter()
-            .filter(|app| !self.is_hidden(app))
-            .cloned()
-            .collect::<Vec<_>>();
+        let (eligible_apps, hidden_summary) = crate::core::hidden_entries::eligible_apps(
+            &self.apps,
+            &self.hidden_entry_keys,
+            &self.visibility_options,
+        );
+        self.hidden_summary = hidden_summary;
 
         if self.query.is_empty() {
             self.shown = eligible_apps;
@@ -87,5 +87,38 @@ mod tests {
 
         state.unhide_entry(&entry_key);
         assert_eq!(state.shown.len(), 1);
+    }
+
+    #[test]
+    fn hide_keeps_the_nearest_selection() {
+        let mut apps = ["One", "Two", "Three"]
+            .into_iter()
+            .map(|name| {
+                let mut app = App::parse(
+                    format!("[Desktop Entry]\nType=Application\nName={name}\nExec=/bin/true"),
+                    false,
+                )
+                .expect("fixture should parse");
+                app.desktop_id = Some(format!("{}.desktop", name.to_lowercase()));
+                app.set_source_path(Path::new(&format!("/{name}.desktop")));
+                app
+            })
+            .collect::<Vec<_>>();
+        let hidden_key = apps[1].entry_key().expect("app should have an entry key");
+        let mut state = State::new(
+            std::mem::take(&mut apps),
+            MatchMode::Fuzzy,
+            HashMap::new(),
+            3,
+            RankingMode::Frecency,
+            PinnedOrderMode::Ranking,
+            HashMap::new(),
+        );
+        state.selected = Some(1);
+
+        state.hide_entry(hidden_key);
+
+        assert_eq!(state.selected, Some(1));
+        assert_eq!(state.shown[1].name, "Three");
     }
 }

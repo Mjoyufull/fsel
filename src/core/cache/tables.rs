@@ -8,3 +8,5 @@ pub const PINNED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("pin
 pub const FRECENCY_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("frecency");
 pub const HIDDEN_ENTRIES_TABLE: TableDefinition<u64, &[u8]> =
     TableDefinition::new("hidden_entries");
+pub const HIDDEN_ENTRY_META_TABLE: TableDefinition<&str, u64> =
+    TableDefinition::new("hidden_entry_meta");

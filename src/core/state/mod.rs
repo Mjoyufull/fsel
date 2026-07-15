@@ -7,7 +7,7 @@ mod filter;
 mod info;
 mod update;
 
-use crate::core::hidden_entries::EntryKey;
+use crate::core::hidden_entries::{EntryKey, HiddenSummary, VisibilityOptions};
 use crate::core::ranking::FrecencyEntry;
 use crate::desktop::App;
 use std::collections::{HashMap, HashSet};
@@ -45,6 +45,9 @@ pub struct State {
     /// Match mode used for app filtering.
     pub match_mode: crate::cli::MatchMode,
     hidden_entry_keys: HashSet<EntryKey>,
+    visibility_options: VisibilityOptions,
+    hidden_summary: HiddenSummary,
+    status_message: Option<String>,
 }
 
 impl State {
@@ -73,6 +76,9 @@ impl State {
             pin_timestamps,
             match_mode,
             hidden_entry_keys: HashSet::new(),
+            visibility_options: VisibilityOptions::default(),
+            hidden_summary: HiddenSummary::default(),
+            status_message: None,
         };
         state.filter();
         state
@@ -83,19 +89,55 @@ impl State {
         self.filter();
     }
 
+    pub(crate) fn set_visibility_options(&mut self, visibility_options: VisibilityOptions) {
+        self.visibility_options = visibility_options;
+        self.filter();
+    }
+
     pub(crate) fn hide_entry(&mut self, entry_key: EntryKey) {
+        let selected = self.selected.unwrap_or(0);
+        let scroll_offset = self.scroll_offset;
         self.hidden_entry_keys.insert(entry_key);
         self.filter();
+        if !self.shown.is_empty() {
+            let nearest = selected.min(self.shown.len() - 1);
+            self.selected = Some(nearest);
+            self.scroll_offset = scroll_offset.min(nearest);
+        }
     }
 
     pub(crate) fn unhide_entry(&mut self, entry_key: &EntryKey) {
+        let selected_key = self
+            .selected
+            .and_then(|index| self.shown.get(index))
+            .and_then(App::entry_key);
+        let selected_index = self.selected.unwrap_or(0);
+        let scroll_offset = self.scroll_offset;
         self.hidden_entry_keys.remove(entry_key);
         self.filter();
+        if !self.shown.is_empty() {
+            let restored_selection = selected_key
+                .and_then(|key| {
+                    self.shown
+                        .iter()
+                        .position(|app| app.entry_key().as_ref() == Some(&key))
+                })
+                .unwrap_or_else(|| selected_index.min(self.shown.len() - 1));
+            self.selected = Some(restored_selection);
+            self.scroll_offset = scroll_offset.min(restored_selection);
+        }
     }
 
-    pub(crate) fn is_hidden(&self, app: &App) -> bool {
-        app.entry_key()
-            .is_some_and(|entry_key| self.hidden_entry_keys.contains(&entry_key))
+    pub(crate) fn hidden_summary(&self) -> &HiddenSummary {
+        &self.hidden_summary
+    }
+
+    pub(crate) fn set_status_message(&mut self, message: impl Into<String>) {
+        self.status_message = Some(message.into());
+    }
+
+    pub(crate) fn clear_status_message(&mut self) {
+        self.status_message = None;
     }
 }
 

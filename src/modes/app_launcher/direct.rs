@@ -20,20 +20,33 @@ pub(crate) fn launch_program_directly(
     let hidden_store = HiddenEntryStore::new(std::sync::Arc::clone(db))?;
     let hidden_entry_keys = hidden_store.entry_keys()?;
 
-    if let Some(app) =
-        find_history_exact_name_match(db, &history_cache, &hidden_entry_keys, program_name, cli)?
+    if !cli.auto_hide_duplicates
+        && let Some(app) = find_history_exact_name_match(
+            db,
+            &history_cache,
+            &hidden_entry_keys,
+            program_name,
+            cli,
+        )?
     {
         return launch_or_print(cli, db, &app);
     }
 
-    if matches!(cli.match_mode, cli::MatchMode::Fuzzy)
+    if !cli.auto_hide_duplicates
+        && matches!(cli.match_mode, cli::MatchMode::Fuzzy)
         && let Some(app) =
             find_history_best_match(db, &history_cache, &hidden_entry_keys, program_name, cli)?
     {
         return launch_or_print(cli, db, &app);
     }
 
-    let all_apps = load_available_apps(db, cli, &hidden_entry_keys);
+    let (all_apps, hidden_summary) = load_available_apps(db, cli, &hidden_entry_keys);
+    if cli.verbose.unwrap_or(0) > 2 {
+        eprintln!(
+            "Hidden entries: {} manual, {} automatic, {} unavailable",
+            hidden_summary.manual, hidden_summary.automatic, hidden_summary.unavailable,
+        );
+    }
     let app_to_run =
         select_match_for_mode(all_apps, program_name, cli.match_mode).ok_or_else(|| {
             if matches!(cli.match_mode, cli::MatchMode::Exact) {
@@ -116,27 +129,34 @@ fn load_available_apps(
     db: &std::sync::Arc<redb::Database>,
     cli: &cli::Opts,
     hidden_entry_keys: &HashSet<EntryKey>,
-) -> Vec<desktop::App> {
+) -> (
+    Vec<desktop::App>,
+    crate::core::hidden_entries::HiddenSummary,
+) {
+    let application_dirs = desktop::application_dirs();
     let apps_receiver = desktop::read_with_options(
-        desktop::application_dirs(),
+        application_dirs.clone(),
         db,
         desktop::DiscoverOptions {
             filter_desktop: cli.filter_desktop,
             filter_actions: cli.filter_actions,
             list_executables: cli.list_executables_in_path,
+            auto_hide_duplicates: cli.auto_hide_duplicates,
         },
     );
 
     let mut all_apps = Vec::new();
     while let Ok(app) = apps_receiver.recv() {
-        if !app
-            .entry_key()
-            .is_some_and(|entry_key| hidden_entry_keys.contains(&entry_key))
-        {
-            all_apps.push(app);
-        }
+        all_apps.push(app);
     }
-    all_apps
+    crate::core::hidden_entries::eligible_apps(
+        &all_apps,
+        hidden_entry_keys,
+        &crate::core::hidden_entries::VisibilityOptions {
+            auto_hide_duplicates: cli.auto_hide_duplicates,
+            application_dirs,
+        },
+    )
 }
 
 fn confirm_first_launch(app_name: &str) -> Result<bool> {
