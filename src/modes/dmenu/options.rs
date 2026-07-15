@@ -93,6 +93,7 @@ impl DmenuOptions {
         crate::ui::InputConfig {
             disable_mouse: self.disable_mouse,
             exit_key: KeyCode::Null,
+            render_rate: None,
             ..crate::ui::InputConfig::default()
         }
     }

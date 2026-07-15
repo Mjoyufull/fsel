@@ -3,6 +3,7 @@ use eyre::Result;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
+use ratatui_image::protocol::StatefulProtocol;
 use std::process::Stdio;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::mpsc;
@@ -13,10 +14,12 @@ const MAX_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
 pub(super) struct PreviewRuntime {
     command_template: Option<String>,
     content: PreviewContent,
+    adapter: GraphicsAdapter,
     image_manager: ImageManager,
     active_request: Option<JoinHandle<()>>,
     current_signature: Option<PreviewSignature>,
     generation: u64,
+    previous_was_image: bool,
     result_tx: mpsc::UnboundedSender<PreviewResult>,
     result_rx: mpsc::UnboundedReceiver<PreviewResult>,
 }
@@ -35,12 +38,19 @@ enum PreviewContent {
     Image(String),
 }
 
-pub(super) struct PreviewResult {
-    generation: u64,
-    output: Result<CommandOutput, String>,
+pub(super) enum PreviewResult {
+    Command {
+        generation: u64,
+        output: Result<CommandOutput, String>,
+    },
+    Image {
+        generation: u64,
+        key: String,
+        protocol: Result<Box<StatefulProtocol>, String>,
+    },
 }
 
-struct CommandOutput {
+pub(super) struct CommandOutput {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     status: String,
@@ -54,10 +64,12 @@ impl PreviewRuntime {
         Self {
             command_template,
             content: PreviewContent::Empty,
+            adapter,
             image_manager: ImageManager::new(adapter.picker()),
             active_request: None,
             current_signature: None,
             generation: 0,
+            previous_was_image: false,
             result_tx,
             result_rx,
         }
@@ -126,7 +138,7 @@ impl PreviewRuntime {
         let result_tx = self.result_tx.clone();
         self.active_request = Some(tokio::spawn(async move {
             let output = run_preview_command(&command).await;
-            let _ = result_tx.send(PreviewResult { generation, output });
+            let _ = result_tx.send(PreviewResult::Command { generation, output });
         }));
         self.current_signature = Some(signature);
     }
@@ -135,13 +147,16 @@ impl PreviewRuntime {
         self.result_rx.recv().await
     }
 
-    pub(super) async fn apply_result(&mut self, result: PreviewResult) {
-        if result.generation != self.generation {
+    pub(super) fn apply_result(&mut self, result: PreviewResult) {
+        let PreviewResult::Command { generation, output } = result else {
+            return self.apply_image_result(result);
+        };
+        if generation != self.generation {
             return;
         }
         self.active_request = None;
 
-        let output = match result.output {
+        let output = match output {
             Ok(output) => output,
             Err(error) => {
                 self.content = PreviewContent::Text(error);
@@ -151,31 +166,68 @@ impl PreviewRuntime {
 
         if !output.success {
             let stderr = output_text(&output.stderr);
-            self.content = PreviewContent::Text(if stderr.trim().is_empty() {
+            let mut text = if stderr.trim().is_empty() {
                 format!("Preview command exited with {}", output.status)
             } else {
                 stderr
-            });
+            };
+            append_truncation_notice(&mut text, output.truncated);
+            self.content = PreviewContent::Text(text);
             return;
         }
 
-        let image_key = format!("dmenu-preview-{}", result.generation);
-        if image::guess_format(&output.stdout).is_ok()
-            && self
-                .image_manager
-                .load_image_bytes(&image_key, output.stdout.clone())
-                .await
-                .is_ok()
-        {
-            self.content = PreviewContent::Image(image_key);
+        let image_key = format!("dmenu-preview-{generation}");
+        if image::guess_format(&output.stdout).is_ok() {
+            let picker = self.image_manager.picker();
+            let result_tx = self.result_tx.clone();
+            self.active_request = Some(tokio::spawn(async move {
+                let protocol = ImageManager::prepare_image_bytes(picker, output.stdout)
+                    .await
+                    .map(Box::new)
+                    .map_err(|error| format!("Failed to decode preview image: {error}"));
+                let _ = result_tx.send(PreviewResult::Image {
+                    generation,
+                    key: image_key,
+                    protocol,
+                });
+            }));
             return;
         }
 
         let mut text = output_text(&output.stdout);
-        if output.truncated {
-            text.push_str("\n\n[preview output truncated]");
-        }
+        append_truncation_notice(&mut text, output.truncated);
         self.content = PreviewContent::Text(text);
+    }
+
+    fn apply_image_result(&mut self, result: PreviewResult) {
+        let PreviewResult::Image {
+            generation,
+            key,
+            protocol,
+        } = result
+        else {
+            return;
+        };
+        if generation != self.generation {
+            return;
+        }
+        self.active_request = None;
+        match protocol {
+            Ok(protocol) => {
+                self.image_manager.insert_protocol(key.clone(), *protocol);
+                self.content = PreviewContent::Image(key);
+            }
+            Err(error) => self.content = PreviewContent::Text(error),
+        }
+    }
+
+    pub(super) fn needs_terminal_clear(&self) -> bool {
+        matches!(self.adapter, GraphicsAdapter::Sixel)
+            && self.previous_was_image != matches!(&self.content, PreviewContent::Image(_))
+    }
+
+    pub(super) fn finish_draw(&mut self) {
+        self.previous_was_image = matches!(&self.content, PreviewContent::Image(_));
     }
 
     pub(super) fn render_image(&mut self, frame: &mut Frame, area: Rect) -> Result<bool> {
@@ -241,14 +293,21 @@ fn shell_quote(value: &str) -> String {
 
 async fn run_preview_command(command: &str) -> Result<CommandOutput, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    let mut child = tokio::process::Command::new(shell)
+    let mut process = tokio::process::Command::new(shell);
+    process
         .args(["-c", command])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    process.process_group(0);
+
+    let mut child = process
         .spawn()
         .map_err(|error| format!("Failed to start preview command: {error}"))?;
+    #[cfg(unix)]
+    let mut process_group = ProcessGroupGuard::new(child.id());
 
     let stdout = child
         .stdout
@@ -261,6 +320,8 @@ async fn run_preview_command(command: &str) -> Result<CommandOutput, String> {
 
     let (status, stdout_result, stderr_result) =
         tokio::join!(child.wait(), read_limited(stdout), read_limited(stderr),);
+    #[cfg(unix)]
+    process_group.disarm();
     let status = status.map_err(|error| format!("Preview command failed: {error}"))?;
     let (stdout, stdout_truncated) =
         stdout_result.map_err(|error| format!("Failed to read preview output: {error}"))?;
@@ -274,6 +335,35 @@ async fn run_preview_command(command: &str) -> Result<CommandOutput, String> {
         success: status.success(),
         truncated: stdout_truncated || stderr_truncated,
     })
+}
+
+#[cfg(unix)]
+struct ProcessGroupGuard {
+    pgid: Option<rustix::process::Pid>,
+}
+
+#[cfg(unix)]
+impl ProcessGroupGuard {
+    fn new(pid: Option<u32>) -> Self {
+        Self {
+            pgid: pid
+                .and_then(|pid| i32::try_from(pid).ok())
+                .and_then(rustix::process::Pid::from_raw),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.pgid = None;
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        if let Some(pgid) = self.pgid {
+            let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
+        }
+    }
 }
 
 async fn read_limited(reader: impl AsyncRead + Unpin) -> std::io::Result<(Vec<u8>, bool)> {
@@ -294,9 +384,15 @@ fn output_text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&stripped).trim_end().to_string()
 }
 
+fn append_truncation_notice(text: &mut String, truncated: bool) {
+    if truncated {
+        text.push_str("\n\n[preview output truncated]");
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{expand_preview_command, shell_quote};
+    use super::{append_truncation_notice, expand_preview_command, shell_quote};
 
     #[test]
     fn command_expansion_quotes_selected_item_and_query() {
@@ -316,5 +412,14 @@ mod tests {
         let command = expand_preview_command("printf '%s %s' {} {q}", "{q}", "{}", 0);
 
         assert_eq!(command, "printf '%s %s' '{q}' '{}'");
+    }
+
+    #[test]
+    fn truncation_notice_is_added_to_failed_command_diagnostics() {
+        let mut text = "command failed".to_string();
+
+        append_truncation_notice(&mut text, true);
+
+        assert_eq!(text, "command failed\n\n[preview output truncated]");
     }
 }

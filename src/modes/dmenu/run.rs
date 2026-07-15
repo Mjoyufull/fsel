@@ -75,6 +75,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     let outcome = loop {
         if needs_redraw {
+            if preview.needs_terminal_clear() {
+                terminal.clear()?;
+            }
             sync_update_mode(options.term_is_foot, true);
             let mut render_result = Ok(());
             let draw_result = terminal.draw(|frame| {
@@ -83,12 +86,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
             sync_update_mode(options.term_is_foot, false);
             draw_result?;
             render_result?;
+            preview.finish_draw();
             needs_redraw = false;
         }
 
         tokio::select! {
             Some(result) = preview.next_result() => {
-                preview.apply_result(result).await;
+                preview.apply_result(result);
                 needs_redraw = true;
             }
             maybe_event = input.next() => {

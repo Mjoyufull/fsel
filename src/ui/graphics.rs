@@ -57,15 +57,27 @@ impl ImageManager {
             return Ok(());
         }
 
-        let picker = self.picker.clone();
-        let protocol = tokio::task::spawn_blocking(move || {
-            let image = image::load_from_memory(&bytes)?;
-            Ok::<_, eyre::Report>(picker.new_resize_protocol(image))
-        })
-        .await??;
+        let protocol = Self::prepare_image_bytes(self.picker.clone(), bytes).await?;
 
         self.insert_protocol(key.to_string(), protocol);
         Ok(())
+    }
+
+    /// Decode bytes and prepare terminal protocol state off the async executor.
+    pub(crate) async fn prepare_image_bytes(
+        picker: Picker,
+        bytes: Vec<u8>,
+    ) -> Result<StatefulProtocol> {
+        tokio::task::spawn_blocking(move || {
+            let image = image::load_from_memory(&bytes)?;
+            Ok::<_, eyre::Report>(picker.new_resize_protocol(image))
+        })
+        .await?
+    }
+
+    /// Clone the detected picker for an independently polled decode task.
+    pub(crate) fn picker(&self) -> Picker {
+        self.picker.clone()
     }
 
     /// Insert a prepared terminal image protocol into the bounded cache.
@@ -162,17 +174,24 @@ impl ImageManager {
 
     /// Render a cached image without changing the manager's current selection.
     pub fn render_cached(&mut self, f: &mut Frame, key: &str, area: Rect) -> Result<bool> {
-        let Some(protocol) = self.cache.get_mut(key) else {
-            return Ok(false);
-        };
+        let encoding_failed = {
+            let Some(protocol) = self.cache.get_mut(key) else {
+                return Ok(false);
+            };
 
-        f.render_stateful_widget(
-            StatefulImage::default().resize(Resize::Fit(None)),
-            area,
-            protocol,
-        );
-        if let Some(Err(error)) = protocol.last_encoding_result() {
-            return Err(eyre!("Image encoding failed: {error}"));
+            f.render_stateful_widget(
+                StatefulImage::default().resize(Resize::Fit(None)),
+                area,
+                protocol,
+            );
+            protocol
+                .last_encoding_result()
+                .is_some_and(|result| result.is_err())
+        };
+        if encoding_failed {
+            self.cache.remove(key);
+            self.cache_order.retain(|cached| cached != key);
+            return Ok(false);
         }
 
         Ok(true)
