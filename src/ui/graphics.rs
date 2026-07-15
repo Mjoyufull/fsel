@@ -5,10 +5,13 @@ use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
 use std::collections::{HashMap, VecDeque};
+use std::io::Read;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 const MAX_SVG_DIMENSION: f32 = 2048.0;
+const MAX_SVG_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
+static SVG_FONT_DATABASE: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
 
 /// Combined display state to track what's currently on screen
 #[derive(Debug, Clone, PartialEq)]
@@ -230,17 +233,16 @@ fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage> {
     }
 }
 
-fn contains_svg_markup(bytes: &[u8]) -> bool {
-    let prefix_len = bytes.len().min(4096);
-    String::from_utf8_lossy(&bytes[..prefix_len]).contains("<svg")
-}
-
 fn looks_like_svg(bytes: &[u8]) -> bool {
-    contains_svg_markup(bytes) || bytes.starts_with(&[0x1f, 0x8b])
+    has_svg_document_root(bytes) || bytes.starts_with(&[0x1f, 0x8b])
 }
 
 fn decode_svg(bytes: &[u8]) -> Result<image::DynamicImage> {
-    let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())?;
+    let document = bounded_svg_document(bytes, MAX_SVG_DOCUMENT_BYTES)?;
+    if !has_svg_document_root(&document) {
+        return Err(eyre!("Input is not an SVG document"));
+    }
+    let tree = resvg::usvg::Tree::from_data(&document, &svg_options())?;
     let source_size = tree.size();
     let scale = (MAX_SVG_DIMENSION / source_size.width())
         .min(MAX_SVG_DIMENSION / source_size.height())
@@ -259,6 +261,83 @@ fn decode_svg(bytes: &[u8]) -> Result<image::DynamicImage> {
     let rgba = image::RgbaImage::from_raw(width, height, rgba_bytes)
         .ok_or_else(|| eyre!("Failed to convert SVG raster buffer"))?;
     Ok(image::DynamicImage::ImageRgba8(rgba))
+}
+
+fn bounded_svg_document(bytes: &[u8], limit: usize) -> Result<Vec<u8>> {
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let decoder = flate2::read::GzDecoder::new(bytes);
+        let mut document = Vec::with_capacity(bytes.len().saturating_mul(2).min(limit));
+        decoder.take(limit as u64 + 1).read_to_end(&mut document)?;
+        if document.len() > limit {
+            return Err(eyre!("Decompressed SVG exceeds {limit} bytes"));
+        }
+        Ok(document)
+    } else if bytes.len() > limit {
+        Err(eyre!("SVG exceeds {limit} bytes"))
+    } else {
+        Ok(bytes.to_vec())
+    }
+}
+
+fn has_svg_document_root(bytes: &[u8]) -> bool {
+    let Ok(mut text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    text = text.strip_prefix('\u{feff}').unwrap_or(text);
+
+    loop {
+        text = text.trim_start();
+        if text.starts_with("<?") {
+            let Some(end) = text.find("?>") else {
+                return false;
+            };
+            text = &text[end + 2..];
+        } else if text.starts_with("<!--") {
+            let Some(end) = text.find("-->") else {
+                return false;
+            };
+            text = &text[end + 3..];
+        } else if text.starts_with("<!DOCTYPE") {
+            let Some(end) = text.find('>') else {
+                return false;
+            };
+            text = &text[end + 1..];
+        } else {
+            break;
+        }
+    }
+
+    let Some(after_name) = text.strip_prefix("<svg") else {
+        return false;
+    };
+    after_name
+        .chars()
+        .next()
+        .is_some_and(|character| character.is_whitespace() || matches!(character, '>' | '/'))
+}
+
+fn svg_options() -> resvg::usvg::Options<'static> {
+    use resvg::usvg::{ImageHrefResolver, ImageKind};
+
+    let fontdb = Arc::clone(SVG_FONT_DATABASE.get_or_init(|| {
+        let mut database = resvg::usvg::fontdb::Database::new();
+        database.load_system_fonts();
+        Arc::new(database)
+    }));
+    resvg::usvg::Options {
+        fontdb,
+        image_href_resolver: ImageHrefResolver {
+            resolve_data: Box::new(|mime, data, _| match mime {
+                "image/jpg" | "image/jpeg" => Some(ImageKind::JPEG(data)),
+                "image/png" => Some(ImageKind::PNG(data)),
+                "image/gif" => Some(ImageKind::GIF(data)),
+                "image/webp" => Some(ImageKind::WEBP(data)),
+                _ => None,
+            }),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..resvg::usvg::Options::default()
+    }
 }
 
 fn unpremultiply_rgba(bytes: &mut [u8]) {
@@ -322,7 +401,13 @@ impl GraphicsAdapter {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_image, unpremultiply_rgba};
+    use super::{
+        bounded_svg_document, decode_image, has_svg_document_root, looks_like_svg, svg_options,
+        unpremultiply_rgba,
+    };
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write;
 
     #[test]
     fn decodes_svg_bytes_into_rgba_image() {
@@ -352,6 +437,32 @@ mod tests {
 
         assert_eq!(image.width(), 2);
         assert_eq!(image.height(), 1);
+    }
+
+    #[test]
+    fn svg_probe_requires_the_document_root() {
+        assert!(!looks_like_svg(b"Markdown with <svg>embedded</svg> later"));
+        assert!(has_svg_document_root(
+            b"\xef\xbb\xbf <?xml version='1.0'?><!-- icon --><svg width='1' height='1'/>"
+        ));
+    }
+
+    #[test]
+    fn svgz_decompression_respects_its_limit() {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+        encoder
+            .write_all(b"<svg><!-- content beyond the configured limit --></svg>")
+            .expect("compressed SVG should be written");
+        let compressed = encoder.finish().expect("compressed SVG should finish");
+
+        assert!(bounded_svg_document(&compressed, 16).is_err());
+    }
+
+    #[test]
+    fn svg_options_reject_external_image_paths() {
+        let options = svg_options();
+
+        assert!((options.image_href_resolver.resolve_string)("/dev/zero", &options).is_none());
     }
 
     #[test]
