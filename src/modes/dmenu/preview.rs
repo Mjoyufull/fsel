@@ -5,6 +5,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui_image::protocol::StatefulProtocol;
 use std::process::Stdio;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -17,7 +18,8 @@ pub(super) struct PreviewRuntime {
     adapter: GraphicsAdapter,
     image_manager: ImageManager,
     active_request: Option<JoinHandle<()>>,
-    decode_tx: mpsc::UnboundedSender<DecodeRequest>,
+    decode_tx: mpsc::UnboundedSender<()>,
+    decode_request: Arc<Mutex<Option<DecodeRequest>>>,
     decode_worker: JoinHandle<()>,
     current_signature: Option<PreviewSignature>,
     generation: u64,
@@ -70,14 +72,21 @@ pub(super) struct CommandOutput {
 impl PreviewRuntime {
     pub(super) fn new(command_template: Option<String>, adapter: GraphicsAdapter) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
-        let (decode_tx, mut decode_rx) = mpsc::unbounded_channel::<DecodeRequest>();
+        let (decode_tx, mut decode_rx) = mpsc::unbounded_channel::<()>();
+        let decode_request = Arc::new(Mutex::new(None::<DecodeRequest>));
+        let worker_request = Arc::clone(&decode_request);
         let picker = adapter.picker();
         let decode_result_tx = result_tx.clone();
         let decode_worker = tokio::task::spawn_blocking(move || {
-            while let Some(mut request) = decode_rx.blocking_recv() {
-                while let Ok(latest) = decode_rx.try_recv() {
-                    request = latest;
-                }
+            while decode_rx.blocking_recv().is_some() {
+                while decode_rx.try_recv().is_ok() {}
+                let request = worker_request
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                let Some(request) = request else {
+                    continue;
+                };
                 let protocol =
                     ImageManager::prepare_image_bytes_blocking(picker.clone(), request.bytes)
                         .map(Box::new)
@@ -101,6 +110,7 @@ impl PreviewRuntime {
             image_manager: ImageManager::new(adapter.picker()),
             active_request: None,
             decode_tx,
+            decode_request,
             decode_worker,
             current_signature: None,
             generation: 0,
@@ -213,11 +223,16 @@ impl PreviewRuntime {
 
         let image_key = format!("dmenu-preview-{generation}");
         if image::guess_format(&output.stdout).is_ok() {
-            let _ = self.decode_tx.send(DecodeRequest {
+            let request = DecodeRequest {
                 generation,
                 key: image_key,
                 bytes: output.stdout,
-            });
+            };
+            *self
+                .decode_request
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(request);
+            let _ = self.decode_tx.send(());
             return;
         }
 

@@ -80,6 +80,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 for _ in 0..2 {
                     if preview.needs_terminal_clear() {
                         terminal.clear()?;
+                        preview.finish_draw();
                     }
                     let mut render_result = Ok(());
                     terminal.draw(|frame| {
