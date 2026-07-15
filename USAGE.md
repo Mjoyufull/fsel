@@ -57,6 +57,27 @@ fsel --cclip -r         # Replace running cclip instance
 # Not supported in --dmenu mode
 ```
 
+### Hidden Entries
+
+Press `Alt+Delete` to hide the exact selected launcher entry. This records its source in fsel's
+database; it does not delete or edit the desktop file or executable. Press `Alt+U` to restore the
+most recently hidden entry.
+
+```sh
+# Show persistent manual hide records and their numeric IDs
+fsel --list-hidden
+
+# Restore one record
+fsel --unhide 12
+
+# Restore every manually hidden entry
+fsel --unhide-all
+```
+
+Hides apply to the interactive launcher, direct launch, and `--stdout`. Entries with the same
+visible name remain independent when they come from different source paths. Clearing history or
+the desktop cache does not clear hidden-entry records.
+
 ### Launch Methods
 ```sh
 # Default (direct execution)

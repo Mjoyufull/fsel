@@ -226,6 +226,7 @@ impl App {
             try_exec,
             entry_type,
             desktop_id: None,
+            source_path: None,
             actions,
             breakdown: None,
         })

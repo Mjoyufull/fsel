@@ -12,6 +12,8 @@ highlight_color = "LightBlue"
 # select = ["enter"]
 # exit = ["esc"]
 # pin = [{ key = "space", modifiers = "ctrl" }]
+# hide = [{ key = "delete", modifiers = "alt" }]
+# unhide_last = [{ key = "u", modifiers = "alt" }]
 
 # Cursor character in search box
 cursor = "█"

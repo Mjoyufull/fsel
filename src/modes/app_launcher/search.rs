@@ -1,8 +1,10 @@
 use crate::cli;
 use crate::core::cache;
+use crate::core::hidden_entries::EntryKey;
 use crate::desktop;
 use eyre::Result;
 use jwalk::WalkDir;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
@@ -11,12 +13,14 @@ pub fn find_app_by_name_fast(
     db: &std::sync::Arc<redb::Database>,
     app_name: &str,
     cli: &cli::Opts,
+    hidden_entry_keys: &HashSet<EntryKey>,
 ) -> Result<Option<desktop::App>> {
     let desktop_cache = cache::DesktopCache::new(db.clone())?;
     let history_cache = cache::HistoryCache::load(db)?;
 
     if let Ok(Some(app)) = desktop_cache.get_by_name(app_name)
         && matches_current_desktop(&app, cli)
+        && !is_hidden(&app, hidden_entry_keys)
     {
         return Ok(Some(history_cache.apply_to_app(app)));
     }
@@ -37,6 +41,7 @@ pub fn find_app_by_name_fast(
             if let Some(app) = load_app_from_path(&desktop_cache, &file_path, cli)?
                 && app.name == app_name
                 && matches_current_desktop(&app, cli)
+                && !is_hidden(&app, hidden_entry_keys)
             {
                 return Ok(Some(history_cache.apply_to_app(app)));
             }
@@ -44,6 +49,11 @@ pub fn find_app_by_name_fast(
     }
 
     Ok(None)
+}
+
+fn is_hidden(app: &desktop::App, hidden_entry_keys: &HashSet<EntryKey>) -> bool {
+    app.entry_key()
+        .is_some_and(|entry_key| hidden_entry_keys.contains(&entry_key))
 }
 
 fn load_app_from_path(
@@ -71,6 +81,7 @@ fn load_app_from_path(
     if let Some(file_name) = file_path.file_name().and_then(|name| name.to_str()) {
         app.desktop_id = Some(file_name.to_string());
     }
+    app.set_source_path(file_path);
 
     let _ = desktop_cache.set(file_path, app.clone());
     Ok(Some(app))

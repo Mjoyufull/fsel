@@ -5,13 +5,20 @@ impl State {
     pub fn filter(&mut self) {
         use std::time::Instant;
 
+        let eligible_apps = self
+            .apps
+            .iter()
+            .filter(|app| !self.is_hidden(app))
+            .cloned()
+            .collect::<Vec<_>>();
+
         if self.query.is_empty() {
-            self.shown = self.apps.clone();
+            self.shown = eligible_apps;
         } else {
             let filter_start = Instant::now();
             let now_secs = crate::core::ranking::current_unix_seconds();
             self.shown = crate::core::ranking::filter_apps(
-                &self.apps,
+                &eligible_apps,
                 crate::core::ranking::FilterOptions {
                     query: &self.query,
                     match_mode: self.match_mode,
@@ -42,5 +49,43 @@ impl State {
             self.selected = None;
             self.scroll_offset = 0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::State;
+    use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
+    use crate::desktop::App;
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+
+    #[test]
+    fn manual_hidden_keys_filter_and_restore_exact_sources() {
+        let mut app = App::parse(
+            "[Desktop Entry]\nType=Application\nName=Editor\nExec=/usr/bin/editor",
+            false,
+        )
+        .expect("desktop entry should parse");
+        app.desktop_id = Some("editor.desktop".to_string());
+        app.set_source_path(Path::new("/usr/share/applications/editor.desktop"));
+        let entry_key = app
+            .entry_key()
+            .expect("desktop app should have an entry key");
+        let mut state = State::new(
+            vec![app],
+            MatchMode::Fuzzy,
+            HashMap::new(),
+            3,
+            RankingMode::Frecency,
+            PinnedOrderMode::Ranking,
+            HashMap::new(),
+        );
+
+        state.set_hidden_entry_keys(HashSet::from([entry_key.clone()]));
+        assert!(state.shown.is_empty());
+
+        state.unhide_entry(&entry_key);
+        assert_eq!(state.shown.len(), 1);
     }
 }

@@ -69,6 +69,7 @@ fn load_desktop_files(
 }
 
 fn attach_desktop_id(app: &mut App, file_path: &Path, suffix: Option<&str>) {
+    app.set_source_path(file_path);
     if let Some(file_name) = file_path.file_name().and_then(|name| name.to_str()) {
         app.desktop_id = Some(match suffix {
             Some(suffix) => format!("{file_name}#{suffix}"),
@@ -141,6 +142,7 @@ fn executable_app(path: &Path, file_name: &str) -> App {
         try_exec: None,
         entry_type: "Application".to_string(),
         desktop_id: None,
+        source_path: Some(path.to_path_buf()),
         history: 0,
         score: 0,
         pinned: false,

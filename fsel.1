@@ -1,4 +1,4 @@
-.TH FSEL 1 "2026-06-14" "3.5.2-kiwicrab" "User Commands"
+.TH FSEL 1 "2026-07-15" "3.5.2-kiwicrab" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -25,6 +25,15 @@ Clear desktop file cache
 .TP
 .B \-\-refresh-cache
 Force refresh of desktop file list (rescan for new apps)
+.TP
+.B \-\-list-hidden
+List manually hidden launcher entries and their numeric IDs, then exit
+.TP
+.BR \-\-unhide " " \fIID\fR
+Restore one manually hidden launcher entry by numeric ID, then exit
+.TP
+.B \-\-unhide-all
+Restore every manually hidden launcher entry, then exit
 .TP
 .BR \-p ", " \-\-program " " \fINAME\fR
 Launch program directly, bypassing TUI. Respects \fB\-\-match-mode\fR; exact mode requires an exact app or executable name.
@@ -211,6 +220,8 @@ down = ["down", { key = "n", modifiers = "ctrl" }]
 select = ["enter"]
 exit = ["esc", { key = "q", modifiers = "ctrl" }]
 pin = [{ key = "space", modifiers = "ctrl" }]
+hide = [{ key = "delete", modifiers = "alt" }]
+unhide_last = [{ key = "u", modifiers = "alt" }]
 .RE
 .fi
 .PP
@@ -229,6 +240,12 @@ Launch selected application
 .TP
 .BR "Ctrl-Space"
 Toggle pin/favorite for selected app (pinned apps always appear first)
+.TP
+.BR "Alt-Delete"
+Hide the exact selected launcher entry without deleting or editing its source file
+.TP
+.BR "Alt-U"
+Restore the most recently hidden launcher entry
 .TP
 .BR "Esc" " or " "Ctrl-Q" " or " "Ctrl-C"
 Exit
@@ -466,7 +483,7 @@ User configuration file
 Keybind customization file (optional, can use [keybinds] in config.toml)
 .TP
 .I ~/.local/share/fsel/hist_db.redb
-Launch history, frecency data, and pinned apps database (redb format)
+Launch history, frecency data, pinned apps, and manually hidden entries database (redb format)
 .TP
 .I ~/.local/share/fsel/fsel-fsel.lock
 Lock file for single instance (app launcher mode)

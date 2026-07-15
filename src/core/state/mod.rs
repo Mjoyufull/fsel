@@ -7,8 +7,10 @@ mod filter;
 mod info;
 mod update;
 
+use crate::core::hidden_entries::EntryKey;
 use crate::core::ranking::FrecencyEntry;
 use crate::desktop::App;
+use std::collections::{HashMap, HashSet};
 
 pub use update::update;
 
@@ -31,7 +33,7 @@ pub struct State {
     /// Whether to execute the selected app.
     pub should_launch: bool,
     /// Frecency data for boosting.
-    pub frecency_data: std::collections::HashMap<String, FrecencyEntry>,
+    pub frecency_data: HashMap<String, FrecencyEntry>,
     /// Character depth for prioritized prefix matching.
     pub prefix_depth: usize,
     /// Ranking mode used for ordering and score boosts.
@@ -39,20 +41,21 @@ pub struct State {
     /// Strategy for ordering pinned apps.
     pub pinned_order_mode: crate::cli::PinnedOrderMode,
     /// First pinned timestamp by app name.
-    pub pin_timestamps: std::collections::HashMap<String, u64>,
+    pub pin_timestamps: HashMap<String, u64>,
     /// Match mode used for app filtering.
     pub match_mode: crate::cli::MatchMode,
+    hidden_entry_keys: HashSet<EntryKey>,
 }
 
 impl State {
     pub fn new(
         apps: Vec<App>,
         match_mode: crate::cli::MatchMode,
-        frecency_data: std::collections::HashMap<String, FrecencyEntry>,
+        frecency_data: HashMap<String, FrecencyEntry>,
         prefix_depth: usize,
         ranking_mode: crate::cli::RankingMode,
         pinned_order_mode: crate::cli::PinnedOrderMode,
-        pin_timestamps: std::collections::HashMap<String, u64>,
+        pin_timestamps: HashMap<String, u64>,
     ) -> Self {
         let mut state = Self {
             apps,
@@ -69,9 +72,30 @@ impl State {
             pinned_order_mode,
             pin_timestamps,
             match_mode,
+            hidden_entry_keys: HashSet::new(),
         };
         state.filter();
         state
+    }
+
+    pub(crate) fn set_hidden_entry_keys(&mut self, hidden_entry_keys: HashSet<EntryKey>) {
+        self.hidden_entry_keys = hidden_entry_keys;
+        self.filter();
+    }
+
+    pub(crate) fn hide_entry(&mut self, entry_key: EntryKey) {
+        self.hidden_entry_keys.insert(entry_key);
+        self.filter();
+    }
+
+    pub(crate) fn unhide_entry(&mut self, entry_key: &EntryKey) {
+        self.hidden_entry_keys.remove(entry_key);
+        self.filter();
+    }
+
+    pub(crate) fn is_hidden(&self, app: &App) -> bool {
+        app.entry_key()
+            .is_some_and(|entry_key| self.hidden_entry_keys.contains(&entry_key))
     }
 }
 

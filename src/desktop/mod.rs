@@ -1,6 +1,7 @@
 use crate::core::ranking::ScoreBreakdown;
 use ratatui::widgets::ListItem;
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 mod dirs;
 mod discover;
@@ -48,6 +49,8 @@ pub struct App {
     pub entry_type: String,
     /// Desktop file ID for tracking.
     pub desktop_id: Option<String>,
+    #[serde(skip)]
+    pub(crate) source_path: Option<PathBuf>,
 
     /// Matching score (used in UI).
     pub score: i64,
@@ -76,6 +79,26 @@ impl App {
         } else {
             self.score.saturating_mul(history)
         }
+    }
+
+    pub(crate) fn entry_key(&self) -> Option<crate::core::hidden_entries::EntryKey> {
+        let source_path = self.source_path.as_deref()?;
+        Some(match self.desktop_id.as_deref() {
+            Some(desktop_id) => {
+                crate::core::hidden_entries::EntryKey::desktop(source_path, desktop_id)
+            }
+            None => crate::core::hidden_entries::EntryKey::executable(source_path),
+        })
+    }
+
+    pub(crate) fn source_display(&self) -> Option<String> {
+        self.source_path
+            .as_deref()
+            .map(|path| path.to_string_lossy().into_owned())
+    }
+
+    pub(crate) fn set_source_path(&mut self, source_path: &Path) {
+        self.source_path = Some(source_path.to_path_buf());
     }
 }
 

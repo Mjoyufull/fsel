@@ -1,4 +1,5 @@
 use crate::cli::Opts;
+use crate::core::hidden_entries::{HiddenEntryStore, NewHiddenEntry};
 use crate::core::ranking::current_unix_seconds;
 use crate::core::state::{Message, State};
 use crate::ui::InputEvent as Event;
@@ -9,10 +10,11 @@ pub(crate) fn handle_event(
     event: Event<crossterm::event::KeyEvent>,
     cli: &Opts,
     db: &std::sync::Arc<redb::Database>,
+    hidden_store: &HiddenEntryStore,
     total_height: u16,
 ) {
     match event {
-        Event::Input(key) => handle_key_event(state, key, cli, db, total_height),
+        Event::Input(key) => handle_key_event(state, key, cli, db, hidden_store, total_height),
         Event::Mouse(mouse_event) => handle_mouse_event(state, mouse_event, cli, total_height),
         Event::Tick | Event::Render => {}
     }
@@ -23,6 +25,7 @@ fn handle_key_event(
     key: KeyEvent,
     cli: &Opts,
     db: &std::sync::Arc<redb::Database>,
+    hidden_store: &HiddenEntryStore,
     total_height: u16,
 ) {
     let max_visible = max_visible_items(total_height, cli);
@@ -43,6 +46,18 @@ fn handle_key_event(
         Message::Backspace
     } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
         toggle_selected_pin(state, db);
+        refresh_info(state, cli);
+        return;
+    } else if cli.keybinds.matches_hide(key.code, key.modifiers) {
+        if let Err(error) = hide_selected_entry(state, hidden_store) {
+            eprintln!("Warning: Failed to hide entry: {error}");
+        }
+        refresh_info(state, cli);
+        return;
+    } else if cli.keybinds.matches_unhide_last(key.code, key.modifiers) {
+        if let Err(error) = unhide_last_entry(state, hidden_store) {
+            eprintln!("Warning: Failed to restore entry: {error}");
+        }
         refresh_info(state, cli);
         return;
     } else {
@@ -157,6 +172,36 @@ fn toggle_selected_pin(state: &mut State, db: &std::sync::Arc<redb::Database>) {
         current_unix_seconds(),
     );
     state.filter();
+}
+
+fn hide_selected_entry(state: &mut State, hidden_store: &HiddenEntryStore) -> eyre::Result<()> {
+    let Some(index) = state.selected else {
+        return Ok(());
+    };
+    let Some(app) = state.shown.get(index).cloned() else {
+        return Ok(());
+    };
+    let Some(entry_key) = app.entry_key() else {
+        return Ok(());
+    };
+    let Some(source_display) = app.source_display() else {
+        return Ok(());
+    };
+    let hidden_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0);
+    let new_entry = NewHiddenEntry::new(entry_key, app.name, source_display, hidden_at_unix_ms);
+    let hidden_entry = hidden_store.insert(new_entry)?;
+    state.hide_entry(hidden_entry.entry_key().clone());
+    Ok(())
+}
+
+fn unhide_last_entry(state: &mut State, hidden_store: &HiddenEntryStore) -> eyre::Result<()> {
+    if let Some(hidden_entry) = hidden_store.remove_last()? {
+        state.unhide_entry(hidden_entry.entry_key());
+    }
+    Ok(())
 }
 
 fn refresh_info(state: &mut State, cli: &Opts) {

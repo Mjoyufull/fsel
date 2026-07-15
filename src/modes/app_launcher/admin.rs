@@ -1,4 +1,5 @@
 use crate::cli::Opts;
+use crate::core::hidden_entries::{HiddenEntryId, HiddenEntryStore};
 use eyre::{Result, WrapErr};
 use redb::ReadableTable;
 use std::path::Path;
@@ -11,7 +12,7 @@ pub(crate) fn handle_maintenance_command(
 ) -> Result<bool> {
     if cli.clear_history {
         clear_history(db)?;
-        println!("Database cleared successfully!");
+        println!("Launch history and pins cleared successfully!");
         println!(
             "To fully remove the database, delete {}",
             data_dir.display()
@@ -33,7 +34,57 @@ pub(crate) fn handle_maintenance_command(
         return Ok(true);
     }
 
+    if cli.list_hidden {
+        let store = HiddenEntryStore::new(Arc::clone(db))?;
+        let entries = store.list()?;
+        if entries.is_empty() {
+            println!("No manually hidden entries.");
+        } else {
+            println!("ID\tHIDDEN_MS\tNAME\tSOURCE");
+            for entry in entries {
+                println!(
+                    "{}\t{}\t{}\t{}",
+                    entry.id().value(),
+                    entry.hidden_at_unix_ms(),
+                    sanitize_table_field(entry.display_name()),
+                    sanitize_table_field(entry.source_display())
+                );
+            }
+        }
+        return Ok(true);
+    }
+
+    if let Some(id) = cli.unhide {
+        let store = HiddenEntryStore::new(Arc::clone(db))?;
+        let removed = store.remove(HiddenEntryId::new(id))?;
+        let Some(entry) = removed else {
+            return Err(eyre::eyre!("No manually hidden entry has ID {id}"));
+        };
+        println!("Restored {}", sanitize_table_field(entry.display_name()));
+        return Ok(true);
+    }
+
+    if cli.unhide_all {
+        let store = HiddenEntryStore::new(Arc::clone(db))?;
+        let removed_count = store.remove_all()?;
+        println!("Restored {removed_count} manually hidden entries.");
+        return Ok(true);
+    }
+
     Ok(false)
+}
+
+fn sanitize_table_field(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect()
 }
 
 pub(crate) fn initialize_test_mode(cli: &Opts) {
@@ -80,4 +131,17 @@ fn clear_history(db: &redb::Database) -> Result<()> {
     write_txn.commit().wrap_err("Error clearing database")?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_table_field;
+
+    #[test]
+    fn hidden_entry_table_fields_do_not_emit_terminal_controls() {
+        assert_eq!(
+            sanitize_table_field("Unsafe\n\u{1b}[31mName"),
+            "Unsafe  [31mName"
+        );
+    }
 }

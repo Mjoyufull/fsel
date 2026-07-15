@@ -138,4 +138,28 @@ mod tests {
         assert!(enabled_opts.filter_actions);
         assert!(!disabled_opts.filter_actions);
     }
+
+    #[test]
+    fn hidden_entry_management_flags_parse() {
+        let command =
+            parse_with_config(&args(&["fsel", "--unhide", "42"]), FselConfig::default()).unwrap();
+        let CliCommand::Run(opts) = command else {
+            panic!("expected run command");
+        };
+
+        assert_eq!(opts.unhide, Some(42));
+    }
+
+    #[test]
+    fn hidden_entry_management_flags_are_mutually_exclusive() {
+        let error = parse_with_config(
+            &args(&["fsel", "--list-hidden", "--unhide-all"]),
+            FselConfig::default(),
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, CliError::Message(message) if message.contains("cannot be combined"))
+        );
+    }
 }

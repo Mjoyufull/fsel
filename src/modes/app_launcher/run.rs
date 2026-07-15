@@ -10,6 +10,7 @@ use ratatui::backend::CrosstermBackend;
 use scopeguard::defer;
 use std::cell::Cell;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Run application launcher mode.
@@ -32,6 +33,8 @@ pub async fn run(cli: Opts) -> Result<()> {
     if super::admin::handle_maintenance_command(&cli, &db, data_dir.as_path())? {
         return Ok(());
     }
+
+    let hidden_store = crate::core::hidden_entries::HiddenEntryStore::new(Arc::clone(&db))?;
 
     super::admin::initialize_test_mode(&cli);
 
@@ -72,6 +75,7 @@ pub async fn run(cli: Opts) -> Result<()> {
         cli.pinned_order_mode,
         std::mem::take(&mut pin_timestamps),
     );
+    state.set_hidden_entry_keys(hidden_store.entry_keys()?);
 
     if let Some(ref search) = cli.search_string {
         state.query = search.clone();
@@ -125,7 +129,7 @@ pub async fn run(cli: Opts) -> Result<()> {
 
         if matches!(event, Event::Input(_) | Event::Mouse(_)) {
             let total_height = terminal.size()?.height;
-            super::events::handle_event(&mut state, event, &cli, &db, total_height);
+            super::events::handle_event(&mut state, event, &cli, &db, &hidden_store, total_height);
         }
 
         if state.should_exit {
