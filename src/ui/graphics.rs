@@ -5,12 +5,16 @@ use ratatui_image::picker::{Picker, ProtocolType};
 use ratatui_image::protocol::StatefulProtocol;
 use ratatui_image::{Resize, StatefulImage};
 use std::collections::{HashMap, VecDeque};
-use std::io::Read;
+use std::io::{Cursor, Read};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 const MAX_SVG_DIMENSION: f32 = 2048.0;
 const MAX_SVG_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
+const MAX_SVG_PROBE_BYTES: u64 = 64 * 1024;
+const MAX_SVG_EMBEDDED_RASTER_DIMENSION: u32 = 4096;
+const MAX_SVG_EMBEDDED_RASTER_PIXELS: u64 = 2048 * 2048;
 static SVG_FONT_DATABASE: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
 
 /// Combined display state to track what's currently on screen
@@ -234,7 +238,16 @@ fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage> {
 }
 
 fn looks_like_svg(bytes: &[u8]) -> bool {
-    has_svg_document_root(bytes) || bytes.starts_with(&[0x1f, 0x8b])
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut prefix = Vec::with_capacity(MAX_SVG_PROBE_BYTES as usize);
+        flate2::read::GzDecoder::new(bytes)
+            .take(MAX_SVG_PROBE_BYTES)
+            .read_to_end(&mut prefix)
+            .is_ok()
+            && has_svg_document_root(&prefix)
+    } else {
+        has_svg_document_root(bytes)
+    }
 }
 
 fn decode_svg(bytes: &[u8]) -> Result<image::DynamicImage> {
@@ -324,15 +337,44 @@ fn svg_options() -> resvg::usvg::Options<'static> {
         database.load_system_fonts();
         Arc::new(database)
     }));
+    let remaining_raster_pixels = Arc::new(AtomicU64::new(MAX_SVG_EMBEDDED_RASTER_PIXELS));
     resvg::usvg::Options {
         fontdb,
         image_href_resolver: ImageHrefResolver {
-            resolve_data: Box::new(|mime, data, _| match mime {
-                "image/jpg" | "image/jpeg" => Some(ImageKind::JPEG(data)),
-                "image/png" => Some(ImageKind::PNG(data)),
-                "image/gif" => Some(ImageKind::GIF(data)),
-                "image/webp" => Some(ImageKind::WEBP(data)),
-                _ => None,
+            resolve_data: Box::new(move |mime, data, _| {
+                let expected_format = match mime {
+                    "image/jpg" | "image/jpeg" => image::ImageFormat::Jpeg,
+                    "image/png" => image::ImageFormat::Png,
+                    "image/gif" => image::ImageFormat::Gif,
+                    "image/webp" => image::ImageFormat::WebP,
+                    _ => return None,
+                };
+                let reader = image::ImageReader::new(Cursor::new(data.as_slice()))
+                    .with_guessed_format()
+                    .ok()?;
+                if reader.format() != Some(expected_format) {
+                    return None;
+                }
+                let (width, height) = reader.into_dimensions().ok()?;
+                if width > MAX_SVG_EMBEDDED_RASTER_DIMENSION
+                    || height > MAX_SVG_EMBEDDED_RASTER_DIMENSION
+                {
+                    return None;
+                }
+                let pixels = u64::from(width).checked_mul(u64::from(height))?;
+                remaining_raster_pixels
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                        remaining.checked_sub(pixels)
+                    })
+                    .ok()?;
+
+                match expected_format {
+                    image::ImageFormat::Jpeg => Some(ImageKind::JPEG(data)),
+                    image::ImageFormat::Png => Some(ImageKind::PNG(data)),
+                    image::ImageFormat::Gif => Some(ImageKind::GIF(data)),
+                    image::ImageFormat::WebP => Some(ImageKind::WEBP(data)),
+                    _ => None,
+                }
             }),
             resolve_string: Box::new(|_, _| None),
         },
@@ -402,12 +444,13 @@ impl GraphicsAdapter {
 #[cfg(test)]
 mod tests {
     use super::{
-        bounded_svg_document, decode_image, has_svg_document_root, looks_like_svg, svg_options,
-        unpremultiply_rgba,
+        ImageManager, bounded_svg_document, decode_image, has_svg_document_root, looks_like_svg,
+        svg_options, unpremultiply_rgba,
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
-    use std::io::Write;
+    use std::io::{Cursor, Write};
+    use std::sync::Arc;
 
     #[test]
     fn decodes_svg_bytes_into_rgba_image() {
@@ -456,6 +499,33 @@ mod tests {
         let compressed = encoder.finish().expect("compressed SVG should finish");
 
         assert!(bounded_svg_document(&compressed, 16).is_err());
+    }
+
+    #[test]
+    fn gzip_probe_rejects_non_svg_payloads() {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder
+            .write_all(b"ordinary compressed output")
+            .expect("gzip payload should be written");
+        let compressed = encoder.finish().expect("gzip payload should finish");
+
+        assert!(!ImageManager::recognizes_image_bytes(&compressed));
+    }
+
+    #[test]
+    fn embedded_rasters_share_a_decoded_pixel_budget() {
+        let image = image::DynamicImage::new_rgba8(2048, 1024);
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test PNG should encode");
+        let data = Arc::new(encoded.into_inner());
+        let options = svg_options();
+        let resolve = &options.image_href_resolver.resolve_data;
+
+        assert!(resolve("image/png", Arc::clone(&data), &options).is_some());
+        assert!(resolve("image/png", Arc::clone(&data), &options).is_some());
+        assert!(resolve("image/png", data, &options).is_none());
     }
 
     #[test]
