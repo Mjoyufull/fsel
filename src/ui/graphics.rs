@@ -17,6 +17,7 @@ const MAX_SVG_PROBE_BYTES: u64 = 64 * 1024;
 const MAX_SVG_EMBEDDED_RASTER_DIMENSION: u32 = 4096;
 const MAX_SVG_EMBEDDED_RASTER_PIXELS: u64 = 2048 * 2048;
 const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
+const MAX_IMAGE_FILE_BYTES: u64 = 32 * 1024 * 1024;
 static SVG_FONT_DATABASE: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
 
 /// Combined display state to track what's currently on screen
@@ -94,7 +95,17 @@ impl ImageManager {
 
     /// Read and prepare an image file from a blocking worker.
     pub(crate) fn prepare_image_path(picker: Picker, path: &Path) -> Result<StatefulProtocol> {
-        let bytes = std::fs::read(path)?;
+        let file = std::fs::File::open(path)?;
+        let file_size = file.metadata()?.len();
+        if file_size > MAX_IMAGE_FILE_BYTES {
+            return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
+        }
+        let mut bytes = Vec::with_capacity(file_size as usize);
+        file.take(MAX_IMAGE_FILE_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_IMAGE_FILE_BYTES {
+            return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
+        }
         let image = decode_image(&bytes)?;
         Ok(picker.new_resize_protocol(image))
     }
@@ -609,8 +620,8 @@ impl GraphicsAdapter {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageManager, bounded_svg_document, decode_image, has_svg_document_root, looks_like_svg,
-        svg_needs_fonts, svg_options, unpremultiply_rgba,
+        ImageManager, MAX_IMAGE_FILE_BYTES, bounded_svg_document, decode_image,
+        has_svg_document_root, looks_like_svg, svg_needs_fonts, svg_options, unpremultiply_rgba,
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -757,6 +768,22 @@ mod tests {
         assert!(resolve("image/png", Arc::clone(&data), &options).is_some());
         assert!(resolve("image/png", Arc::clone(&data), &options).is_some());
         assert!(resolve("image/png", data, &options).is_none());
+    }
+
+    #[test]
+    fn image_path_read_rejects_oversized_files() {
+        let path = std::env::temp_dir().join(format!("fsel-oversized-icon-{}", std::process::id()));
+        let file = std::fs::File::create(&path).expect("sparse test file should be created");
+        file.set_len(MAX_IMAGE_FILE_BYTES + 1)
+            .expect("sparse test file should be sized");
+
+        let error =
+            ImageManager::prepare_image_path(ratatui_image::picker::Picker::halfblocks(), &path)
+                .err()
+                .expect("oversized image should be rejected");
+
+        assert!(error.to_string().contains("exceeds"));
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

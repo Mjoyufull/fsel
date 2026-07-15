@@ -1,5 +1,5 @@
 use jwalk::WalkDir;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -81,47 +81,66 @@ impl IconResolver {
         if let Some(cached) = self.cache.get(icon) {
             return cached.clone();
         }
+        if icon.contains(['/', '\\']) {
+            self.cache.insert(icon.to_string(), None);
+            return None;
+        }
 
         let icon_name = strip_icon_extension(icon);
         let resolved = self
             .theme_chain()
             .into_iter()
             .find_map(|theme| self.find_in_theme(&theme, icon_name))
-            .or_else(|| self.find_in_pixmaps(icon_name));
+            .or_else(|| self.find_unthemed(icon_name));
         self.cache.insert(icon.to_string(), resolved.clone());
         resolved
     }
 
     fn theme_chain(&self) -> Vec<String> {
-        let mut queue = VecDeque::from([self.theme.clone()]);
         let mut seen = HashSet::new();
         let mut themes = Vec::new();
-
-        while let Some(theme) = queue.pop_front() {
-            if themes.len() >= MAX_THEME_DEPTH || !seen.insert(theme.clone()) {
-                continue;
-            }
-            for root in &self.icon_roots {
-                if let Some(metadata) = read_theme_metadata(&root.join(&theme)) {
-                    queue.extend(metadata.inherits);
-                }
-            }
-            themes.push(theme);
-        }
-        if seen.insert("hicolor".to_string()) {
-            themes.push("hicolor".to_string());
+        self.append_theme_subtree(&self.theme, &mut seen, &mut themes);
+        if !seen.contains("hicolor") {
+            self.append_theme_subtree("hicolor", &mut seen, &mut themes);
         }
         themes
     }
 
+    fn append_theme_subtree(
+        &self,
+        theme: &str,
+        seen: &mut HashSet<String>,
+        themes: &mut Vec<String>,
+    ) {
+        if themes.len() >= MAX_THEME_DEPTH || !seen.insert(theme.to_string()) {
+            return;
+        }
+        themes.push(theme.to_string());
+
+        let mut inherits = Vec::new();
+        for root in &self.icon_roots {
+            if let Some(metadata) = read_theme_metadata(&root.join(theme)) {
+                for inherited in metadata.inherits {
+                    if !inherits.contains(&inherited) {
+                        inherits.push(inherited);
+                    }
+                }
+            }
+        }
+        for inherited in inherits {
+            self.append_theme_subtree(&inherited, seen, themes);
+        }
+    }
+
     fn find_in_theme(&self, theme: &str, icon: &str) -> Option<PathBuf> {
+        let mut candidates = Vec::new();
         for root in &self.icon_roots {
             let theme_root = root.join(theme);
             if !theme_root.is_dir() {
                 continue;
             }
 
-            let mut candidates = Vec::new();
+            let candidate_count = candidates.len();
             if let Some(metadata) = read_theme_metadata(&theme_root) {
                 for directory in metadata.directories {
                     collect_named_candidates(
@@ -133,7 +152,7 @@ impl IconResolver {
                     );
                 }
             }
-            if candidates.is_empty() {
+            if candidates.len() == candidate_count {
                 for entry in WalkDir::new(&theme_root)
                     .min_depth(1)
                     .max_depth(5)
@@ -146,15 +165,12 @@ impl IconResolver {
                     }
                 }
             }
-            if let Some(path) = best_candidate(candidates) {
-                return Some(path);
-            }
         }
-        None
+        best_candidate(candidates)
     }
 
-    fn find_in_pixmaps(&self, icon: &str) -> Option<PathBuf> {
-        for root in &self.pixmap_roots {
+    fn find_unthemed(&self, icon: &str) -> Option<PathBuf> {
+        for root in self.icon_roots.iter().chain(&self.pixmap_roots) {
             for extension in ICON_EXTENSIONS {
                 let path = root.join(format!("{icon}.{extension}"));
                 if path.is_file() {
@@ -344,6 +360,104 @@ mod tests {
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn chooses_best_theme_candidate_across_icon_roots() {
+        let root = temp_dir();
+        let user_root = root.join("user");
+        let system_root = root.join("system");
+        for (icon_root, size) in [(&user_root, 16), (&system_root, 128)] {
+            let theme = icon_root.join("Selected");
+            fs::create_dir_all(theme.join(format!("{size}x{size}/apps")))
+                .expect("theme directory should be created");
+            fs::write(
+                theme.join("index.theme"),
+                format!(
+                    "[Icon Theme]\nDirectories={size}x{size}/apps\n[{size}x{size}/apps]\nSize={size}\nType=Fixed\n"
+                ),
+            )
+            .expect("theme metadata should be written");
+            fs::write(
+                theme.join(format!("{size}x{size}/apps/editor.png")),
+                b"icon",
+            )
+            .expect("icon should be written");
+        }
+        let expected = system_root.join("Selected/128x128/apps/editor.png");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 128,
+            icon_roots: vec![user_root, system_root],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inherited_themes_are_traversed_depth_first() {
+        let root = temp_dir();
+        for (theme, inherits) in [("Selected", "A,B"), ("A", "C"), ("B", ""), ("C", "")] {
+            let theme_root = root.join(theme);
+            fs::create_dir_all(theme_root.join("64x64/apps"))
+                .expect("theme directory should be created");
+            fs::write(
+                theme_root.join("index.theme"),
+                format!(
+                    "[Icon Theme]\nInherits={inherits}\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n"
+                ),
+            )
+            .expect("theme metadata should be written");
+        }
+        fs::write(root.join("B/64x64/apps/editor.png"), b"sibling")
+            .expect("sibling icon should be written");
+        let expected = root.join("C/64x64/apps/editor.png");
+        fs::write(&expected, b"descendant").expect("descendant icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn finds_unthemed_icons_in_icon_roots() {
+        let root = temp_dir();
+        let expected = root.join("editor.png");
+        fs::write(&expected, b"icon").expect("unthemed icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Missing".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_relative_icon_paths() {
+        let mut resolver = IconResolver {
+            theme: "hicolor".to_string(),
+            size: 64,
+            icon_roots: Vec::new(),
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("../outside"), None);
+        assert_eq!(resolver.resolve("folder/icon"), None);
+        assert_eq!(resolver.resolve("folder\\icon"), None);
     }
 
     #[test]

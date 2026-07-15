@@ -58,8 +58,9 @@ impl UI {
         state: &crate::core::state::State,
         cli: &crate::cli::Opts,
         icon_preview: Option<AppIconPreview<'_>>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let size = f.area();
+        let mut icon_render_failed = false;
         let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
         let should_render_border = title_height > 0;
 
@@ -133,24 +134,36 @@ impl UI {
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
             if let Some(icon_preview) = icon_preview {
                 let inner = info_block.inner(title_area);
-                f.render_widget(info_block, title_area);
                 let (icon_area, text_area) = split_icon_preview(
                     inner,
                     cli.desktop_icon_position,
                     cli.desktop_icon_preview_width_percent,
                 );
-                f.render_widget(
-                    Paragraph::new(info_text).style(Style::default().fg(cli.main_text_color)),
-                    text_area,
-                );
                 let icon_area = icon_area.inner(Margin {
                     horizontal: 1,
                     vertical: 0,
                 });
-                if icon_area.width > 0 && icon_area.height > 0 {
-                    icon_preview
-                        .image_manager
-                        .render_cached(f, icon_preview.key, icon_area)?;
+                let icon_rendered = if icon_area.width > 0 && icon_area.height > 0 {
+                    Some(icon_preview.image_manager.render_cached(
+                        f,
+                        icon_preview.key,
+                        icon_area,
+                    )?)
+                } else {
+                    None
+                };
+                if icon_rendered == Some(true) {
+                    f.render_widget(info_block, title_area);
+                    f.render_widget(
+                        Paragraph::new(info_text).style(Style::default().fg(cli.main_text_color)),
+                        text_area,
+                    );
+                } else {
+                    icon_render_failed = icon_rendered == Some(false);
+                    let paragraph = Paragraph::new(info_text)
+                        .block(info_block)
+                        .style(Style::default().fg(cli.main_text_color));
+                    f.render_widget(paragraph, title_area);
                 }
             } else {
                 let paragraph = Paragraph::new(info_text)
@@ -279,7 +292,7 @@ impl UI {
         }
 
         f.render_stateful_widget(list, apps_area, &mut list_state);
-        Ok(())
+        Ok(icon_render_failed)
     }
 }
 

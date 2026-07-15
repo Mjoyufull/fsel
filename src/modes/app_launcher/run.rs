@@ -149,11 +149,15 @@ pub async fn run(cli: Opts) -> Result<()> {
             if icons.take_terminal_clear() {
                 terminal.clear()?;
             }
-            let mut render_result = Ok(());
+            let mut render_result = Ok(false);
             terminal.draw(|frame| {
                 render_result = UI::new().render(frame, &state, &cli, icons.preview());
             })?;
-            render_result?;
+            if render_result? {
+                icons.clear_failed_preview();
+                needs_redraw = true;
+                continue;
+            }
         }
 
         tokio::select! {

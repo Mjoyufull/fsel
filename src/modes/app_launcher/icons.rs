@@ -130,6 +130,12 @@ impl IconRuntime {
         })
     }
 
+    pub(super) fn clear_failed_preview(&mut self) {
+        if self.current_key.take().is_some() {
+            self.needs_terminal_clear |= !matches!(self.adapter, GraphicsAdapter::None);
+        }
+    }
+
     pub(super) fn take_terminal_clear(&mut self) -> bool {
         std::mem::take(&mut self.needs_terminal_clear)
     }
