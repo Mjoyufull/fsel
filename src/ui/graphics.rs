@@ -343,13 +343,28 @@ fn has_svg_document_root(bytes: &[u8]) -> bool {
 }
 
 fn skip_doctype(text: &str) -> Option<&str> {
+    let body = &text["<!DOCTYPE".len()..];
     let mut quote = None;
     let mut subset_depth = 0_u32;
-    for (offset, character) in text["<!DOCTYPE".len()..].char_indices() {
+    let mut offset = 0;
+    while offset < body.len() {
+        let remaining = &body[offset..];
+        let character = remaining.chars().next()?;
         if let Some(expected) = quote {
             if character == expected {
                 quote = None;
             }
+            offset += character.len_utf8();
+            continue;
+        }
+        if remaining.starts_with("<!--") {
+            let end = remaining.find("-->")?;
+            offset += end + "-->".len();
+            continue;
+        }
+        if remaining.starts_with("<?") {
+            let end = remaining.find("?>")?;
+            offset += end + "?>".len();
             continue;
         }
         match character {
@@ -362,6 +377,7 @@ fn skip_doctype(text: &str) -> Option<&str> {
             }
             _ => {}
         }
+        offset += character.len_utf8();
     }
     None
 }
@@ -407,15 +423,45 @@ fn svg_root_namespace_matches(mut attributes: &str, prefix: Option<&str>) -> boo
             None => name == "xmlns",
         };
         if is_namespace {
+            let Some(value) = xml_attribute_value(value) else {
+                return false;
+            };
             namespace = Some(value);
         }
         attributes = &attributes[value_end + delimiter.len_utf8()..];
     }
 
     match prefix {
-        Some(_) => namespace == Some(SVG_NAMESPACE),
-        None => namespace.is_none() || namespace == Some(SVG_NAMESPACE),
+        Some(_) => namespace.as_deref() == Some(SVG_NAMESPACE),
+        None => namespace.is_none() || namespace.as_deref() == Some(SVG_NAMESPACE),
     }
+}
+
+fn xml_attribute_value(value: &str) -> Option<String> {
+    let mut decoded = String::with_capacity(value.len());
+    let mut rest = value;
+    while let Some(start) = rest.find('&') {
+        decoded.push_str(&rest[..start]);
+        rest = &rest[start + 1..];
+        let end = rest.find(';')?;
+        let reference = &rest[..end];
+        let character = match reference {
+            "amp" => '&',
+            "lt" => '<',
+            "gt" => '>',
+            "apos" => '\'',
+            "quot" => '"',
+            value if value.starts_with("#x") => {
+                char::from_u32(u32::from_str_radix(&value[2..], 16).ok()?)?
+            }
+            value if value.starts_with('#') => char::from_u32(value[1..].parse().ok()?)?,
+            _ => return None,
+        };
+        decoded.push(character);
+        rest = &rest[end + 1..];
+    }
+    decoded.push_str(rest);
+    Some(decoded)
 }
 
 fn svg_options() -> resvg::usvg::Options<'static> {
@@ -585,12 +631,18 @@ mod tests {
         assert!(has_svg_document_root(
             br#"<!DOCTYPE svg SYSTEM "x>y"><svg/>"#
         ));
+        assert!(has_svg_document_root(
+            br#"<!DOCTYPE svg [<!-- ] must not close the subset --><?audit ]?><!ENTITY color 'red'>]><svg/>"#
+        ));
     }
 
     #[test]
     fn svg_probe_accepts_namespace_prefixed_roots() {
         assert!(has_svg_document_root(
             br#"<s:svg xmlns:s="http://www.w3.org/2000/svg" width="1"/>"#
+        ));
+        assert!(has_svg_document_root(
+            br#"<s:svg xmlns:s="http:&#x2f;&#47;www.w3.org/2000/svg" width="1"/>"#
         ));
         assert!(!has_svg_document_root(
             br#"<s:svg xmlns:s="https://example.com/not-svg"/>"#
@@ -603,12 +655,20 @@ mod tests {
             br#"<s:svg xmlns:s="http://www.w3.org/2000/svg" width="1" height="1"><s:rect width="1" height="1"/></s:svg>"#,
         )
         .expect("prefixed SVG should decode");
+        let escaped_namespace = decode_image(
+            br#"<s:svg xmlns:s="http:&#x2f;&#47;www.w3.org/2000/svg" width="1" height="1"><s:rect width="1" height="1"/></s:svg>"#,
+        )
+        .expect("prefixed SVG with character references should decode");
         let with_doctype = decode_image(
             br#"<!DOCTYPE svg [<!ENTITY color 'red'>]><svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="&color;"/></svg>"#,
         )
         .expect("SVG with an internal DTD subset should decode");
 
         assert_eq!((prefixed.width(), prefixed.height()), (1, 1));
+        assert_eq!(
+            (escaped_namespace.width(), escaped_namespace.height()),
+            (1, 1)
+        );
         assert_eq!((with_doctype.width(), with_doctype.height()), (1, 1));
     }
 
