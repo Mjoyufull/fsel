@@ -426,6 +426,9 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
             {
                 match character {
                     ';' | '|' | '&' | '\n' => substitution.command_position = true,
+                    '(' | '{' if substitution.command_position => {
+                        substitution.command_position = true;
+                    }
                     character if character.is_whitespace() => {}
                     _ => substitution.command_position = false,
                 }
@@ -714,6 +717,30 @@ mod tests {
 
         assert!(output.success);
         assert_eq!(output.stdout, b"<casetwo words*.txt>");
+    }
+
+    #[tokio::test]
+    async fn grouped_case_preserves_placeholder_quoting() {
+        let command =
+            expand_preview_command("printf '<%s>' \"$( (case x in x) :;; esac); printf '%s' {})\"")
+                .expect("a grouped case command should keep substitution context");
+        let payload = "two words*.txt";
+
+        let output = tokio::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("FSEL_PREVIEW_ITEM", payload)
+            .env("FSEL_PREVIEW_QUERY", "")
+            .env("FSEL_PREVIEW_ORDINAL", "0")
+            .output()
+            .await
+            .expect("POSIX preview command should run");
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"<two words*.txt>");
     }
 
     #[tokio::test]
