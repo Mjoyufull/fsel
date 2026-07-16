@@ -311,27 +311,34 @@ impl Drop for PreviewRuntime {
 }
 
 fn expand_preview_command(template: &str) -> Result<String, String> {
-    if template.contains("<<") {
-        return Err("Preview command heredocs are not supported".to_string());
-    }
-
     let mut command = String::with_capacity(template.len() + 16);
     let mut remaining = template;
     let mut quote = ShellQuote::Unquoted;
     let mut escaped = false;
+    let mut substitutions = Vec::<CommandSubstitution>::new();
 
     while !remaining.is_empty() {
-        if !escaped && let Some(rest) = remaining.strip_prefix("{}") {
-            require_expandable_placeholder(quote)?;
-            command.push_str("\"$FSEL_PREVIEW_ITEM\"");
+        if !escaped && quote == ShellQuote::Unquoted && remaining.starts_with("<<") {
+            return Err("Preview command heredocs are not supported".to_string());
+        } else if !escaped && let Some(rest) = remaining.strip_prefix("{}") {
+            append_placeholder(&mut command, quote, "FSEL_PREVIEW_ITEM")?;
             remaining = rest;
         } else if !escaped && let Some(rest) = remaining.strip_prefix("{q}") {
-            require_expandable_placeholder(quote)?;
-            command.push_str("\"$FSEL_PREVIEW_QUERY\"");
+            append_placeholder(&mut command, quote, "FSEL_PREVIEW_QUERY")?;
             remaining = rest;
         } else if !escaped && let Some(rest) = remaining.strip_prefix("{n}") {
-            require_expandable_placeholder(quote)?;
-            command.push_str("\"$FSEL_PREVIEW_ORDINAL\"");
+            append_placeholder(&mut command, quote, "FSEL_PREVIEW_ORDINAL")?;
+            remaining = rest;
+        } else if !escaped
+            && quote != ShellQuote::Single
+            && let Some(rest) = remaining.strip_prefix("$(")
+        {
+            command.push_str("$(");
+            substitutions.push(CommandSubstitution {
+                outer_quote: quote,
+                nested_parentheses: 0,
+            });
+            quote = ShellQuote::Unquoted;
             remaining = rest;
         } else {
             let Some(character) = remaining.chars().next() else {
@@ -350,6 +357,25 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                 (ShellQuote::Single, '\'') | (ShellQuote::Double, '"') => {
                     quote = ShellQuote::Unquoted;
                 }
+                (ShellQuote::Unquoted, '(') if !substitutions.is_empty() => {
+                    substitutions
+                        .last_mut()
+                        .expect("substitution stack is non-empty")
+                        .nested_parentheses += 1;
+                }
+                (ShellQuote::Unquoted, ')') if !substitutions.is_empty() => {
+                    let substitution = substitutions
+                        .last_mut()
+                        .expect("substitution stack is non-empty");
+                    if substitution.nested_parentheses == 0 {
+                        quote = substitutions
+                            .pop()
+                            .expect("substitution stack is non-empty")
+                            .outer_quote;
+                    } else {
+                        substitution.nested_parentheses -= 1;
+                    }
+                }
                 _ => {}
             }
         }
@@ -365,12 +391,26 @@ enum ShellQuote {
     Double,
 }
 
-fn require_expandable_placeholder(quote: ShellQuote) -> Result<(), String> {
-    if quote != ShellQuote::Single {
-        Ok(())
-    } else {
-        Err("Preview placeholders must not appear inside single quotes".to_string())
+struct CommandSubstitution {
+    outer_quote: ShellQuote,
+    nested_parentheses: usize,
+}
+
+fn append_placeholder(
+    command: &mut String,
+    quote: ShellQuote,
+    variable: &str,
+) -> Result<(), String> {
+    match quote {
+        ShellQuote::Unquoted => command.push_str(&format!("\"${variable}\"")),
+        // Empty adjacent quotes terminate the variable name without changing the
+        // surrounding double-quoted context. This works in POSIX shells and fish.
+        ShellQuote::Double => command.push_str(&format!("${variable}\"\"")),
+        ShellQuote::Single => {
+            return Err("Preview placeholders must not appear inside single quotes".to_string());
+        }
     }
+    Ok(())
 }
 
 async fn run_preview_command(
@@ -408,9 +448,19 @@ async fn run_preview_command(
         .take()
         .ok_or_else(|| "Failed to capture preview stderr".to_string())?;
 
-    let stdout_task = tokio::spawn(read_limited(stdout));
-    let stderr_task = tokio::spawn(read_limited(stderr));
-    let status = child.wait().await;
+    let (limit_tx, mut limit_rx) = mpsc::unbounded_channel();
+    let stdout_task = tokio::spawn(read_limited(stdout, limit_tx.clone()));
+    let stderr_task = tokio::spawn(read_limited(stderr, limit_tx.clone()));
+    drop(limit_tx);
+    let status = tokio::select! {
+        status = child.wait() => status,
+        Some(()) = limit_rx.recv() => {
+            #[cfg(unix)]
+            process_group.terminate();
+            let _ = child.start_kill();
+            child.wait().await
+        }
+    };
     #[cfg(unix)]
     process_group.terminate();
     let status = status.map_err(|error| format!("Preview command failed: {error}"))?;
@@ -461,15 +511,32 @@ impl Drop for ProcessGroupGuard {
     }
 }
 
-async fn read_limited(reader: impl AsyncRead + Unpin) -> std::io::Result<(Vec<u8>, bool)> {
+async fn read_limited(
+    reader: impl AsyncRead + Unpin,
+    limit_tx: mpsc::UnboundedSender<()>,
+) -> std::io::Result<(Vec<u8>, bool)> {
+    read_limited_to(reader, MAX_PREVIEW_BYTES, limit_tx).await
+}
+
+async fn read_limited_to(
+    mut reader: impl AsyncRead + Unpin,
+    limit: u64,
+    limit_tx: mpsc::UnboundedSender<()>,
+) -> std::io::Result<(Vec<u8>, bool)> {
     let mut bytes = Vec::new();
-    reader
-        .take(MAX_PREVIEW_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .await?;
-    let truncated = bytes.len() as u64 > MAX_PREVIEW_BYTES;
-    if truncated {
-        bytes.truncate(MAX_PREVIEW_BYTES as usize);
+    let mut buffer = [0_u8; 8192];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        let remaining = limit.saturating_sub(bytes.len() as u64) as usize;
+        bytes.extend_from_slice(&buffer[..read.min(remaining)]);
+        if read > remaining && !truncated {
+            truncated = true;
+            let _ = limit_tx.send(());
+        }
     }
     Ok((bytes, truncated))
 }
@@ -492,9 +559,10 @@ fn should_show_truncated_stdout(output: &CommandOutput) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandOutput, append_truncation_notice, expand_preview_command, run_preview_command,
-        should_show_truncated_stdout,
+        CommandOutput, append_truncation_notice, expand_preview_command, read_limited_to,
+        run_preview_command, should_show_truncated_stdout,
     };
+    use tokio::io::AsyncWriteExt;
 
     #[test]
     fn command_expansion_uses_environment_variables() {
@@ -508,11 +576,18 @@ mod tests {
     }
 
     #[test]
-    fn nested_double_quotes_never_interpolate_row_source() {
+    fn nested_double_quotes_preserve_shell_context() {
         let command = expand_preview_command("echo \"$(printf \"{}\")\"")
-            .expect("positional parameters make double-quoted expansion safe");
+            .expect("nested double-quoted placeholders should expand safely");
 
-        assert_eq!(command, "echo \"$(printf \"\"$FSEL_PREVIEW_ITEM\"\")\"");
+        assert_eq!(command, "echo \"$(printf \"$FSEL_PREVIEW_ITEM\"\"\")\"");
+    }
+
+    #[test]
+    fn nested_single_quoted_placeholders_are_rejected() {
+        let result = expand_preview_command("echo \"$(printf '{}')\"");
+
+        assert!(result.is_err());
     }
 
     #[test]
@@ -529,6 +604,14 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[test]
+    fn quoted_shift_operators_are_not_treated_as_heredocs() {
+        let command = expand_preview_command("python -c 'print(1 << 8)' {}")
+            .expect("quoted shift operators are ordinary command data");
+
+        assert!(command.contains("print(1 << 8)"));
+    }
+
     #[tokio::test]
     async fn selected_item_is_not_reparsed_as_shell_source() {
         let command =
@@ -542,6 +625,56 @@ mod tests {
         assert!(output.success);
         assert_eq!(output.stdout, payload.as_bytes());
         assert!(output.stderr.is_empty());
+    }
+
+    #[tokio::test]
+    async fn double_quoted_placeholder_preserves_one_argument() {
+        let command = expand_preview_command("printf '<%s>' \"{}\"")
+            .expect("double-quoted placeholder should expand");
+        let payload = "two words*.txt";
+
+        let output = run_preview_command(&command, payload, "", 0)
+            .await
+            .expect("preview command should run");
+
+        assert!(output.success);
+        assert_eq!(output.stdout, b"<two words*.txt>");
+    }
+
+    #[tokio::test]
+    async fn nested_double_quoted_placeholder_expands_the_row() {
+        let command = expand_preview_command("printf '<%s>' \"$(printf '%s' \"{}\")\"")
+            .expect("nested double-quoted placeholder should expand");
+        let payload = "two words*.txt";
+
+        let output = run_preview_command(&command, payload, "", 0)
+            .await
+            .expect("preview command should run");
+
+        assert!(output.success);
+        assert_eq!(output.stdout, b"<two words*.txt>");
+    }
+
+    #[tokio::test]
+    async fn limited_reader_drains_after_reporting_the_cap() {
+        let (mut writer, reader) = tokio::io::duplex(32);
+        let writer_task = tokio::spawn(async move {
+            writer
+                .write_all(b"abcdef")
+                .await
+                .expect("write should work");
+            writer.shutdown().await.expect("shutdown should work");
+        });
+        let (limit_tx, mut limit_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let (bytes, truncated) = read_limited_to(reader, 3, limit_tx)
+            .await
+            .expect("read should work");
+        writer_task.await.expect("writer should finish");
+
+        assert_eq!(bytes, b"abc");
+        assert!(truncated);
+        assert!(limit_rx.try_recv().is_ok());
     }
 
     #[test]
