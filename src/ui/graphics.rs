@@ -311,22 +311,111 @@ fn has_svg_document_root(bytes: &[u8]) -> bool {
             };
             text = &text[end + 3..];
         } else if text.starts_with("<!DOCTYPE") {
-            let Some(end) = text.find('>') else {
+            let Some(rest) = skip_doctype(text) else {
                 return false;
             };
-            text = &text[end + 1..];
+            text = rest;
         } else {
             break;
         }
     }
 
-    let Some(after_name) = text.strip_prefix("<svg") else {
+    let Some(after_open) = text.strip_prefix('<') else {
         return false;
     };
-    after_name
-        .chars()
-        .next()
-        .is_some_and(|character| character.is_whitespace() || matches!(character, '>' | '/'))
+    let name_end = after_open
+        .char_indices()
+        .find_map(|(index, character)| {
+            (character.is_whitespace() || matches!(character, '>' | '/')).then_some(index)
+        })
+        .unwrap_or(after_open.len());
+    let qualified_name = &after_open[..name_end];
+    let (prefix, local_name) = qualified_name
+        .split_once(':')
+        .map_or((None, qualified_name), |(prefix, local)| {
+            (Some(prefix), local)
+        });
+    if local_name != "svg" || prefix.is_some_and(str::is_empty) {
+        return false;
+    }
+
+    svg_root_namespace_matches(&after_open[name_end..], prefix)
+}
+
+fn skip_doctype(text: &str) -> Option<&str> {
+    let mut quote = None;
+    let mut subset_depth = 0_u32;
+    for (offset, character) in text["<!DOCTYPE".len()..].char_indices() {
+        if let Some(expected) = quote {
+            if character == expected {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' => quote = Some(character),
+            '[' => subset_depth = subset_depth.saturating_add(1),
+            ']' => subset_depth = subset_depth.saturating_sub(1),
+            '>' if subset_depth == 0 => {
+                let end = "<!DOCTYPE".len() + offset + character.len_utf8();
+                return Some(&text[end..]);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn svg_root_namespace_matches(mut attributes: &str, prefix: Option<&str>) -> bool {
+    const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
+    let mut namespace = None;
+
+    loop {
+        attributes = attributes.trim_start();
+        if attributes.starts_with('>') || attributes.starts_with("/>") {
+            break;
+        }
+        let name_end = attributes
+            .char_indices()
+            .find_map(|(index, character)| {
+                (character.is_whitespace() || matches!(character, '=' | '/' | '>')).then_some(index)
+            })
+            .unwrap_or(attributes.len());
+        if name_end == 0 {
+            return false;
+        }
+        let name = &attributes[..name_end];
+        attributes = attributes[name_end..].trim_start();
+        let Some(after_equals) = attributes.strip_prefix('=') else {
+            return false;
+        };
+        attributes = after_equals.trim_start();
+        let Some(delimiter) = attributes
+            .chars()
+            .next()
+            .filter(|value| matches!(value, '\'' | '"'))
+        else {
+            return false;
+        };
+        attributes = &attributes[delimiter.len_utf8()..];
+        let Some(value_end) = attributes.find(delimiter) else {
+            return false;
+        };
+        let value = &attributes[..value_end];
+        let is_namespace = match prefix {
+            Some(prefix) => name.strip_prefix("xmlns:") == Some(prefix),
+            None => name == "xmlns",
+        };
+        if is_namespace {
+            namespace = Some(value);
+        }
+        attributes = &attributes[value_end + delimiter.len_utf8()..];
+    }
+
+    match prefix {
+        Some(_) => namespace == Some(SVG_NAMESPACE),
+        None => namespace.is_none() || namespace == Some(SVG_NAMESPACE),
+    }
 }
 
 fn svg_options() -> resvg::usvg::Options<'static> {
@@ -486,6 +575,41 @@ mod tests {
         assert!(has_svg_document_root(
             b"\xef\xbb\xbf <?xml version='1.0'?><!-- icon --><svg width='1' height='1'/>"
         ));
+    }
+
+    #[test]
+    fn svg_probe_skips_complete_doctype_declarations() {
+        assert!(has_svg_document_root(
+            br#"<!DOCTYPE svg [<!ENTITY color 'red'>]><svg fill='&color;'/>"#
+        ));
+        assert!(has_svg_document_root(
+            br#"<!DOCTYPE svg SYSTEM "x>y"><svg/>"#
+        ));
+    }
+
+    #[test]
+    fn svg_probe_accepts_namespace_prefixed_roots() {
+        assert!(has_svg_document_root(
+            br#"<s:svg xmlns:s="http://www.w3.org/2000/svg" width="1"/>"#
+        ));
+        assert!(!has_svg_document_root(
+            br#"<s:svg xmlns:s="https://example.com/not-svg"/>"#
+        ));
+    }
+
+    #[test]
+    fn decodes_prefixed_and_doctype_svg_documents() {
+        let prefixed = decode_image(
+            br#"<s:svg xmlns:s="http://www.w3.org/2000/svg" width="1" height="1"><s:rect width="1" height="1"/></s:svg>"#,
+        )
+        .expect("prefixed SVG should decode");
+        let with_doctype = decode_image(
+            br#"<!DOCTYPE svg [<!ENTITY color 'red'>]><svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="&color;"/></svg>"#,
+        )
+        .expect("SVG with an internal DTD subset should decode");
+
+        assert_eq!((prefixed.width(), prefixed.height()), (1, 1));
+        assert_eq!((with_doctype.width(), with_doctype.height()), (1, 1));
     }
 
     #[test]
