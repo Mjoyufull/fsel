@@ -43,8 +43,8 @@ pub(super) fn draw_frame(
         .border_type(border_type)
         .border_style(Style::default().fg(options.main_border_color));
 
-    let content_lines = if preview.is_enabled() {
-        preview.text_lines().unwrap_or_default()
+    let default_content_lines = if preview.is_enabled() {
+        None
     } else {
         ui.info_with_image_support(
             options.highlight_color,
@@ -53,14 +53,8 @@ pub(super) fn draw_frame(
             chunks[content_panel_index].width,
             chunks[content_panel_index].height.saturating_sub(2),
         );
-        ui.text.clone()
+        Some(ui.text.clone())
     };
-
-    let content_paragraph = Paragraph::new(content_lines)
-        .block(content_block.clone())
-        .style(Style::default().fg(options.main_text_color))
-        .wrap(Wrap { trim: false })
-        .alignment(Alignment::Left);
 
     let items_panel_height = chunks[items_panel_index].height;
     let max_visible = items_panel_height.saturating_sub(2) as usize;
@@ -171,14 +165,17 @@ pub(super) fn draw_frame(
         };
         if preview.render_image(frame, image_area)? {
             frame.render_widget(content_block, content_area);
-        } else if preview.is_enabled() {
-            let fallback_paragraph = Paragraph::new(preview.text_lines().unwrap_or_default())
+        } else {
+            let content_lines = if preview.is_enabled() {
+                preview.text_lines().unwrap_or_default()
+            } else {
+                default_content_lines.unwrap_or_default()
+            };
+            let content_paragraph = Paragraph::new(content_lines)
                 .block(content_block)
                 .style(Style::default().fg(options.main_text_color))
                 .wrap(Wrap { trim: false })
                 .alignment(Alignment::Left);
-            frame.render_widget(fallback_paragraph, content_area);
-        } else {
             frame.render_widget(content_paragraph, content_area);
         }
     }
