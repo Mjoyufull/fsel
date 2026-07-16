@@ -67,7 +67,6 @@ pub(super) struct CommandOutput {
     status: String,
     success: bool,
     truncated: bool,
-    stdout_truncated: bool,
 }
 
 impl PreviewRuntime {
@@ -216,7 +215,7 @@ impl PreviewRuntime {
             }
         };
 
-        if !output.success && !should_show_truncated_stdout(&output) {
+        if should_report_command_failure(&output) {
             let stderr = output_text(&output.stderr);
             let mut text = if stderr.trim().is_empty() {
                 format!("Preview command exited with {}", output.status)
@@ -318,7 +317,14 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
     let mut substitutions = Vec::<CommandSubstitution>::new();
 
     while !remaining.is_empty() {
-        if !escaped && quote == ShellQuote::Unquoted && remaining.starts_with("<<") {
+        let arithmetic_context = substitutions
+            .last()
+            .is_some_and(|substitution| substitution.arithmetic);
+        if !escaped
+            && quote == ShellQuote::Unquoted
+            && !arithmetic_context
+            && remaining.starts_with("<<")
+        {
             return Err("Preview command heredocs are not supported".to_string());
         } else if !escaped && let Some(rest) = remaining.strip_prefix("{}") {
             append_placeholder(&mut command, quote, "FSEL_PREVIEW_ITEM")?;
@@ -337,10 +343,25 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
             substitutions.push(CommandSubstitution {
                 outer_quote: quote,
                 nested_parentheses: 0,
+                case_depth: 0,
+                arithmetic: remaining.starts_with("$(("),
             });
             quote = ShellQuote::Unquoted;
             remaining = rest;
         } else {
+            if !escaped && quote == ShellQuote::Unquoted && !substitutions.is_empty() {
+                if starts_shell_keyword(template, remaining, "case") {
+                    substitutions
+                        .last_mut()
+                        .expect("substitution stack is non-empty")
+                        .case_depth += 1;
+                } else if starts_shell_keyword(template, remaining, "esac") {
+                    let substitution = substitutions
+                        .last_mut()
+                        .expect("substitution stack is non-empty");
+                    substitution.case_depth = substitution.case_depth.saturating_sub(1);
+                }
+            }
             let Some(character) = remaining.chars().next() else {
                 break;
             };
@@ -367,7 +388,10 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                     let substitution = substitutions
                         .last_mut()
                         .expect("substitution stack is non-empty");
-                    if substitution.nested_parentheses == 0 {
+                    if substitution.case_depth > 0 {
+                        // A case pattern terminator belongs to the case grammar,
+                        // not to the surrounding command substitution.
+                    } else if substitution.nested_parentheses == 0 {
                         quote = substitutions
                             .pop()
                             .expect("substitution stack is non-empty")
@@ -394,6 +418,22 @@ enum ShellQuote {
 struct CommandSubstitution {
     outer_quote: ShellQuote,
     nested_parentheses: usize,
+    case_depth: usize,
+    arithmetic: bool,
+}
+
+fn starts_shell_keyword(template: &str, remaining: &str, keyword: &str) -> bool {
+    let Some(after_keyword) = remaining.strip_prefix(keyword) else {
+        return false;
+    };
+    let offset = template.len().saturating_sub(remaining.len());
+    let previous = template[..offset].chars().next_back();
+    let next = after_keyword.chars().next();
+    previous.is_none_or(is_shell_word_boundary) && next.is_none_or(is_shell_word_boundary)
+}
+
+fn is_shell_word_boundary(character: char) -> bool {
+    !character.is_alphanumeric() && character != '_'
 }
 
 fn append_placeholder(
@@ -478,7 +518,6 @@ async fn run_preview_command(
         status: status.to_string(),
         success: status.success(),
         truncated: stdout_truncated || stderr_truncated,
-        stdout_truncated,
     })
 }
 
@@ -552,15 +591,15 @@ fn append_truncation_notice(text: &mut String, truncated: bool) {
     }
 }
 
-fn should_show_truncated_stdout(output: &CommandOutput) -> bool {
-    output.stdout_truncated && !output.stdout.is_empty()
+fn should_report_command_failure(output: &CommandOutput) -> bool {
+    !output.success && output.stdout.is_empty()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         CommandOutput, append_truncation_notice, expand_preview_command, read_limited_to,
-        run_preview_command, should_show_truncated_stdout,
+        run_preview_command, should_report_command_failure,
     };
     use tokio::io::AsyncWriteExt;
 
@@ -610,6 +649,22 @@ mod tests {
             .expect("quoted shift operators are ordinary command data");
 
         assert!(command.contains("print(1 << 8)"));
+    }
+
+    #[test]
+    fn arithmetic_shift_operators_are_not_treated_as_heredocs() {
+        let command = expand_preview_command("printf '%s' $((1 << 8)) {}")
+            .expect("arithmetic shifts are not heredocs");
+
+        assert!(command.contains("$((1 << 8))"));
+    }
+
+    #[test]
+    fn case_patterns_do_not_close_command_substitutions() {
+        let command = expand_preview_command("echo \"$(case x in x) printf '%s' \"{}\";; esac)\"")
+            .expect("case pattern terminators belong to the case clause");
+
+        assert!(command.contains("$FSEL_PREVIEW_ITEM"));
     }
 
     #[tokio::test]
@@ -687,16 +742,15 @@ mod tests {
     }
 
     #[test]
-    fn truncated_stdout_survives_a_producer_sigpipe_failure() {
+    fn nonzero_commands_keep_nonempty_stdout() {
         let output = CommandOutput {
-            stdout: b"captured prefix".to_vec(),
+            stdout: b"useful diff".to_vec(),
             stderr: Vec::new(),
-            status: "signal: 13 (SIGPIPE)".to_string(),
+            status: "exit status: 1".to_string(),
             success: false,
-            truncated: true,
-            stdout_truncated: true,
+            truncated: false,
         };
 
-        assert!(should_show_truncated_stdout(&output));
+        assert!(!should_report_command_failure(&output));
     }
 }
