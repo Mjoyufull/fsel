@@ -18,6 +18,8 @@ const MAX_SVG_EMBEDDED_RASTER_DIMENSION: u32 = 4096;
 const MAX_SVG_EMBEDDED_RASTER_PIXELS: u64 = 2048 * 2048;
 const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 const MAX_IMAGE_FILE_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_ICON_RASTER_DIMENSION: u32 = 4096;
+const MAX_ICON_DECODED_BYTES: u64 = 64 * 1024 * 1024;
 static SVG_FONT_DATABASE: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
 
 /// Combined display state to track what's currently on screen
@@ -106,7 +108,7 @@ impl ImageManager {
         if bytes.len() as u64 > MAX_IMAGE_FILE_BYTES {
             return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
         }
-        let image = decode_image(&bytes)?;
+        let image = decode_icon_image(&bytes)?;
         Ok(picker.new_resize_protocol(image))
     }
 
@@ -255,6 +257,20 @@ fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage> {
             .map_err(|svg_error| eyre!("Image decode failed: {raster_error}; {svg_error}")),
         Err(error) => Err(error.into()),
     }
+}
+
+fn decode_icon_image(bytes: &[u8]) -> Result<image::DynamicImage> {
+    if looks_like_svg(bytes) {
+        return decode_svg(bytes);
+    }
+
+    let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_ICON_RASTER_DIMENSION);
+    limits.max_image_height = Some(MAX_ICON_RASTER_DIMENSION);
+    limits.max_alloc = Some(MAX_ICON_DECODED_BYTES);
+    reader.limits(limits);
+    Ok(reader.decode()?)
 }
 
 fn looks_like_svg(bytes: &[u8]) -> bool {
@@ -620,7 +636,7 @@ impl GraphicsAdapter {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageManager, MAX_IMAGE_FILE_BYTES, bounded_svg_document, decode_image,
+        ImageManager, MAX_IMAGE_FILE_BYTES, bounded_svg_document, decode_icon_image, decode_image,
         has_svg_document_root, looks_like_svg, svg_needs_fonts, svg_options, unpremultiply_rgba,
     };
     use flate2::Compression;
@@ -784,6 +800,17 @@ mod tests {
 
         assert!(error.to_string().contains("exceeds"));
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn icon_decode_rejects_oversized_raster_dimensions() {
+        let image = image::DynamicImage::new_rgba8(4097, 1);
+        let mut encoded = Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .expect("test PNG should encode");
+
+        assert!(decode_icon_image(encoded.get_ref()).is_err());
     }
 
     #[test]

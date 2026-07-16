@@ -9,7 +9,7 @@ mod theme;
 use index::{ThemeDirectory, read_theme_metadata};
 use theme::detect_icon_theme;
 
-const ICON_EXTENSIONS: [&str; 2] = ["svg", "png"];
+const ICON_EXTENSIONS: [&str; 2] = ["png", "svg"];
 const MAX_THEME_DEPTH: usize = 16;
 
 /// Resolves desktop-entry icon names through the active XDG icon theme.
@@ -238,8 +238,8 @@ fn best_candidate(mut candidates: Vec<IconCandidate>) -> Option<PathBuf> {
 
 fn extension_rank(path: &Path) -> u8 {
     match path.extension().and_then(|value| value.to_str()) {
-        Some("svg") => 0,
-        Some("png") => 1,
+        Some("png") => 0,
+        Some("svg") => 1,
         _ => 2,
     }
 }
@@ -353,6 +353,31 @@ mod tests {
         let mut resolver = IconResolver {
             theme: "Selected".to_string(),
             size: 128,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn png_outranks_svg_at_the_same_theme_size() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("64x64/apps")).expect("fixed directory should be created");
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n",
+        )
+        .expect("theme metadata should be written");
+        fs::write(theme.join("64x64/apps/editor.svg"), b"svg").expect("SVG icon should be written");
+        let expected = theme.join("64x64/apps/editor.png");
+        fs::write(&expected, b"png").expect("PNG icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),

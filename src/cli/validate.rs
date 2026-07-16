@@ -1,6 +1,6 @@
 use super::error::CliError;
 use super::launch::active_launch_method_count;
-use super::types::Opts;
+use super::types::{DesktopIconMode, Opts};
 
 pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<(), CliError> {
     let hidden_commands = usize::from(default.list_hidden)
@@ -24,12 +24,16 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
         ));
     }
 
-    if !(10..=90).contains(&default.desktop_icon_preview_width_percent) {
+    if default.desktop_icon_mode.shows_preview()
+        && !(10..=90).contains(&default.desktop_icon_preview_width_percent)
+    {
         return Err(CliError::message(
             "Error: Desktop icon preview width must be between 10 and 90\n",
         ));
     }
-    if default.desktop_icon_size == 0 || default.desktop_icon_size > 4096 {
+    if default.desktop_icon_mode != DesktopIconMode::None
+        && (default.desktop_icon_size == 0 || default.desktop_icon_size > 4096)
+    {
         return Err(CliError::message(
             "Error: Desktop icon size must be between 1 and 4096\n",
         ));
@@ -130,9 +134,8 @@ Available methods: --launch-prefix, --systemd-run, --uwsm\n",
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    use crate::cli::types::Opts;
+    use super::validate;
+    use crate::cli::{DesktopIconMode, Opts};
 
     #[test]
     fn reject_both_index_modes() {
@@ -149,5 +152,17 @@ mod tests {
                 .to_string()
                 .contains("Cannot use --index and --index-original")
         );
+    }
+
+    #[test]
+    fn disabled_icon_layout_ignores_unused_dimensions() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::None,
+            desktop_icon_preview_width_percent: 0,
+            desktop_icon_size: 0,
+            ..Opts::default()
+        };
+
+        assert!(validate(&mut options, 0).is_ok());
     }
 }
