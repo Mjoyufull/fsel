@@ -345,7 +345,6 @@ fn svg_options() -> resvg::usvg::Options<'static> {
                 let expected_format = match mime {
                     "image/jpg" | "image/jpeg" => image::ImageFormat::Jpeg,
                     "image/png" => image::ImageFormat::Png,
-                    "image/gif" => image::ImageFormat::Gif,
                     "image/webp" => image::ImageFormat::WebP,
                     _ => return None,
                 };
@@ -371,7 +370,6 @@ fn svg_options() -> resvg::usvg::Options<'static> {
                 match expected_format {
                     image::ImageFormat::Jpeg => Some(ImageKind::JPEG(data)),
                     image::ImageFormat::Png => Some(ImageKind::PNG(data)),
-                    image::ImageFormat::Gif => Some(ImageKind::GIF(data)),
                     image::ImageFormat::WebP => Some(ImageKind::WEBP(data)),
                     _ => None,
                 }
@@ -533,6 +531,14 @@ mod tests {
         let options = svg_options();
 
         assert!((options.image_href_resolver.resolve_string)("/dev/zero", &options).is_none());
+    }
+
+    #[test]
+    fn svg_options_reject_embedded_gifs() {
+        let options = svg_options();
+        let gif = Arc::new(b"GIF89a".to_vec());
+
+        assert!((options.image_href_resolver.resolve_data)("image/gif", gif, &options).is_none());
     }
 
     #[test]
