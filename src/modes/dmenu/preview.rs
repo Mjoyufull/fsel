@@ -176,12 +176,7 @@ impl PreviewRuntime {
         self.content = PreviewContent::Loading;
 
         let generation = self.generation;
-        let command = match expand_preview_command(
-            command_template,
-            &signature.item,
-            &signature.query,
-            signature.input_ordinal,
-        ) {
+        let command = match expand_preview_command(command_template) {
             Ok(command) => command,
             Err(error) => {
                 self.content = PreviewContent::Text(error);
@@ -189,9 +184,12 @@ impl PreviewRuntime {
                 return;
             }
         };
+        let item = signature.item.clone();
+        let query = signature.query.clone();
+        let input_ordinal = signature.input_ordinal;
         let result_tx = self.result_tx.clone();
         self.active_request = Some(tokio::spawn(async move {
-            let output = run_preview_command(&command).await;
+            let output = run_preview_command(&command, &item, &query, input_ordinal).await;
             let _ = result_tx.send(PreviewResult::Command { generation, output });
         }));
         self.current_signature = Some(signature);
@@ -312,32 +310,28 @@ impl Drop for PreviewRuntime {
     }
 }
 
-fn expand_preview_command(
-    template: &str,
-    item: &str,
-    query: &str,
-    selected: usize,
-) -> Result<String, String> {
-    let item = shell_quote(item);
-    let query = shell_quote(query);
-    let selected = selected.to_string();
-    let mut command = String::with_capacity(template.len() + item.len() + query.len());
+fn expand_preview_command(template: &str) -> Result<String, String> {
+    if template.contains("<<") {
+        return Err("Preview command heredocs are not supported".to_string());
+    }
+
+    let mut command = String::with_capacity(template.len() + 16);
     let mut remaining = template;
     let mut quote = ShellQuote::Unquoted;
     let mut escaped = false;
 
     while !remaining.is_empty() {
         if !escaped && let Some(rest) = remaining.strip_prefix("{}") {
-            require_unquoted_placeholder(quote)?;
-            command.push_str(&item);
+            require_expandable_placeholder(quote)?;
+            command.push_str("\"$FSEL_PREVIEW_ITEM\"");
             remaining = rest;
         } else if !escaped && let Some(rest) = remaining.strip_prefix("{q}") {
-            require_unquoted_placeholder(quote)?;
-            command.push_str(&query);
+            require_expandable_placeholder(quote)?;
+            command.push_str("\"$FSEL_PREVIEW_QUERY\"");
             remaining = rest;
         } else if !escaped && let Some(rest) = remaining.strip_prefix("{n}") {
-            require_unquoted_placeholder(quote)?;
-            command.push_str(&selected);
+            require_expandable_placeholder(quote)?;
+            command.push_str("\"$FSEL_PREVIEW_ORDINAL\"");
             remaining = rest;
         } else {
             let Some(character) = remaining.chars().next() else {
@@ -371,29 +365,27 @@ enum ShellQuote {
     Double,
 }
 
-fn require_unquoted_placeholder(quote: ShellQuote) -> Result<(), String> {
-    if quote == ShellQuote::Unquoted {
+fn require_expandable_placeholder(quote: ShellQuote) -> Result<(), String> {
+    if quote != ShellQuote::Single {
         Ok(())
     } else {
-        Err(
-            "Preview placeholders are shell-quoted automatically and must not appear inside quotes"
-                .to_string(),
-        )
+        Err("Preview placeholders must not appear inside single quotes".to_string())
     }
 }
 
-fn shell_quote(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_string();
-    }
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-async fn run_preview_command(command: &str) -> Result<CommandOutput, String> {
+async fn run_preview_command(
+    command: &str,
+    item: &str,
+    query: &str,
+    input_ordinal: usize,
+) -> Result<CommandOutput, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
     let mut process = tokio::process::Command::new(shell);
     process
         .args(["-c", command])
+        .env("FSEL_PREVIEW_ITEM", item)
+        .env("FSEL_PREVIEW_QUERY", query)
+        .env("FSEL_PREVIEW_ORDINAL", input_ordinal.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -500,37 +492,56 @@ fn should_show_truncated_stdout(output: &CommandOutput) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandOutput, append_truncation_notice, expand_preview_command, shell_quote,
+        CommandOutput, append_truncation_notice, expand_preview_command, run_preview_command,
         should_show_truncated_stdout,
     };
 
     #[test]
-    fn command_expansion_quotes_selected_item_and_query() {
-        let command =
-            expand_preview_command("printf '%s %s %s' {} {q} {n}", "it's here", "two words", 4)
-                .expect("unquoted placeholders should expand");
-
-        assert_eq!(command, "printf '%s %s %s' 'it'\"'\"'s here' 'two words' 4");
-    }
-
-    #[test]
-    fn shell_quote_preserves_empty_arguments() {
-        assert_eq!(shell_quote(""), "''");
-    }
-
-    #[test]
-    fn command_expansion_does_not_reexpand_placeholder_text_inside_values() {
-        let command = expand_preview_command("printf '%s %s' {} {q}", "{q}", "{}", 0)
+    fn command_expansion_uses_environment_variables() {
+        let command = expand_preview_command("printf '%s %s %s' {} {q} {n}")
             .expect("unquoted placeholders should expand");
 
-        assert_eq!(command, "printf '%s %s' '{q}' '{}'");
+        assert_eq!(
+            command,
+            "printf '%s %s %s' \"$FSEL_PREVIEW_ITEM\" \"$FSEL_PREVIEW_QUERY\" \"$FSEL_PREVIEW_ORDINAL\""
+        );
     }
 
     #[test]
-    fn quoted_placeholders_are_rejected() {
-        let result = expand_preview_command("printf %s \"{}\"", "\"; touch /tmp/pwn; #", "", 0);
+    fn nested_double_quotes_never_interpolate_row_source() {
+        let command = expand_preview_command("echo \"$(printf \"{}\")\"")
+            .expect("positional parameters make double-quoted expansion safe");
+
+        assert_eq!(command, "echo \"$(printf \"\"$FSEL_PREVIEW_ITEM\"\")\"");
+    }
+
+    #[test]
+    fn single_quoted_placeholders_are_rejected() {
+        let result = expand_preview_command("printf %s '{}'");
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn heredoc_preview_commands_are_rejected() {
+        let result = expand_preview_command("sh <<EOF\necho {}\nEOF");
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn selected_item_is_not_reparsed_as_shell_source() {
+        let command =
+            expand_preview_command("printf '%s' {}").expect("unquoted placeholder should expand");
+        let payload = "$(printf injected >&2)";
+
+        let output = run_preview_command(&command, payload, "", 0)
+            .await
+            .expect("preview command should run");
+
+        assert!(output.success);
+        assert_eq!(output.stdout, payload.as_bytes());
+        assert!(output.stderr.is_empty());
     }
 
     #[test]

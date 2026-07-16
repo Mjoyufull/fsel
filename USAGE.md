@@ -144,14 +144,14 @@ find . -print0 | fsel --dmenu0
 ### Preview Commands
 
 `--preview` accepts a shell command and implies `--dmenu`. Its core fzf-style placeholders are
-shell-quoted before execution:
+passed through dedicated shell environment variables rather than interpolated into command source:
 
 - `{}`: selected input row
 - `{q}`: current query
 - `{n}`: zero-based original input ordinal
 
-Place placeholders directly in the command rather than inside shell quotes. fsel shell-quotes
-placeholder values automatically before execution.
+Place placeholders directly in the command rather than inside single quotes. Heredoc preview
+templates are rejected because their expanded body can become source for another interpreter.
 
 The preview panel renders text output after stripping terminal escape sequences. If stdout contains
 PNG, JPEG, GIF, BMP, or WebP bytes, fsel renders the image using Kitty, Sixel, or its half-block

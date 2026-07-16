@@ -240,7 +240,7 @@ ls -la | fsel --dmenu
 find . -name "*.rs" | fsel --dmenu
 git log --oneline | fsel --dmenu
 
-# fzf-style preview command ({} is the shell-quoted selected row)
+# fzf-style preview command ({} is the selected row, passed via the environment)
 find . -type f | fsel --preview 'file --brief {}'
 
 # Preview image bytes with Kitty, Sixel, or the half-block fallback
