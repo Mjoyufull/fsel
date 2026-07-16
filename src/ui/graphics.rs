@@ -43,8 +43,11 @@ pub struct ImageManager {
     picker: Picker,
     current_rowid: Option<String>,
     cache: HashMap<String, StatefulProtocol>,
+    cache_weights: HashMap<String, u64>,
     cache_order: VecDeque<String>,
     cache_capacity: usize,
+    cache_weight: u64,
+    cache_weight_capacity: u64,
 }
 
 impl ImageManager {
@@ -54,9 +57,19 @@ impl ImageManager {
             picker,
             current_rowid: None,
             cache: HashMap::new(),
+            cache_weights: HashMap::new(),
             cache_order: VecDeque::new(),
             cache_capacity: 50,
+            cache_weight: 0,
+            cache_weight_capacity: u64::MAX,
         }
+    }
+
+    /// Limit the retained decoded image data while preserving the entry-count bound.
+    pub(crate) fn with_cache_weight_limit(mut self, capacity: u64) -> Self {
+        self.cache_weight_capacity = capacity;
+        self.enforce_cache_capacity();
+        self
     }
 
     /// Check if an image is already in cache
@@ -96,7 +109,16 @@ impl ImageManager {
     }
 
     /// Read and prepare an image file from a blocking worker.
+    #[cfg(test)]
     pub(crate) fn prepare_image_path(picker: Picker, path: &Path) -> Result<StatefulProtocol> {
+        Self::prepare_image_path_with_weight(picker, path).map(|(protocol, _)| protocol)
+    }
+
+    /// Read an icon and return its protocol plus retained decoded byte size.
+    pub(crate) fn prepare_image_path_with_weight(
+        picker: Picker,
+        path: &Path,
+    ) -> Result<(StatefulProtocol, u64)> {
         let file = std::fs::File::open(path)?;
         let file_size = file.metadata()?.len();
         if file_size > MAX_IMAGE_FILE_BYTES {
@@ -109,7 +131,8 @@ impl ImageManager {
             return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
         }
         let image = decode_icon_image(&bytes)?;
-        Ok(picker.new_resize_protocol(image))
+        let decoded_bytes = image.as_bytes().len() as u64;
+        Ok((picker.new_resize_protocol(image), decoded_bytes))
     }
 
     /// Return whether bytes have a supported raster signature or contain SVG markup.
@@ -119,6 +142,20 @@ impl ImageManager {
 
     /// Insert a prepared terminal image protocol into the bounded cache.
     pub fn insert_protocol(&mut self, key: String, protocol: StatefulProtocol) {
+        self.insert_protocol_with_weight(key, protocol, 0);
+    }
+
+    /// Insert a protocol and account for the decoded image bytes it retains.
+    pub(crate) fn insert_protocol_with_weight(
+        &mut self,
+        key: String,
+        protocol: StatefulProtocol,
+        weight: u64,
+    ) {
+        if let Some(previous) = self.cache_weights.insert(key.clone(), weight) {
+            self.cache_weight = self.cache_weight.saturating_sub(previous);
+        }
+        self.cache_weight = self.cache_weight.saturating_add(weight);
         self.cache.insert(key.clone(), protocol);
         self.update_lru(&key);
         self.enforce_cache_capacity();
@@ -226,8 +263,7 @@ impl ImageManager {
                 .is_some_and(|result| result.is_err())
         };
         if encoding_failed {
-            self.cache.remove(key);
-            self.cache_order.retain(|cached| cached != key);
+            self.remove_cached(key);
             return Ok(false);
         }
 
@@ -237,16 +273,29 @@ impl ImageManager {
     pub fn clear(&mut self) {
         self.current_rowid = None;
         self.cache.clear();
+        self.cache_weights.clear();
         self.cache_order.clear();
+        self.cache_weight = 0;
         self.update_display_state(DisplayState::Empty);
     }
 
     fn enforce_cache_capacity(&mut self) {
-        if self.cache_order.len() > self.cache_capacity
-            && let Some(old_key) = self.cache_order.pop_front()
+        while self.cache_order.len() > self.cache_capacity
+            || self.cache_weight > self.cache_weight_capacity
         {
-            self.cache.remove(&old_key);
+            let Some(old_key) = self.cache_order.front().cloned() else {
+                break;
+            };
+            self.remove_cached(&old_key);
         }
+    }
+
+    fn remove_cached(&mut self, key: &str) {
+        self.cache.remove(key);
+        if let Some(weight) = self.cache_weights.remove(key) {
+            self.cache_weight = self.cache_weight.saturating_sub(weight);
+        }
+        self.cache_order.retain(|cached| cached != key);
     }
 }
 
@@ -641,8 +690,31 @@ mod tests {
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
+    use ratatui_image::picker::Picker;
     use std::io::{Cursor, Write};
     use std::sync::Arc;
+
+    #[test]
+    fn weighted_cache_evicts_oldest_decoded_image() {
+        let picker = Picker::halfblocks();
+        let mut manager = ImageManager::new(picker.clone()).with_cache_weight_limit(4);
+        manager.insert_protocol_with_weight(
+            "first".to_string(),
+            picker
+                .clone()
+                .new_resize_protocol(image::DynamicImage::new_rgba8(1, 1)),
+            4,
+        );
+        manager.insert_protocol_with_weight(
+            "second".to_string(),
+            picker.new_resize_protocol(image::DynamicImage::new_rgba8(1, 1)),
+            4,
+        );
+
+        assert!(!manager.is_cached("first"));
+        assert!(manager.is_cached("second"));
+        assert_eq!(manager.cache_weight, 4);
+    }
 
     #[test]
     fn decodes_svg_bytes_into_rgba_image() {

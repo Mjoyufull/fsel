@@ -4,6 +4,7 @@ use crate::desktop::IconResolver;
 use crate::ui::{AppIconPreview, GraphicsAdapter, ImageManager};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -14,6 +15,7 @@ pub(super) struct IconRuntime {
     image_manager: ImageManager,
     selected_icon: Option<String>,
     current_key: Option<String>,
+    icon_keys: HashMap<String, String>,
     needs_terminal_clear: bool,
     generation: u64,
     request_tx: mpsc::UnboundedSender<Option<IconRequest>>,
@@ -29,20 +31,28 @@ struct IconRequest {
 
 pub(super) struct IconResult {
     generation: u64,
+    icon: String,
     prepared: Result<Option<PreparedIcon>, String>,
 }
 
 struct PreparedIcon {
     key: String,
     protocol: Box<StatefulProtocol>,
+    decoded_bytes: u64,
 }
 
 impl IconRuntime {
     pub(super) fn new(cli: &Opts) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<Option<IconRequest>>();
-        let adapter = GraphicsAdapter::detect(None);
-        let picker = adapter.picker();
+        let enabled = cli.desktop_icon_mode.shows_preview();
+        let fallback_adapter = GraphicsAdapter::detect(None);
+        let picker = if enabled {
+            Picker::from_query_stdio().unwrap_or_else(|_| fallback_adapter.picker())
+        } else {
+            fallback_adapter.picker()
+        };
+        let adapter = GraphicsAdapter::detect(Some(&picker));
         let worker_picker = picker.clone();
         let mut resolver = IconResolver::from_environment(
             cli.desktop_icon_theme.as_deref(),
@@ -59,16 +69,18 @@ impl IconRuntime {
                 let prepared = prepare_icon(&mut resolver, worker_picker.clone(), &request.icon);
                 let _ = result_tx.send(IconResult {
                     generation: request.generation,
+                    icon: request.icon,
                     prepared,
                 });
             }
         });
         Self {
-            enabled: cli.desktop_icon_mode.shows_preview(),
+            enabled,
             adapter,
-            image_manager: ImageManager::new(picker),
+            image_manager: ImageManager::new(picker).with_cache_weight_limit(128 * 1024 * 1024),
             selected_icon: None,
             current_key: None,
+            icon_keys: HashMap::new(),
             needs_terminal_clear: false,
             generation: 0,
             request_tx,
@@ -100,6 +112,12 @@ impl IconRuntime {
             let _ = self.request_tx.send(None);
             return;
         };
+        if let Some(key) = self.icon_keys.get(&icon)
+            && self.image_manager.is_cached(key)
+        {
+            self.current_key = Some(key.clone());
+            return;
+        }
         let _ = self.request_tx.send(Some(IconRequest {
             generation: self.generation,
             icon,
@@ -117,8 +135,12 @@ impl IconRuntime {
         let Ok(Some(prepared)) = result.prepared else {
             return;
         };
-        self.image_manager
-            .insert_protocol(prepared.key.clone(), *prepared.protocol);
+        self.image_manager.insert_protocol_with_weight(
+            prepared.key.clone(),
+            *prepared.protocol,
+            prepared.decoded_bytes,
+        );
+        self.icon_keys.insert(result.icon, prepared.key.clone());
         self.current_key = Some(prepared.key);
     }
 
@@ -160,10 +182,11 @@ fn prepare_icon(
 
 fn prepare_resolved_icon(picker: Picker, path: PathBuf) -> Result<PreparedIcon, String> {
     let key = path.to_string_lossy().into_owned();
-    let protocol = ImageManager::prepare_image_path(picker, &path)
+    let (protocol, decoded_bytes) = ImageManager::prepare_image_path_with_weight(picker, &path)
         .map_err(|error| format!("Failed to load desktop icon {}: {error}", path.display()))?;
     Ok(PreparedIcon {
         key,
         protocol: Box::new(protocol),
+        decoded_bytes,
     })
 }

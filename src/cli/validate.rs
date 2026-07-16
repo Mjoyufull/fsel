@@ -24,14 +24,23 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
         ));
     }
 
-    if default.desktop_icon_mode.shows_preview()
+    let uses_desktop_icons = !default.dmenu_mode
+        && !default.cclip_mode
+        && default.program.is_none()
+        && hidden_commands == 0
+        && !default.clear_history
+        && !default.clear_cache
+        && !default.refresh_cache;
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_preview()
         && !(10..=90).contains(&default.desktop_icon_preview_width_percent)
     {
         return Err(CliError::message(
             "Error: Desktop icon preview width must be between 10 and 90\n",
         ));
     }
-    if default.desktop_icon_mode != DesktopIconMode::None
+    if uses_desktop_icons
+        && default.desktop_icon_mode != DesktopIconMode::None
         && (default.desktop_icon_size == 0 || default.desktop_icon_size > 4096)
     {
         return Err(CliError::message(
@@ -164,5 +173,31 @@ mod tests {
         };
 
         assert!(validate(&mut options, 0).is_ok());
+    }
+
+    #[test]
+    fn non_launcher_modes_ignore_launcher_icon_dimensions() {
+        for mut options in [
+            Opts {
+                dmenu_mode: true,
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                ..Opts::default()
+            },
+            Opts {
+                cclip_mode: true,
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                ..Opts::default()
+            },
+            Opts {
+                program: Some("true".to_string()),
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                ..Opts::default()
+            },
+        ] {
+            assert!(validate(&mut options, 0).is_ok());
+        }
     }
 }

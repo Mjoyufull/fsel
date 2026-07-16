@@ -9,7 +9,7 @@ mod theme;
 use index::{ThemeDirectory, read_theme_metadata};
 use theme::detect_icon_theme;
 
-const ICON_EXTENSIONS: [&str; 2] = ["png", "svg"];
+const ICON_EXTENSIONS: [&str; 3] = ["png", "svg", "svgz"];
 const MAX_THEME_DEPTH: usize = 16;
 
 /// Resolves desktop-entry icon names through the active XDG icon theme.
@@ -117,18 +117,14 @@ impl IconResolver {
         }
         themes.push(theme.to_string());
 
-        let mut inherits = Vec::new();
-        for root in &self.icon_roots {
-            if let Some(metadata) = read_theme_metadata(&root.join(theme)) {
-                for inherited in metadata.inherits {
-                    if !inherits.contains(&inherited) {
-                        inherits.push(inherited);
-                    }
-                }
+        if let Some(metadata) = self
+            .icon_roots
+            .iter()
+            .find_map(|root| read_theme_metadata(&root.join(theme)))
+        {
+            for inherited in metadata.inherits {
+                self.append_theme_subtree(&inherited, seen, themes);
             }
-        }
-        for inherited in inherits {
-            self.append_theme_subtree(&inherited, seen, themes);
         }
     }
 
@@ -239,7 +235,7 @@ fn best_candidate(mut candidates: Vec<IconCandidate>) -> Option<PathBuf> {
 fn extension_rank(path: &Path) -> u8 {
     match path.extension().and_then(|value| value.to_str()) {
         Some("png") => 0,
-        Some("svg") => 1,
+        Some("svg" | "svgz") => 1,
         _ => 2,
     }
 }
@@ -379,6 +375,72 @@ mod tests {
             theme: "Selected".to_string(),
             size: 64,
             icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolves_compressed_svg_theme_icons() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("scalable/apps"))
+            .expect("scalable directory should be created");
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=scalable/apps\n[scalable/apps]\nSize=64\nType=Scalable\nMinSize=16\nMaxSize=256\n",
+        )
+        .expect("theme metadata should be written");
+        let expected = theme.join("scalable/apps/editor.svgz");
+        fs::write(&expected, b"compressed svg").expect("SVGZ icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn first_theme_metadata_controls_inheritance() {
+        let root = temp_dir();
+        let user_root = root.join("user");
+        let system_root = root.join("system");
+        fs::create_dir_all(user_root.join("Selected")).expect("user theme should be created");
+        fs::create_dir_all(system_root.join("Selected")).expect("system theme should be created");
+        fs::write(
+            user_root.join("Selected/index.theme"),
+            "[Icon Theme]\nInherits=UserParent\n",
+        )
+        .expect("user theme metadata should be written");
+        fs::write(
+            system_root.join("Selected/index.theme"),
+            "[Icon Theme]\nInherits=SystemParent\n",
+        )
+        .expect("system theme metadata should be written");
+        for parent in ["UserParent", "SystemParent"] {
+            let theme = root.join(parent).join("64x64/apps");
+            fs::create_dir_all(&theme).expect("parent theme should be created");
+            fs::write(
+                root.join(parent).join("index.theme"),
+                "[Icon Theme]\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n",
+            )
+            .expect("parent metadata should be written");
+            fs::write(theme.join("editor.png"), parent.as_bytes())
+                .expect("parent icon should be written");
+        }
+        let expected = root.join("UserParent/64x64/apps/editor.png");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![user_root, system_root, root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
         };
