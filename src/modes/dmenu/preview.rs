@@ -340,28 +340,45 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
             && let Some(rest) = remaining.strip_prefix("$(")
         {
             command.push_str("$(");
+            if let Some(parent) = substitutions.last_mut() {
+                parent.command_position = false;
+            }
             substitutions.push(CommandSubstitution {
                 outer_quote: quote,
                 nested_parentheses: 0,
                 case_depth: 0,
                 arithmetic: remaining.starts_with("$(("),
+                command_position: true,
             });
             quote = ShellQuote::Unquoted;
             remaining = rest;
-        } else {
-            if !escaped && quote == ShellQuote::Unquoted && !substitutions.is_empty() {
-                if starts_shell_keyword(template, remaining, "case") {
-                    substitutions
-                        .last_mut()
-                        .expect("substitution stack is non-empty")
-                        .case_depth += 1;
-                } else if starts_shell_keyword(template, remaining, "esac") {
-                    let substitution = substitutions
-                        .last_mut()
-                        .expect("substitution stack is non-empty");
-                    substitution.case_depth = substitution.case_depth.saturating_sub(1);
+        } else if !escaped
+            && quote == ShellQuote::Unquoted
+            && substitutions.last().is_some_and(|substitution| {
+                substitution.command_position && !substitution.arithmetic
+            })
+            && let Some(keyword) = shell_control_keyword(template, remaining)
+        {
+            command.push_str(keyword);
+            remaining = &remaining[keyword.len()..];
+            let substitution = substitutions
+                .last_mut()
+                .expect("substitution stack is non-empty");
+            match keyword {
+                "case" => {
+                    substitution.case_depth += 1;
+                    substitution.command_position = false;
                 }
+                "esac" => {
+                    substitution.case_depth = substitution.case_depth.saturating_sub(1);
+                    substitution.command_position = false;
+                }
+                "then" | "do" | "else" | "elif" => {
+                    substitution.command_position = true;
+                }
+                _ => unreachable!("all recognized control keywords are handled"),
             }
+        } else {
             let Some(character) = remaining.chars().next() else {
                 break;
             };
@@ -391,6 +408,8 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                     if substitution.case_depth > 0 {
                         // A case pattern terminator belongs to the case grammar,
                         // not to the surrounding command substitution.
+                        substitution.command_position = true;
+                        continue;
                     } else if substitution.nested_parentheses == 0 {
                         quote = substitutions
                             .pop()
@@ -401,6 +420,15 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                     }
                 }
                 _ => {}
+            }
+            if quote == ShellQuote::Unquoted
+                && let Some(substitution) = substitutions.last_mut()
+            {
+                match character {
+                    ';' | '|' | '&' | '\n' => substitution.command_position = true,
+                    character if character.is_whitespace() => {}
+                    _ => substitution.command_position = false,
+                }
             }
         }
     }
@@ -420,6 +448,13 @@ struct CommandSubstitution {
     nested_parentheses: usize,
     case_depth: usize,
     arithmetic: bool,
+    command_position: bool,
+}
+
+fn shell_control_keyword(template: &str, remaining: &str) -> Option<&'static str> {
+    ["case", "esac", "then", "do", "else", "elif"]
+        .into_iter()
+        .find(|keyword| starts_shell_keyword(template, remaining, keyword))
 }
 
 fn starts_shell_keyword(template: &str, remaining: &str, keyword: &str) -> bool {
@@ -665,6 +700,20 @@ mod tests {
             .expect("case pattern terminators belong to the case clause");
 
         assert!(command.contains("$FSEL_PREVIEW_ITEM"));
+    }
+
+    #[tokio::test]
+    async fn case_as_an_argument_does_not_change_shell_context() {
+        let command = expand_preview_command("printf '<%s>' \"$(printf case){}\"")
+            .expect("an ordinary case argument is not case grammar");
+        let payload = "two words*.txt";
+
+        let output = run_preview_command(&command, payload, "", 0)
+            .await
+            .expect("preview command should run");
+
+        assert!(output.success);
+        assert_eq!(output.stdout, b"<casetwo words*.txt>");
     }
 
     #[tokio::test]
