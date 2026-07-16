@@ -185,7 +185,7 @@ fn toggle_selected_pin(state: &mut State, db: &std::sync::Arc<redb::Database>) {
         &state.pin_timestamps,
         current_unix_seconds(),
     );
-    state.filter();
+    state.refresh_visibility();
 }
 
 fn hide_selected_entry(

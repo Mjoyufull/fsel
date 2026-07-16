@@ -20,6 +20,7 @@ pub struct State {
     pub apps: Vec<App>,
     /// Filtered/shown applications.
     pub shown: Vec<App>,
+    eligible_apps: Vec<App>,
     /// Current search query.
     pub query: String,
     /// Currently selected index.
@@ -63,6 +64,7 @@ impl State {
         let mut state = Self {
             apps,
             shown: Vec::new(),
+            eligible_apps: Vec::new(),
             query: String::new(),
             selected: None,
             scroll_offset: 0,
@@ -80,25 +82,25 @@ impl State {
             hidden_summary: HiddenSummary::default(),
             status_message: None,
         };
-        state.filter();
+        state.refresh_visibility();
         state
     }
 
     pub(crate) fn set_hidden_entry_keys(&mut self, hidden_entry_keys: HashSet<EntryKey>) {
         self.hidden_entry_keys = hidden_entry_keys;
-        self.filter();
+        self.refresh_visibility();
     }
 
     pub(crate) fn set_visibility_options(&mut self, visibility_options: VisibilityOptions) {
         self.visibility_options = visibility_options;
-        self.filter();
+        self.refresh_visibility();
     }
 
     pub(crate) fn hide_entry(&mut self, entry_key: EntryKey) {
         let selected = self.selected.unwrap_or(0);
         let scroll_offset = self.scroll_offset;
         self.hidden_entry_keys.insert(entry_key);
-        self.filter();
+        self.refresh_visibility();
         if !self.shown.is_empty() {
             let nearest = selected.min(self.shown.len() - 1);
             self.selected = Some(nearest);
@@ -114,7 +116,7 @@ impl State {
         let selected_index = self.selected.unwrap_or(0);
         let scroll_offset = self.scroll_offset;
         self.hidden_entry_keys.remove(entry_key);
-        self.filter();
+        self.refresh_visibility();
         if !self.shown.is_empty() {
             let restored_selection = selected_key
                 .and_then(|key| {
@@ -130,6 +132,17 @@ impl State {
 
     pub(crate) fn hidden_summary(&self) -> &HiddenSummary {
         &self.hidden_summary
+    }
+
+    pub(crate) fn refresh_visibility(&mut self) {
+        let (eligible_apps, hidden_summary) = crate::core::hidden_entries::eligible_apps(
+            &self.apps,
+            &self.hidden_entry_keys,
+            &self.visibility_options,
+        );
+        self.eligible_apps = eligible_apps;
+        self.hidden_summary = hidden_summary;
+        self.filter();
     }
 
     pub(crate) fn set_status_message(&mut self, message: impl Into<String>) {

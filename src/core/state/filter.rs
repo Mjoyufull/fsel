@@ -5,20 +5,13 @@ impl State {
     pub fn filter(&mut self) {
         use std::time::Instant;
 
-        let (eligible_apps, hidden_summary) = crate::core::hidden_entries::eligible_apps(
-            &self.apps,
-            &self.hidden_entry_keys,
-            &self.visibility_options,
-        );
-        self.hidden_summary = hidden_summary;
-
         if self.query.is_empty() {
-            self.shown = eligible_apps;
+            self.shown.clone_from(&self.eligible_apps);
         } else {
             let filter_start = Instant::now();
             let now_secs = crate::core::ranking::current_unix_seconds();
             self.shown = crate::core::ranking::filter_apps(
-                &eligible_apps,
+                &self.eligible_apps,
                 crate::core::ranking::FilterOptions {
                     query: &self.query,
                     match_mode: self.match_mode,

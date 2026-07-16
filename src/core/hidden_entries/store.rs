@@ -107,7 +107,13 @@ impl HiddenEntryStore {
             let mut last_entry = None;
             for row in table.iter()? {
                 let (id_guard, value_guard) = row?;
-                last_entry = Some(decode_entry(id_guard.value(), value_guard.value())?);
+                let entry = decode_entry(id_guard.value(), value_guard.value())?;
+                if last_entry
+                    .as_ref()
+                    .is_none_or(|current: &HiddenEntry| entry.id() > current.id())
+                {
+                    last_entry = Some(entry);
+                }
             }
             if let Some(entry) = &last_entry {
                 table.remove(entry.id().value())?;

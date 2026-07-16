@@ -26,7 +26,8 @@ pub fn find_app_by_name_fast(
         return Ok(Some(history_cache.apply_to_app(app)));
     }
 
-    for dir in crate::desktop::application_dirs() {
+    let application_dirs = crate::desktop::application_dirs();
+    for dir in &application_dirs {
         for entry in WalkDir::new(dir)
             .min_depth(1)
             .max_depth(5)
@@ -39,7 +40,8 @@ pub fn find_app_by_name_fast(
         {
             let file_path = entry.path();
 
-            if let Some(app) = load_app_from_path(&desktop_cache, &file_path, cli)?
+            if let Some(app) =
+                load_app_from_path(&desktop_cache, &application_dirs, &file_path, cli)?
                 && app.name == app_name
                 && matches_current_desktop(&app, cli)
                 && !is_hidden(&app, hidden_entry_keys)
@@ -59,10 +61,15 @@ fn is_hidden(app: &desktop::App, hidden_entry_keys: &HashSet<EntryKey>) -> bool 
 
 fn load_app_from_path(
     desktop_cache: &cache::DesktopCache,
+    application_dirs: &[std::path::PathBuf],
     file_path: &Path,
     cli: &cli::Opts,
 ) -> Result<Option<desktop::App>> {
-    if let Ok(Some(cached_app)) = desktop_cache.get(file_path) {
+    if let Ok(Some(mut cached_app)) = desktop_cache.get(file_path) {
+        if cached_app.hidden {
+            return Ok(None);
+        }
+        cached_app.desktop_id = crate::desktop::desktop_file_id(application_dirs, file_path);
         return Ok(Some(cached_app));
     }
 
@@ -79,9 +86,7 @@ fn load_app_from_path(
         Err(_) => return Ok(None),
     };
 
-    if let Some(file_name) = file_path.file_name().and_then(|name| name.to_str()) {
-        app.desktop_id = Some(file_name.to_string());
-    }
+    app.desktop_id = crate::desktop::desktop_file_id(application_dirs, file_path);
     app.set_source_path(file_path);
 
     let _ = desktop_cache.set(file_path, app.clone());
@@ -122,7 +127,7 @@ fn matches_current_desktop(app: &desktop::App, cli: &cli::Opts) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::find_app_by_name_fast;
+    use super::{find_app_by_name_fast, load_app_from_path};
     use crate::cli::Opts;
     use crate::core::hidden_entries::EntryKey;
     use crate::desktop::App;
@@ -165,6 +170,77 @@ mod tests {
             .expect("lookup should succeed");
 
         assert!(found.is_none());
+        drop(db);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn fallback_lookup_uses_canonical_nested_desktop_id() {
+        let dir = std::env::temp_dir().join(format!("fsel-hidden-nested-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let application_root = dir.join("applications");
+        let vendor_dir = application_root.join("vendor");
+        fs::create_dir_all(&vendor_dir).expect("nested application directory should be created");
+        let desktop_path = vendor_dir.join("editor.desktop");
+        fs::write(
+            &desktop_path,
+            "[Desktop Entry]\nType=Application\nName=Nested Editor\nExec=/bin/true\n",
+        )
+        .expect("desktop entry should be written");
+        let db = Arc::new(
+            redb::Database::create(dir.join("history.redb")).expect("database should be created"),
+        );
+        let cache = crate::core::cache::DesktopCache::new(Arc::clone(&db))
+            .expect("cache should initialize");
+
+        let app = load_app_from_path(
+            &cache,
+            std::slice::from_ref(&application_root),
+            &desktop_path,
+            &Opts::default(),
+        )
+        .expect("lookup should succeed")
+        .expect("desktop entry should load");
+
+        assert_eq!(app.desktop_id.as_deref(), Some("vendor-editor.desktop"));
+        drop(cache);
+        drop(db);
+        fs::remove_dir_all(dir).expect("test directory should be removed");
+    }
+
+    #[test]
+    fn fallback_lookup_rejects_cached_hidden_tombstones() {
+        let dir =
+            std::env::temp_dir().join(format!("fsel-hidden-tombstone-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let application_root = dir.join("applications");
+        fs::create_dir_all(&application_root).expect("application directory should be created");
+        let desktop_path = application_root.join("hidden.desktop");
+        fs::write(
+            &desktop_path,
+            "[Desktop Entry]\nType=Application\nName=Hidden Override\nExec=/bin/true\n",
+        )
+        .expect("desktop entry should be written");
+        let db = Arc::new(
+            redb::Database::create(dir.join("history.redb")).expect("database should be created"),
+        );
+        let cache = crate::core::cache::DesktopCache::new(Arc::clone(&db))
+            .expect("cache should initialize");
+        let mut tombstone = App::parse(
+            fs::read_to_string(&desktop_path).expect("fixture should be readable"),
+            false,
+        )
+        .expect("fixture should parse");
+        tombstone.hidden = true;
+        cache
+            .set(&desktop_path, tombstone)
+            .expect("tombstone should be cached");
+
+        let app = load_app_from_path(&cache, &[application_root], &desktop_path, &Opts::default())
+            .expect("lookup should succeed");
+
+        assert!(app.is_none());
+        drop(cache);
         drop(db);
         fs::remove_dir_all(dir).expect("test directory should be removed");
     }

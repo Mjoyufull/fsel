@@ -85,17 +85,25 @@ fn attach_desktop_id(
     }
 }
 
-fn desktop_file_id(application_dirs: &[PathBuf], file_path: &Path) -> Option<String> {
+pub(crate) fn desktop_file_id(application_dirs: &[PathBuf], file_path: &Path) -> Option<String> {
     let relative_path = application_dirs
         .iter()
         .find_map(|root| file_path.strip_prefix(root).ok())?;
     Some(
         relative_path
             .components()
-            .map(|component| component.as_os_str().to_string_lossy())
+            .map(|component| desktop_id_component(component.as_os_str()))
             .collect::<Vec<_>>()
             .join("-"),
     )
+}
+
+fn desktop_id_component(component: &std::ffi::OsStr) -> String {
+    if let Some(component) = component.to_str() {
+        return component.replace('%', "%25");
+    }
+
+    format!("%00{}", crate::core::path_key::encode(Path::new(component)))
 }
 
 fn load_app_from_path(
@@ -387,6 +395,32 @@ mod tests {
             desktop_file_id(&[root], &nested).as_deref(),
             Some("vendor-editor.desktop")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_file_id_escapes_non_utf8_components_without_collisions() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let root = PathBuf::from("/usr/share/applications");
+        let first = root.join(OsString::from_vec(vec![
+            0xfe, b'.', b'd', b'e', b's', b'k', b't', b'o', b'p',
+        ]));
+        let second = root.join(OsString::from_vec(vec![
+            0xff, b'.', b'd', b'e', b's', b'k', b't', b'o', b'p',
+        ]));
+        let escaped_literal = root.join("%00fe2e6465736b746f70");
+
+        let first_id = desktop_file_id(std::slice::from_ref(&root), &first)
+            .expect("first ID should be available");
+        let second_id = desktop_file_id(std::slice::from_ref(&root), &second)
+            .expect("second ID should be available");
+        let literal_id =
+            desktop_file_id(&[root], &escaped_literal).expect("literal ID should be available");
+
+        assert_ne!(first_id, second_id);
+        assert_ne!(first_id, literal_id);
     }
 
     #[test]
