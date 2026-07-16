@@ -171,6 +171,13 @@ pub(super) fn draw_frame(
         };
         if preview.render_image(frame, image_area)? {
             frame.render_widget(content_block, content_area);
+        } else if preview.is_enabled() {
+            let fallback_paragraph = Paragraph::new(preview.text_lines().unwrap_or_default())
+                .block(content_block)
+                .style(Style::default().fg(options.main_text_color))
+                .wrap(Wrap { trim: false })
+                .alignment(Alignment::Left);
+            frame.render_widget(fallback_paragraph, content_area);
         } else {
             frame.render_widget(content_paragraph, content_area);
         }
