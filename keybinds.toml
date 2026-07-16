@@ -27,6 +27,12 @@ exit = ["esc", { key = "q", modifiers = "ctrl" }, { key = "c", modifiers = "ctrl
 # Toggle pin/favorite on selected app (pinned apps always appear first with 📌 icon)
 pin = [{ key = "space", modifiers = "ctrl" }]
 
+# Hide the exact selected launcher entry without deleting its source file
+hide = [{ key = "delete", modifiers = "alt" }]
+
+# Restore the most recently hidden launcher entry
+unhide_last = [{ key = "u", modifiers = "alt" }]
+
 # Delete character from search query
 backspace = ["backspace"]
 

@@ -1,7 +1,9 @@
 //! Regression checks for top-level CLI behavior that must remain stable.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_fsel")
@@ -12,6 +14,27 @@ fn fixture_path(name: &str) -> PathBuf {
         .join("tests")
         .join("fixtures")
         .join(name)
+}
+
+fn isolated_runtime_dir(label: &str) -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after Unix epoch")
+        .as_nanos();
+    let dir =
+        std::env::temp_dir().join(format!("fsel-cli-{label}-{}-{unique}", std::process::id()));
+    fs::create_dir_all(&dir).expect("isolated runtime directory should be created");
+    dir
+}
+
+fn isolated_command(runtime_dir: &Path) -> Command {
+    let mut command = Command::new(binary());
+    command
+        .env("HOME", runtime_dir)
+        .env("XDG_CACHE_HOME", runtime_dir.join("cache"))
+        .env("XDG_CONFIG_HOME", runtime_dir.join("config"))
+        .env("XDG_DATA_HOME", runtime_dir.join("data"));
+    command
 }
 
 #[test]
@@ -124,4 +147,76 @@ fn missing_explicit_config_path_fails() {
         stderr.contains("Config file not found"),
         "missing config path should be included, got: {stderr}"
     );
+}
+
+#[test]
+fn list_hidden_initializes_an_empty_store() {
+    let runtime_dir = isolated_runtime_dir("hidden-list");
+    let output = isolated_command(&runtime_dir)
+        .arg("--list-hidden")
+        .output()
+        .expect("test binary should run");
+
+    assert!(
+        output.status.success(),
+        "expected --list-hidden to succeed, stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "No manually hidden entries."
+    );
+
+    fs::remove_dir_all(runtime_dir).expect("isolated runtime directory should be removed");
+}
+
+#[test]
+fn automatic_duplicate_hiding_is_opt_in_and_uses_xdg_precedence() {
+    let runtime_dir = isolated_runtime_dir("automatic-duplicates");
+    let user_data = runtime_dir.join("user-data");
+    let system_data = runtime_dir.join("system-data");
+    let user_apps = user_data.join("applications");
+    let system_apps = system_data.join("applications");
+    fs::create_dir_all(&user_apps).expect("user application directory should be created");
+    fs::create_dir_all(&system_apps).expect("system application directory should be created");
+    fs::write(
+        user_apps.join("vivaldi.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Vivaldi\nExec=/bin/user-vivaldi\n",
+    )
+    .expect("user desktop entry should be written");
+    fs::write(
+        system_apps.join("vivaldi.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Vivaldi\nExec=/bin/system-vivaldi\n",
+    )
+    .expect("system desktop entry should be written");
+
+    let run = |auto_hide_duplicates: bool| {
+        let mut command = isolated_command(&runtime_dir);
+        command
+            .env("XDG_DATA_HOME", &user_data)
+            .env("XDG_DATA_DIRS", &system_data)
+            .arg("--stdout");
+        if auto_hide_duplicates {
+            command.arg("--auto-hide-duplicates").arg("-vvv");
+        }
+        command.output().expect("test binary should run")
+    };
+
+    let default_output = run(false);
+    assert!(default_output.status.success());
+    let default_stdout = String::from_utf8_lossy(&default_output.stdout);
+    assert!(default_stdout.contains("/bin/user-vivaldi"));
+    assert!(default_stdout.contains("/bin/system-vivaldi"));
+
+    let automatic_output = run(true);
+    assert!(automatic_output.status.success());
+    let automatic_stdout = String::from_utf8_lossy(&automatic_output.stdout);
+    assert!(automatic_stdout.contains("/bin/user-vivaldi"));
+    assert!(!automatic_stdout.contains("/bin/system-vivaldi"));
+    assert!(
+        String::from_utf8_lossy(&automatic_output.stderr)
+            .contains("Hidden entries: 0 manual, 1 automatic, 0 unavailable")
+    );
+
+    fs::remove_dir_all(runtime_dir).expect("isolated runtime directory should be removed");
 }

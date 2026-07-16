@@ -207,7 +207,7 @@ fn file_list_cache_is_fresh(cache: &FileListCache, dirs: &[PathBuf]) -> bool {
 }
 
 fn read_cached_app(table: &redb::ReadOnlyTable<&str, &[u8]>, path: &Path) -> Result<Option<App>> {
-    let path_key = encode_path_key(path);
+    let path_key = crate::core::path_key::encode(path);
     if let Some(app) = read_cached_app_at_key(table, &path_key, path)? {
         return Ok(Some(app));
     }
@@ -220,7 +220,7 @@ fn read_cached_app_by_key(
     table: &redb::ReadOnlyTable<&str, &[u8]>,
     path_key: &str,
 ) -> Result<Option<App>> {
-    if let Some(path) = decode_path_key(path_key)
+    if let Some(path) = crate::core::path_key::decode(path_key)
         && let Some(app) = read_cached_app_at_key(table, path_key, &path)?
     {
         return Ok(Some(app));
@@ -238,7 +238,9 @@ fn read_cached_app_at_key(
         && let Some(entry) = deserialize_cache_entry(data.value())
         && cache_entry_is_fresh(path, &entry)
     {
-        return Ok(Some(entry.app));
+        let mut app = entry.app;
+        app.set_source_path(path);
+        return Ok(Some(app));
     }
 
     Ok(None)
@@ -255,104 +257,6 @@ fn deserialize_cache_entry(data: &[u8]) -> Option<CacheEntry> {
             app: entry.app,
             mtime: entry.mtime,
         })
-}
-
-fn encode_path_key(path: &Path) -> String {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-
-        hex_encode(path.as_os_str().as_bytes())
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-
-        let mut bytes = Vec::new();
-        for unit in path.as_os_str().encode_wide() {
-            bytes.extend_from_slice(&unit.to_le_bytes());
-        }
-        return hex_encode(&bytes);
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        hex_encode(path.to_string_lossy().as_bytes())
-    }
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(HEX[(byte >> 4) as usize] as char);
-        encoded.push(HEX[(byte & 0x0f) as usize] as char);
-    }
-    encoded
-}
-
-fn decode_path_key(path_key: &str) -> Option<PathBuf> {
-    let bytes = hex_decode(path_key)?;
-
-    #[cfg(unix)]
-    {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
-
-        Some(PathBuf::from(OsString::from_vec(bytes)))
-    }
-
-    #[cfg(windows)]
-    {
-        use std::ffi::OsString;
-        use std::os::windows::ffi::OsStringExt;
-
-        let mut wide = Vec::with_capacity(bytes.len() / 2);
-        let mut chunks = bytes.chunks_exact(2);
-        for chunk in &mut chunks {
-            wide.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-        }
-        if !chunks.remainder().is_empty() {
-            return None;
-        }
-
-        return Some(PathBuf::from(OsString::from_wide(&wide)));
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        String::from_utf8(bytes).ok().map(PathBuf::from)
-    }
-}
-
-fn hex_decode(encoded: &str) -> Option<Vec<u8>> {
-    if !encoded.len().is_multiple_of(2) {
-        return None;
-    }
-
-    let mut bytes = Vec::with_capacity(encoded.len() / 2);
-    let encoded = encoded.as_bytes();
-
-    let mut index = 0;
-    while index < encoded.len() {
-        let high = decode_hex_nibble(encoded[index])?;
-        let low = decode_hex_nibble(encoded[index + 1])?;
-        bytes.push((high << 4) | low);
-        index += 2;
-    }
-
-    Some(bytes)
-}
-
-fn decode_hex_nibble(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 fn cache_entry_is_fresh(path: &Path, entry: &CacheEntry) -> bool {
@@ -383,7 +287,7 @@ fn write_cached_app(
         mtime,
     };
     let data = postcard::to_allocvec(&entry)?;
-    let path_key = encode_path_key(path);
+    let path_key = crate::core::path_key::encode(path);
 
     if let Some(existing) = cache_table.get(path_key.as_str())?
         && let Some(previous_entry) = deserialize_cache_entry(existing.value())

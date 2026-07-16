@@ -6,3 +6,7 @@ pub const FILE_LIST_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("
 pub const HISTORY_TABLE: TableDefinition<&str, u64> = TableDefinition::new("history");
 pub const PINNED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("pinned_apps");
 pub const FRECENCY_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("frecency");
+pub const HIDDEN_ENTRIES_TABLE: TableDefinition<u64, &[u8]> =
+    TableDefinition::new("hidden_entries");
+pub const HIDDEN_ENTRY_META_TABLE: TableDefinition<&str, u64> =
+    TableDefinition::new("hidden_entry_meta");

@@ -28,8 +28,12 @@ Usage:
 │  ├─ --clear-history              Delete launch history, then exit
 │  ├─ --clear-cache                Delete the desktop entry cache, then exit
 │  ├─ --refresh-cache              Rescan desktop entries before showing results
+│  ├─ --list-hidden                List manually hidden launcher entries, then exit
+│  ├─ --unhide <ID>                Restore one manually hidden entry, then exit
+│  ├─ --unhide-all                 Restore every manually hidden entry, then exit
 │  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn; pass =no to ignore them
 │  ├─ --filter-actions[=no]        Hide desktop actions; pass =no to keep entries like new window
+│  ├─ --auto-hide-duplicates[=no]  Suppress duplicate IDs/names using XDG source precedence
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
 │  ├─ --stdout                     Print filtered desktop entries to stdout in json form
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
@@ -81,8 +85,12 @@ Usage:
 │  ├─ --clear-history              Delete launch history, then exit
 │  ├─ --clear-cache                Delete the desktop entry cache, then exit
 │  ├─ --refresh-cache              Rescan desktop entries before showing results
+│  ├─ --list-hidden                List manually hidden launcher entries, then exit
+│  ├─ --unhide <ID>                Restore one manually hidden entry, then exit
+│  ├─ --unhide-all                 Restore every manually hidden entry, then exit
 │  ├─ --filter-desktop[=no]        Respect OnlyShowIn/NotShowIn; pass =no to ignore them
 │  ├─ --filter-actions[=no]        Hide desktop actions; pass =no to keep entries like new window
+│  ├─ --auto-hide-duplicates[=no]  Suppress duplicate IDs/names using XDG source precedence
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching (default: fuzzy)

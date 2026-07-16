@@ -57,6 +57,40 @@ fsel --cclip -r         # Replace running cclip instance
 # Not supported in --dmenu mode
 ```
 
+### Hidden Entries
+
+Press `Alt+Delete` to hide the exact selected launcher entry. This records its source in fsel's
+database; it does not delete or edit the desktop file or executable. Press `Alt+U` to restore the
+most recently hidden entry.
+
+```sh
+# Show persistent manual hide records and their numeric IDs
+fsel --list-hidden
+
+# Restore one record
+fsel --unhide 12
+
+# Restore every manually hidden entry
+fsel --unhide-all
+```
+
+Hides apply to the interactive launcher, direct launch, and `--stdout`. Entries with the same
+visible name remain independent when they come from different source paths. Clearing history or
+the desktop cache does not clear hidden-entry records.
+
+Automatic duplicate suppression is separate from manual hides and defaults to off:
+
+```toml
+[app_launcher]
+auto_hide_duplicates = false
+```
+
+Set it to `true`, or run `fsel --auto-hide-duplicates`, to keep one deterministic entry for equal
+desktop-file IDs and equal normalized names. `$XDG_DATA_HOME` wins first, followed by each
+`$XDG_DATA_DIRS` entry in order. Automatic exclusions are not written to the database. Manually
+hiding the current winner exposes the next eligible source, which keeps the behavior usable on
+Bedrock Linux and for duplicates inside the same application directory.
+
 ### Launch Methods
 ```sh
 # Default (direct execution)
@@ -444,6 +478,7 @@ terminal_launcher = "kitty -e"  # or "tty" for TTY mode (-t/--tty)
 [app_launcher]
 filter_desktop = true
 filter_actions = false
+auto_hide_duplicates = false
 list_executables_in_path = false
 ranking_mode = "frecency"
 pinned_order = "ranking"
@@ -484,9 +519,14 @@ FSEL_FILTER_DESKTOP=false FSEL_MATCH_MODE=exact fsel -p nvim
 
 # Hide desktop action entries for launcher mode only
 FSEL_APP_LAUNCHER_FILTER_ACTIONS=true fsel
+
+# Suppress duplicate launcher entries for one invocation
+FSEL_APP_LAUNCHER_AUTO_HIDE_DUPLICATES=true fsel
 ```
 
-Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config.toml` or `FSEL_APP_LAUNCHER_*` overrides them for the app launcher. `filter_actions` is launcher-only, so it is configured only under `[app_launcher]` or with `FSEL_APP_LAUNCHER_FILTER_ACTIONS`.
+Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config.toml` or
+`FSEL_APP_LAUNCHER_*` overrides them for the app launcher. `filter_actions` and
+`auto_hide_duplicates` are launcher-only.
 
 **General / launcher (root-level and shared launcher behavior):**
 
@@ -541,7 +581,7 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `filter_actions`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`
+- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`

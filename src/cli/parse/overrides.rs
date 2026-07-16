@@ -38,6 +38,19 @@ pub(super) fn parse_cli_overrides(
             Long("refresh-cache") => {
                 default.refresh_cache = true;
             }
+            Long("list-hidden") => {
+                default.list_hidden = true;
+            }
+            Long("unhide") => {
+                let id = value_as_string(parser, "Hidden entry ID must be valid UTF-8")?;
+                default.unhide = Some(
+                    id.parse::<u64>()
+                        .map_err(|_| CliError::message("Hidden entry ID must be an integer"))?,
+                );
+            }
+            Long("unhide-all") => {
+                default.unhide_all = true;
+            }
             Long("no-exec") => {
                 default.no_exec = true;
             }
@@ -143,6 +156,16 @@ pub(super) fn parse_cli_overrides(
                     default.filter_actions = value != "no";
                 } else {
                     default.filter_actions = true;
+                }
+            }
+            Long("auto-hide-duplicates") => {
+                if let Some(value) = parser.optional_value() {
+                    let value = value.into_string().map_err(|_| {
+                        CliError::message("auto-hide-duplicates value must be valid UTF-8")
+                    })?;
+                    default.auto_hide_duplicates = value != "no";
+                } else {
+                    default.auto_hide_duplicates = true;
                 }
             }
             Long("list-executables-in-path") => {

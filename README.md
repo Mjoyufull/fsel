@@ -178,9 +178,24 @@ fsel -p firefox
 - **Advanced Search Ranking**: Configurable scoring with `frecency`, `recency`, or `frequency`
 - **Smart Matching**: Searches names, descriptions, keywords, and categories
 - **Pin/Favorite Apps**: Press Ctrl-Space to pin apps - pinned apps always appear first
+- **Reversible Hiding**: Press Alt-Delete to hide one exact launcher source and Alt-U to undo
+- **Optional Deduplication**: Enable deterministic XDG-aware duplicate suppression when wanted
 - **Match Modes**: Fuzzy (default) or exact matching
 
 See [USAGE.md - App Launcher](./USAGE.md#app-launcher) for TTY mode, launch prefixes, `--detach`, cache management, `--replace`, and more.
+
+Hidden entries are stored in fsel's database; their `.desktop` files and executables are not changed.
+Manage persistent hides without opening the TUI:
+
+```sh
+fsel --list-hidden
+fsel --unhide 12
+fsel --unhide-all
+```
+
+Set `auto_hide_duplicates = true` under `[app_launcher]` to suppress entries with the same
+desktop-file ID or normalized visible name. It defaults to `false`; manual hiding always targets
+one exact source path, including duplicate entries in the same directory or across Bedrock strata.
 
 ### Direct Launch Mode
 
@@ -292,6 +307,7 @@ pin_icon = "📌"                     # Icon for pinned apps
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment
 filter_actions = false            # Keep desktop actions visible; set true to hide them
+auto_hide_duplicates = false      # Opt in to deterministic duplicate suppression
 list_executables_in_path = false   # Show CLI tools from $PATH
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
@@ -416,6 +432,11 @@ fsel is a **unified TUI workflow tool** built for terminal-centric setups. It co
 **Too many desktop action entries?**
 - Use `--filter-actions` to hide desktop actions like "New Window"
 - Or set `filter_actions = true` under `[app_launcher]`
+
+**Hidden the wrong launcher entry?**
+- Press Alt-U before leaving the launcher to restore the most recent hide
+- Run `fsel --list-hidden`, then `fsel --unhide <ID>` to restore a specific entry
+- Run `fsel --unhide-all` to clear every manual hide
 
 **Terminal apps not launching?**
 - Set `terminal_launcher` in config

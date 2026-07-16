@@ -85,13 +85,21 @@ impl LocalizedField {
 impl App {
     /// Parse an application from the main `[Desktop Entry]` section.
     pub fn parse<T: AsRef<str>>(contents: T, filter_desktop: bool) -> eyre::Result<App> {
-        Self::parse_section(contents, None, filter_desktop)
+        Self::parse_section(contents, None, filter_desktop, false)
+    }
+
+    pub(crate) fn parse_including_hidden<T: AsRef<str>>(
+        contents: T,
+        filter_desktop: bool,
+    ) -> eyre::Result<App> {
+        Self::parse_section(contents, None, filter_desktop, true)
     }
 
     fn parse_section<T: AsRef<str>>(
         contents: T,
         action: Option<&Action>,
         filter_desktop: bool,
+        include_hidden: bool,
     ) -> eyre::Result<App> {
         let contents = contents.as_ref();
         let locales = get_locale();
@@ -197,9 +205,13 @@ impl App {
                 Some(_) => value,
             })
             .unwrap_or_else(|| "Unknown".to_string());
-        let command = exec.ok_or_else(|| eyre!("Missing required Exec field"))?;
+        let command = match (exec, hidden && include_hidden) {
+            (Some(command), _) => command,
+            (None, true) => String::new(),
+            (None, false) => return Err(eyre!("Missing required Exec field")),
+        };
 
-        if hidden || (filter_desktop && no_display) {
+        if (hidden && !include_hidden) || (!hidden && filter_desktop && no_display) {
             return Err(eyre!("Application is hidden"));
         }
 
@@ -226,6 +238,7 @@ impl App {
             try_exec,
             entry_type,
             desktop_id: None,
+            source_path: None,
             actions,
             breakdown: None,
         })
@@ -237,7 +250,7 @@ impl App {
         action: &Action,
         filter_desktop: bool,
     ) -> eyre::Result<App> {
-        Self::parse_section(contents, Some(action), filter_desktop)
+        Self::parse_section(contents, Some(action), filter_desktop, false)
     }
 }
 
@@ -254,6 +267,25 @@ mod tests {
         .expect("desktop entry should parse");
 
         assert_eq!(app.command, "/usr/bin/editor");
+    }
+
+    #[test]
+    fn hidden_tombstone_can_omit_exec_when_requested_by_discovery() {
+        let app = App::parse_including_hidden(
+            "[Desktop Entry]\nType=Application\nName=Override\nHidden=true",
+            false,
+        )
+        .expect("hidden tombstone should parse");
+
+        assert!(app.hidden);
+        assert!(app.command.is_empty());
+        assert!(
+            App::parse(
+                "[Desktop Entry]\nType=Application\nName=Override\nHidden=true",
+                false,
+            )
+            .is_err()
+        );
     }
 
     #[test]

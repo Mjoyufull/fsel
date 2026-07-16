@@ -25,6 +25,7 @@ pub struct FselConfig {
 pub struct AppLauncherConfig {
     pub filter_desktop: Option<bool>,
     pub filter_actions: Option<bool>,
+    pub auto_hide_duplicates: Option<bool>,
     pub list_executables_in_path: Option<bool>,
     pub hide_before_typing: Option<bool>,
     pub launch_prefix: Option<Vec<String>>,

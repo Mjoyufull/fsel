@@ -71,7 +71,12 @@ pub fn init_test_log() -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn log_startup_info(cli: &crate::cli::Opts, app_count: usize, frecency_count: usize) {
+pub fn log_startup_info(
+    cli: &crate::cli::Opts,
+    app_count: usize,
+    frecency_count: usize,
+    hidden_summary: &crate::core::hidden_entries::HiddenSummary,
+) {
     if let Some(path) = LOG_FILE.get()
         && let Ok(mut file) = OpenOptions::new().append(true).open(path)
     {
@@ -82,6 +87,7 @@ pub fn log_startup_info(cli: &crate::cli::Opts, app_count: usize, frecency_count
         let _ = writeln!(file, "  Pinned order: {}", cli.pinned_order_mode.as_str());
         let _ = writeln!(file, "  Filter desktop: {}", cli.filter_desktop);
         let _ = writeln!(file, "  Filter actions: {}", cli.filter_actions);
+        let _ = writeln!(file, "  Auto-hide duplicates: {}", cli.auto_hide_duplicates);
         let _ = writeln!(
             file,
             "  List executables in PATH: {}",
@@ -92,6 +98,9 @@ pub fn log_startup_info(cli: &crate::cli::Opts, app_count: usize, frecency_count
         let _ = writeln!(file, "[STARTUP] Loaded data:");
         let _ = writeln!(file, "  Total apps: {}", app_count);
         let _ = writeln!(file, "  Frecency entries: {}", frecency_count);
+        let _ = writeln!(file, "  Manually hidden: {}", hidden_summary.manual);
+        let _ = writeln!(file, "  Automatically hidden: {}", hidden_summary.automatic);
+        let _ = writeln!(file, "  Unavailable hides: {}", hidden_summary.unavailable);
         let _ = writeln!(file);
     }
 }

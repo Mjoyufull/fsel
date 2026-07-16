@@ -18,6 +18,8 @@ pub struct DiscoverOptions {
     pub filter_actions: bool,
     /// Include raw executables discovered from `$PATH`.
     pub list_executables: bool,
+    /// Include `Hidden=true` tombstones for automatic duplicate resolution.
+    pub auto_hide_duplicates: bool,
 }
 
 fn current_desktop(filter_desktop: bool) -> Option<Vec<String>> {
@@ -68,22 +70,51 @@ fn load_desktop_files(
     }
 }
 
-fn attach_desktop_id(app: &mut App, file_path: &Path, suffix: Option<&str>) {
-    if let Some(file_name) = file_path.file_name().and_then(|name| name.to_str()) {
+fn attach_desktop_id(
+    app: &mut App,
+    application_dirs: &[PathBuf],
+    file_path: &Path,
+    suffix: Option<&str>,
+) {
+    app.set_source_path(file_path);
+    if let Some(desktop_id) = desktop_file_id(application_dirs, file_path) {
         app.desktop_id = Some(match suffix {
-            Some(suffix) => format!("{file_name}#{suffix}"),
-            None => file_name.to_string(),
+            Some(suffix) => format!("{desktop_id}#{suffix}"),
+            None => desktop_id,
         });
     }
+}
+
+pub(crate) fn desktop_file_id(application_dirs: &[PathBuf], file_path: &Path) -> Option<String> {
+    let relative_path = application_dirs
+        .iter()
+        .find_map(|root| file_path.strip_prefix(root).ok())?;
+    Some(
+        relative_path
+            .components()
+            .map(|component| desktop_id_component(component.as_os_str()))
+            .collect::<Vec<_>>()
+            .join("-"),
+    )
+}
+
+fn desktop_id_component(component: &std::ffi::OsStr) -> String {
+    if let Some(component) = component.to_str() {
+        return component.replace('%', "%25");
+    }
+
+    format!("%00{}", crate::core::path_key::encode(Path::new(component)))
 }
 
 fn load_app_from_path(
     file_path: &Path,
     desktop_cache: Option<&crate::core::cache::DesktopCache>,
     filter_desktop: bool,
+    include_hidden: bool,
 ) -> Option<(App, Option<String>)> {
     if let Some(cache) = desktop_cache
         && let Ok(Some(cached_app)) = cache.get(file_path)
+        && (include_hidden || !cached_app.hidden)
     {
         return Some((cached_app, None));
     }
@@ -93,7 +124,11 @@ fn load_app_from_path(
         return None;
     }
 
-    let app = App::parse(&contents, filter_desktop).ok()?;
+    let app = if include_hidden {
+        App::parse_including_hidden(&contents, filter_desktop).ok()?
+    } else {
+        App::parse(&contents, filter_desktop).ok()?
+    };
     Some((app, Some(contents)))
 }
 
@@ -141,6 +176,7 @@ fn executable_app(path: &Path, file_name: &str) -> App {
         try_exec: None,
         entry_type: "Application".to_string(),
         desktop_id: None,
+        source_path: Some(path.to_path_buf()),
         history: 0,
         score: 0,
         pinned: false,
@@ -213,9 +249,13 @@ pub fn read_with_options(
             .into_par_iter()
             .filter_map(|file_path| {
                 let file_path_ref = file_path.as_path();
-                let (mut app, file_contents) =
-                    load_app_from_path(file_path_ref, desktop_cache_ref, options.filter_desktop)?;
-                attach_desktop_id(&mut app, file_path_ref, None);
+                let (mut app, file_contents) = load_app_from_path(
+                    file_path_ref,
+                    desktop_cache_ref,
+                    options.filter_desktop,
+                    options.auto_hide_duplicates,
+                )?;
+                attach_desktop_id(&mut app, &dirs, file_path_ref, None);
 
                 if !should_keep_for_desktop(&app, current_desktop_ref) {
                     return None;
@@ -223,7 +263,8 @@ pub fn read_with_options(
 
                 let app_with_history = history_cache_ref.apply_to_app(app.clone());
 
-                if !options.filter_actions
+                if !app.hidden
+                    && !options.filter_actions
                     && let Some(actions) = &app.actions
                 {
                     let contents = match &file_contents {
@@ -239,6 +280,7 @@ pub fn read_with_options(
                             {
                                 attach_desktop_id(
                                     &mut action_app,
+                                    &dirs,
                                     file_path_ref,
                                     Some(action.name.as_str()),
                                 );
@@ -277,7 +319,7 @@ pub fn read_with_options(
 
 #[cfg(test)]
 mod tests {
-    use super::{DiscoverOptions, read_with_options};
+    use super::{DiscoverOptions, desktop_file_id, read_with_options};
     use std::fs;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -314,6 +356,7 @@ mod tests {
                 filter_desktop: false,
                 filter_actions,
                 list_executables: false,
+                auto_hide_duplicates: false,
             },
         );
         let mut names = Vec::new();
@@ -341,5 +384,70 @@ mod tests {
             names,
             vec!["Editor".to_string(), "Editor (Open Window)".to_string()]
         );
+    }
+
+    #[test]
+    fn desktop_file_id_uses_the_relative_path() {
+        let root = PathBuf::from("/usr/share/applications");
+        let nested = root.join("vendor/editor.desktop");
+
+        assert_eq!(
+            desktop_file_id(&[root], &nested).as_deref(),
+            Some("vendor-editor.desktop")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_file_id_escapes_non_utf8_components_without_collisions() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let root = PathBuf::from("/usr/share/applications");
+        let first = root.join(OsString::from_vec(vec![
+            0xfe, b'.', b'd', b'e', b's', b'k', b't', b'o', b'p',
+        ]));
+        let second = root.join(OsString::from_vec(vec![
+            0xff, b'.', b'd', b'e', b's', b'k', b't', b'o', b'p',
+        ]));
+        let escaped_literal = root.join("%00fe2e6465736b746f70");
+
+        let first_id = desktop_file_id(std::slice::from_ref(&root), &first)
+            .expect("first ID should be available");
+        let second_id = desktop_file_id(std::slice::from_ref(&root), &second)
+            .expect("second ID should be available");
+        let literal_id =
+            desktop_file_id(&[root], &escaped_literal).expect("literal ID should be available");
+
+        assert_ne!(first_id, second_id);
+        assert_ne!(first_id, literal_id);
+    }
+
+    #[test]
+    fn automatic_discovery_keeps_hidden_tombstones_for_resolution() {
+        let dir = test_temp_dir("tombstone");
+        let db_path = dir.join("history.redb");
+        fs::write(
+            dir.join("editor.desktop"),
+            "[Desktop Entry]\nType=Application\nName=Editor\nHidden=true\n",
+        )
+        .expect("desktop entry should be written");
+        let db = Arc::new(redb::Database::create(db_path).expect("database should be created"));
+
+        let receiver = read_with_options(
+            vec![dir.clone()],
+            &db,
+            DiscoverOptions {
+                filter_desktop: false,
+                filter_actions: false,
+                list_executables: false,
+                auto_hide_duplicates: true,
+            },
+        );
+        let apps = receiver.into_iter().collect::<Vec<_>>();
+
+        assert_eq!(apps.len(), 1);
+        assert!(apps[0].hidden);
+        let _ = fs::remove_dir_all(dir);
     }
 }

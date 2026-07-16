@@ -19,6 +19,10 @@ pub struct Keybinds {
     pub exit: Vec<KeyBind>,
     #[serde(default = "default_pin")]
     pub pin: Vec<KeyBind>,
+    #[serde(default = "default_hide")]
+    pub hide: Vec<KeyBind>,
+    #[serde(default = "default_unhide_last")]
+    pub unhide_last: Vec<KeyBind>,
     #[serde(default = "default_backspace")]
     pub backspace: Vec<KeyBind>,
     #[serde(default = "default_image_preview")]
@@ -39,6 +43,8 @@ impl Default for Keybinds {
             select: default_select(),
             exit: default_exit(),
             pin: default_pin(),
+            hide: default_hide(),
+            unhide_last: default_unhide_last(),
             backspace: default_backspace(),
             image_preview: default_image_preview(),
             tag: default_tag(),
@@ -187,6 +193,20 @@ fn default_pin() -> Vec<KeyBind> {
     }]
 }
 
+fn default_hide() -> Vec<KeyBind> {
+    vec![KeyBind::WithMod {
+        key: "delete".to_string(),
+        modifiers: "alt".to_string(),
+    }]
+}
+
+fn default_unhide_last() -> Vec<KeyBind> {
+    vec![KeyBind::WithMod {
+        key: "u".to_string(),
+        modifiers: "alt".to_string(),
+    }]
+}
+
 fn default_backspace() -> Vec<KeyBind> {
     vec![KeyBind::Simple("backspace".to_string())]
 }
@@ -240,6 +260,16 @@ impl Keybinds {
 
     pub fn matches_pin(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.pin.iter().any(|kb| kb.matches(code, mods))
+    }
+
+    pub fn matches_hide(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        self.hide.iter().any(|binding| binding.matches(code, mods))
+    }
+
+    pub fn matches_unhide_last(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        self.unhide_last
+            .iter()
+            .any(|binding| binding.matches(code, mods))
     }
 
     pub fn matches_backspace(&self, code: KeyCode, mods: KeyModifiers) -> bool {
@@ -297,6 +327,15 @@ mod tests {
         let keybinds: Keybinds = toml::from_str(r#"down = ["tab"]"#).unwrap();
 
         assert!(keybinds.matches_down(KeyCode::Tab, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn default_launcher_hide_bindings_are_deliberate_chords() {
+        let keybinds = Keybinds::default();
+
+        assert!(keybinds.matches_hide(KeyCode::Delete, KeyModifiers::ALT));
+        assert!(keybinds.matches_unhide_last(KeyCode::Char('u'), KeyModifiers::ALT));
+        assert!(!keybinds.matches_hide(KeyCode::Delete, KeyModifiers::NONE));
     }
 
     #[test]

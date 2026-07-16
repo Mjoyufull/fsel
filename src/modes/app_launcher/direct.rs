@@ -1,10 +1,12 @@
 use crate::cli;
 use crate::core::cache;
+use crate::core::hidden_entries::{EntryKey, HiddenEntryStore};
 use crate::desktop;
 use crate::modes::app_launcher::session::LauncherSession;
 use crate::strings;
 use eyre::{Result, eyre};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
+use std::collections::HashSet;
 use std::io::{self, Write};
 
 /// Launches a program directly by name, bypassing the TUI.
@@ -15,18 +17,36 @@ pub(crate) fn launch_program_directly(
 ) -> Result<()> {
     let db = session.db();
     let history_cache = cache::HistoryCache::load(db)?;
+    let hidden_store = HiddenEntryStore::new(std::sync::Arc::clone(db))?;
+    let hidden_entry_keys = hidden_store.entry_keys()?;
 
-    if let Some(app) = find_history_exact_name_match(db, &history_cache, program_name, cli)? {
-        return launch_or_print(cli, db, &app);
-    }
-
-    if matches!(cli.match_mode, cli::MatchMode::Fuzzy)
-        && let Some(app) = find_history_best_match(db, &history_cache, program_name, cli)?
+    if !cli.auto_hide_duplicates
+        && let Some(app) = find_history_exact_name_match(
+            db,
+            &history_cache,
+            &hidden_entry_keys,
+            program_name,
+            cli,
+        )?
     {
         return launch_or_print(cli, db, &app);
     }
 
-    let all_apps = load_available_apps(db, cli);
+    if !cli.auto_hide_duplicates
+        && matches!(cli.match_mode, cli::MatchMode::Fuzzy)
+        && let Some(app) =
+            find_history_best_match(db, &history_cache, &hidden_entry_keys, program_name, cli)?
+    {
+        return launch_or_print(cli, db, &app);
+    }
+
+    let (all_apps, hidden_summary) = load_available_apps(db, cli, &hidden_entry_keys);
+    if cli.verbose.unwrap_or(0) > 2 {
+        eprintln!(
+            "Hidden entries: {} manual, {} automatic, {} unavailable",
+            hidden_summary.manual, hidden_summary.automatic, hidden_summary.unavailable,
+        );
+    }
     let app_to_run =
         select_match_for_mode(all_apps, program_name, cli.match_mode).ok_or_else(|| {
             if matches!(cli.match_mode, cli::MatchMode::Exact) {
@@ -70,6 +90,7 @@ fn launch_or_print(
 fn find_history_exact_name_match(
     db: &std::sync::Arc<redb::Database>,
     history_cache: &cache::HistoryCache,
+    hidden_entry_keys: &HashSet<EntryKey>,
     program_name: &str,
     cli: &cli::Opts,
 ) -> Result<Option<desktop::App>> {
@@ -77,7 +98,8 @@ fn find_history_exact_name_match(
 
     for app_name in history_cache.history.keys() {
         if app_name.to_lowercase() == program_name_lower
-            && let Some(app) = super::search::find_app_by_name_fast(db, app_name, cli)?
+            && let Some(app) =
+                super::search::find_app_by_name_fast(db, app_name, cli, hidden_entry_keys)?
         {
             return Ok(Some(app));
         }
@@ -89,11 +111,13 @@ fn find_history_exact_name_match(
 fn find_history_best_match(
     db: &std::sync::Arc<redb::Database>,
     history_cache: &cache::HistoryCache,
+    hidden_entry_keys: &HashSet<EntryKey>,
     program_name: &str,
     cli: &cli::Opts,
 ) -> Result<Option<desktop::App>> {
     if let Some((app_name, _)) = history_cache.get_best_match(program_name)
-        && let Some(app) = super::search::find_app_by_name_fast(db, app_name, cli)?
+        && let Some(app) =
+            super::search::find_app_by_name_fast(db, app_name, cli, hidden_entry_keys)?
     {
         return Ok(Some(app));
     }
@@ -101,14 +125,23 @@ fn find_history_best_match(
     Ok(None)
 }
 
-fn load_available_apps(db: &std::sync::Arc<redb::Database>, cli: &cli::Opts) -> Vec<desktop::App> {
+fn load_available_apps(
+    db: &std::sync::Arc<redb::Database>,
+    cli: &cli::Opts,
+    hidden_entry_keys: &HashSet<EntryKey>,
+) -> (
+    Vec<desktop::App>,
+    crate::core::hidden_entries::HiddenSummary,
+) {
+    let application_dirs = desktop::application_dirs();
     let apps_receiver = desktop::read_with_options(
-        desktop::application_dirs(),
+        application_dirs.clone(),
         db,
         desktop::DiscoverOptions {
             filter_desktop: cli.filter_desktop,
             filter_actions: cli.filter_actions,
             list_executables: cli.list_executables_in_path,
+            auto_hide_duplicates: cli.auto_hide_duplicates,
         },
     );
 
@@ -116,7 +149,14 @@ fn load_available_apps(db: &std::sync::Arc<redb::Database>, cli: &cli::Opts) -> 
     while let Ok(app) = apps_receiver.recv() {
         all_apps.push(app);
     }
-    all_apps
+    crate::core::hidden_entries::eligible_apps(
+        &all_apps,
+        hidden_entry_keys,
+        &crate::core::hidden_entries::VisibilityOptions {
+            auto_hide_duplicates: cli.auto_hide_duplicates,
+            application_dirs,
+        },
+    )
 }
 
 fn confirm_first_launch(app_name: &str) -> Result<bool> {

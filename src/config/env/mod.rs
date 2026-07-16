@@ -140,4 +140,14 @@ prefix_depth = 2
 
         assert_eq!(config.app_launcher.filter_actions, Some(true));
     }
+
+    #[test]
+    fn applies_auto_hide_duplicates_env_override() {
+        let mut config = FselConfig::default();
+        let source = MapSource::new(&[("FSEL_APP_LAUNCHER_AUTO_HIDE_DUPLICATES", "true")]);
+
+        apply_overrides(&mut config, &source).unwrap();
+
+        assert_eq!(config.app_launcher.auto_hide_duplicates, Some(true));
+    }
 }

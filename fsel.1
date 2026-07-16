@@ -1,4 +1,4 @@
-.TH FSEL 1 "2026-06-14" "3.5.2-kiwicrab" "User Commands"
+.TH FSEL 1 "2026-07-15" "3.5.2-kiwicrab" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -26,6 +26,15 @@ Clear desktop file cache
 .B \-\-refresh-cache
 Force refresh of desktop file list (rescan for new apps)
 .TP
+.B \-\-list-hidden
+List manually hidden launcher entries and their numeric IDs, then exit
+.TP
+.BR \-\-unhide " " \fIID\fR
+Restore one manually hidden launcher entry by numeric ID, then exit
+.TP
+.B \-\-unhide-all
+Restore every manually hidden launcher entry, then exit
+.TP
 .BR \-p ", " \-\-program " " \fINAME\fR
 Launch program directly, bypassing TUI. Respects \fB\-\-match-mode\fR; exact mode requires an exact app or executable name.
 .TP
@@ -52,6 +61,9 @@ Filter apps by OnlyShowIn/NotShowIn fields (default: yes)
 .TP
 .BR \-\-filter-actions [=\fIno\fR]
 Hide desktop action entries such as "New Window" and "Open Private Window" (default: no)
+.TP
+.BR \-\-auto-hide-duplicates [=\fIno\fR]
+Suppress equal desktop-file IDs and normalized visible names using XDG application-directory precedence (default: no). Automatic exclusions are not persisted.
 .TP
 .B \-\-list-executables-in-path
 Include executables from $PATH alongside desktop apps
@@ -186,6 +198,7 @@ pin_color = "rgb(255,165,0)"
 [app_launcher]
 filter_desktop = true
 filter_actions = false
+auto_hide_duplicates = false
 list_executables_in_path = false
 hide_before_typing = false
 match_mode = "fuzzy"
@@ -211,6 +224,8 @@ down = ["down", { key = "n", modifiers = "ctrl" }]
 select = ["enter"]
 exit = ["esc", { key = "q", modifiers = "ctrl" }]
 pin = [{ key = "space", modifiers = "ctrl" }]
+hide = [{ key = "delete", modifiers = "alt" }]
+unhide_last = [{ key = "u", modifiers = "alt" }]
 .RE
 .fi
 .PP
@@ -229,6 +244,12 @@ Launch selected application
 .TP
 .BR "Ctrl-Space"
 Toggle pin/favorite for selected app (pinned apps always appear first)
+.TP
+.BR "Alt-Delete"
+Hide the exact selected launcher entry without deleting or editing its source file
+.TP
+.BR "Alt-U"
+Restore the most recently hidden launcher entry
 .TP
 .BR "Esc" " or " "Ctrl-Q" " or " "Ctrl-C"
 Exit
@@ -315,6 +336,13 @@ Hide desktop action entries in launcher mode:
 .nf
 .RS
 fsel --filter-actions
+.RE
+.fi
+.TP
+Suppress duplicate launcher entries for one invocation:
+.nf
+.RS
+fsel --auto-hide-duplicates
 .RE
 .fi
 .TP
@@ -457,6 +485,9 @@ Environment variables with FSEL_ prefix override config file settings
 .TP
 .B FSEL_APP_LAUNCHER_FILTER_ACTIONS
 Set to \fBtrue\fR to hide desktop action entries in app launcher mode, or \fBfalse\fR to keep them visible
+.TP
+.B FSEL_APP_LAUNCHER_AUTO_HIDE_DUPLICATES
+Set to \fBtrue\fR to enable deterministic duplicate suppression in app launcher mode (default: false)
 .SH FILES
 .TP
 .I ~/.config/fsel/config.toml
@@ -466,7 +497,7 @@ User configuration file
 Keybind customization file (optional, can use [keybinds] in config.toml)
 .TP
 .I ~/.local/share/fsel/hist_db.redb
-Launch history, frecency data, and pinned apps database (redb format)
+Launch history, frecency data, pinned apps, and manually hidden entries database (redb format)
 .TP
 .I ~/.local/share/fsel/fsel-fsel.lock
 Lock file for single instance (app launcher mode)

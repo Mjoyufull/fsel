@@ -3,6 +3,27 @@ use super::launch::active_launch_method_count;
 use super::types::Opts;
 
 pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<(), CliError> {
+    let hidden_commands = usize::from(default.list_hidden)
+        + usize::from(default.unhide.is_some())
+        + usize::from(default.unhide_all);
+    if hidden_commands > 1 {
+        return Err(CliError::message(
+            "Error: --list-hidden, --unhide, and --unhide-all cannot be combined\n",
+        ));
+    }
+    if hidden_commands > 0
+        && (default.clear_history || default.clear_cache || default.refresh_cache)
+    {
+        return Err(CliError::message(
+            "Error: hidden-entry commands cannot be combined with cache/history maintenance\n",
+        ));
+    }
+    if hidden_commands > 0 && (default.program.is_some() || default.search_string.is_some()) {
+        return Err(CliError::message(
+            "Error: hidden-entry commands cannot be combined with launch or search requests\n",
+        ));
+    }
+
     if default.program.is_some() && default.search_string.is_some() {
         return Err(CliError::message(
             "Error: Cannot use -p/--program and -ss together\n\
@@ -11,6 +32,11 @@ Use -p for direct launch or -ss for pre-filled TUI search\n",
     }
 
     if default.dmenu_mode {
+        if hidden_commands > 0 {
+            return Err(CliError::message(
+                "Error: hidden-entry commands are only available in app-launcher mode\n",
+            ));
+        }
         if default.program.is_some() {
             return Err(CliError::message(
                 "Error: --dmenu cannot be used with -p/--program\n\
@@ -31,6 +57,11 @@ Dmenu mode reads from stdin and outputs to stdout\n",
     }
 
     if default.cclip_mode {
+        if hidden_commands > 0 {
+            return Err(CliError::message(
+                "Error: hidden-entry commands are only available in app-launcher mode\n",
+            ));
+        }
         if default.program.is_some() {
             return Err(CliError::message(
                 "Error: --cclip cannot be used with -p/--program\n\

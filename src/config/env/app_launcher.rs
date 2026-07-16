@@ -19,6 +19,12 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
     )?;
     set_optional_parsed(
         source,
+        "FSEL_APP_LAUNCHER_AUTO_HIDE_DUPLICATES",
+        &mut cfg.app_launcher.auto_hide_duplicates,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_optional_parsed(
+        source,
         "FSEL_APP_LAUNCHER_LIST_EXECUTABLES_IN_PATH",
         &mut cfg.app_launcher.list_executables_in_path,
         BOOLEAN_EXPECTED,

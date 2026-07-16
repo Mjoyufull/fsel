@@ -10,6 +10,7 @@ use ratatui::backend::CrosstermBackend;
 use scopeguard::defer;
 use std::cell::Cell;
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Run application launcher mode.
@@ -17,6 +18,7 @@ pub async fn run(cli: Opts) -> Result<()> {
     use crossterm::event::KeyCode;
 
     let data_dir = crate::app::paths::runtime_data_dir()?;
+    let application_dirs = crate::desktop::application_dirs();
     let history_db_path = crate::app::paths::history_db_path()?;
     let lock_path = crate::app::paths::launcher_lock_path()?;
     let session =
@@ -33,15 +35,18 @@ pub async fn run(cli: Opts) -> Result<()> {
         return Ok(());
     }
 
+    let hidden_store = crate::core::hidden_entries::HiddenEntryStore::new(Arc::clone(&db))?;
+
     super::admin::initialize_test_mode(&cli);
 
     let apps_rx = crate::desktop::read_with_options(
-        crate::desktop::application_dirs(),
+        application_dirs.clone(),
         &db,
         crate::desktop::DiscoverOptions {
             filter_desktop: cli.filter_desktop,
             filter_actions: cli.filter_actions,
             list_executables: cli.list_executables_in_path,
+            auto_hide_duplicates: cli.auto_hide_duplicates,
         },
     );
 
@@ -51,6 +56,7 @@ pub async fn run(cli: Opts) -> Result<()> {
     }
 
     let frecency_data = crate::core::database::load_frecency(&db);
+    let frecency_count = frecency_data.len();
     let mut pin_timestamps = crate::core::database::load_pin_timestamps(&db);
     sort_by_ranking(
         &mut all_apps,
@@ -61,7 +67,7 @@ pub async fn run(cli: Opts) -> Result<()> {
         current_unix_seconds(),
     );
 
-    super::admin::log_startup_if_enabled(&cli, all_apps.len(), frecency_data.len());
+    let discovered_count = all_apps.len();
 
     let mut state = State::new(
         all_apps,
@@ -71,6 +77,17 @@ pub async fn run(cli: Opts) -> Result<()> {
         cli.ranking_mode,
         cli.pinned_order_mode,
         std::mem::take(&mut pin_timestamps),
+    );
+    state.set_visibility_options(crate::core::hidden_entries::VisibilityOptions {
+        auto_hide_duplicates: cli.auto_hide_duplicates,
+        application_dirs,
+    });
+    state.set_hidden_entry_keys(hidden_store.entry_keys()?);
+    super::admin::log_startup_if_enabled(
+        &cli,
+        discovered_count,
+        frecency_count,
+        state.hidden_summary(),
     );
 
     if let Some(ref search) = cli.search_string {
@@ -83,6 +100,14 @@ pub async fn run(cli: Opts) -> Result<()> {
         cli.fancy_mode,
         cli.verbose.unwrap_or(0),
     );
+
+    if cli.verbose.unwrap_or(0) > 2 {
+        let hidden_summary = state.hidden_summary();
+        eprintln!(
+            "Hidden entries: {} manual, {} automatic, {} unavailable",
+            hidden_summary.manual, hidden_summary.automatic, hidden_summary.unavailable,
+        );
+    }
 
     if cli.stdout {
         println!(
@@ -125,7 +150,7 @@ pub async fn run(cli: Opts) -> Result<()> {
 
         if matches!(event, Event::Input(_) | Event::Mouse(_)) {
             let total_height = terminal.size()?.height;
-            super::events::handle_event(&mut state, event, &cli, &db, total_height);
+            super::events::handle_event(&mut state, event, &cli, &db, &hidden_store, total_height);
         }
 
         if state.should_exit {
