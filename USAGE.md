@@ -147,7 +147,7 @@ find . -print0 | fsel --dmenu0
 passed through dedicated shell environment variables rather than interpolated into command source:
 
 - `{}`: selected input row
-- `{q}`: current query
+- `{q}`: current query (left unset in password mode so masked input is never exported)
 - `{n}`: zero-based original input ordinal
 
 Place placeholders directly in the command rather than inside single quotes. Heredoc preview

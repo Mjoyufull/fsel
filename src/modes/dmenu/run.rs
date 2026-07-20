@@ -68,8 +68,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
     let mut input = options.input_config().init_async();
     let mut ui = build_ui(cli, items, options.highlight_color);
     let mut list_state = ListState::default();
-    let mut preview =
-        PreviewRuntime::new(options.preview_command.clone(), options.graphics_adapter);
+    let mut preview = PreviewRuntime::new(
+        options.preview_command.clone(),
+        options.graphics_adapter,
+        !options.password_mode,
+    );
     preview.request_if_changed(&ui);
     let mut needs_redraw = true;
 
