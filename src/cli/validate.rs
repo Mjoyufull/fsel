@@ -26,6 +26,7 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
 
     let uses_desktop_icons = !default.dmenu_mode
         && !default.cclip_mode
+        && !default.stdout
         && default.program.is_none()
         && hidden_commands == 0
         && !default.clear_history
@@ -192,6 +193,12 @@ mod tests {
             },
             Opts {
                 program: Some("true".to_string()),
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                ..Opts::default()
+            },
+            Opts {
+                stdout: true,
                 desktop_icon_preview_width_percent: 0,
                 desktop_icon_size: 0,
                 ..Opts::default()

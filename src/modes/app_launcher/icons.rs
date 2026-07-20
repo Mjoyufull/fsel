@@ -5,6 +5,8 @@ use crate::ui::{AppIconPreview, GraphicsAdapter, ImageManager};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::io::{self, Write};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -48,7 +50,7 @@ impl IconRuntime {
         let enabled = cli.desktop_icon_mode.shows_preview();
         let fallback_adapter = GraphicsAdapter::detect(None);
         let picker = if enabled {
-            Picker::from_query_stdio().unwrap_or_else(|_| fallback_adapter.picker())
+            picker_from_terminal_output(&fallback_adapter.picker())
         } else {
             fallback_adapter.picker()
         };
@@ -161,6 +163,37 @@ impl IconRuntime {
     pub(super) fn take_terminal_clear(&mut self) -> bool {
         std::mem::take(&mut self.needs_terminal_clear)
     }
+}
+
+#[cfg(unix)]
+fn picker_from_terminal_output(fallback: &Picker) -> Picker {
+    let _ = io::stdout().flush();
+    // The picker library queries through stdout/stdin. The launcher owns the
+    // terminal on stderr and reserves stdout for selected-command output, so
+    // redirect only the probe's writes while keeping its stdin response path.
+    let Ok(saved_stdout) = rustix::io::dup(rustix::stdio::stdout()) else {
+        return fallback.clone();
+    };
+    if rustix::stdio::dup2_stdout(rustix::stdio::stderr()).is_err() {
+        return fallback.clone();
+    }
+
+    struct StdoutGuard(rustix::fd::OwnedFd);
+    impl Drop for StdoutGuard {
+        fn drop(&mut self) {
+            let _ = rustix::stdio::dup2_stdout(&self.0);
+        }
+    }
+
+    let guard = StdoutGuard(saved_stdout);
+    let picker = Picker::from_query_stdio().unwrap_or_else(|_| fallback.clone());
+    drop(guard);
+    picker
+}
+
+#[cfg(not(unix))]
+fn picker_from_terminal_output(fallback: &Picker) -> Picker {
+    fallback.clone()
 }
 
 impl Drop for IconRuntime {

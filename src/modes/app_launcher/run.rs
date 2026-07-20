@@ -131,6 +131,9 @@ pub async fn run(cli: Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
+    let mut icons = super::icons::IconRuntime::new(&cli);
+    icons.request_if_changed(&state);
+
     let mut input = InputConfig {
         disable_mouse: cli.disable_mouse,
         tick_rate: Duration::from_millis(250),
@@ -139,9 +142,6 @@ pub async fn run(cli: Opts) -> Result<()> {
         ..InputConfig::default()
     }
     .init_async();
-
-    let mut icons = super::icons::IconRuntime::new(&cli);
-    icons.request_if_changed(&state);
     let mut needs_redraw = true;
 
     loop {
