@@ -1,15 +1,53 @@
 use eyre::Result;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn effective_title_height(total_height: u16, title_panel_height_percent: u16) -> u16 {
     if title_panel_height_percent == 0 {
         0
     } else {
         (total_height as f32 * title_panel_height_percent as f32 / 100.0).round() as u16
+    }
+}
+
+pub(crate) fn launcher_panel_areas(size: Rect, cli: &crate::cli::Opts) -> (Rect, Rect, Rect) {
+    let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
+    let chunks = match cli.title_panel_position {
+        Some(crate::ui::PanelPosition::Bottom) => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(cli.input_panel_height),
+                Constraint::Length(title_height),
+            ])
+            .split(size),
+        Some(crate::ui::PanelPosition::Middle) => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(title_height),
+                Constraint::Length(cli.input_panel_height),
+                Constraint::Min(0),
+            ])
+            .split(size),
+        _ => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(title_height),
+                Constraint::Min(0),
+                Constraint::Length(cli.input_panel_height),
+            ])
+            .split(size),
+    };
+
+    match cli.title_panel_position {
+        Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
+        Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
+        _ => (chunks[0], chunks[2], chunks[1]),
     }
 }
 
@@ -39,10 +77,12 @@ fn split_icon_preview(
 /// App filtering and sorting UI (Stateless Renderer)
 pub struct UI;
 
-/// Borrowed selected-app icon state used by the launcher renderer.
-pub struct AppIconPreview<'a> {
+/// Borrowed application icon state used by the launcher renderer.
+pub struct AppIcons<'a> {
     pub(crate) image_manager: &'a mut crate::ui::ImageManager,
-    pub(crate) key: &'a str,
+    pub(crate) preview_key: Option<&'a str>,
+    pub(crate) list_keys: &'a HashMap<String, String>,
+    pub(crate) failed_list_icons: &'a mut HashSet<String>,
 }
 
 impl UI {
@@ -57,48 +97,14 @@ impl UI {
         f: &mut Frame,
         state: &crate::core::state::State,
         cli: &crate::cli::Opts,
-        icon_preview: Option<AppIconPreview<'_>>,
-    ) -> Result<bool> {
+        mut app_icons: Option<AppIcons<'_>>,
+    ) -> Result<(bool, bool, bool)> {
         let size = f.area();
         let mut icon_render_failed = false;
         let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
         let should_render_border = title_height > 0;
 
-        // Layout calculations
-        let chunks = match cli.title_panel_position {
-            Some(crate::ui::PanelPosition::Bottom) => Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(cli.input_panel_height),
-                    Constraint::Length(title_height),
-                ])
-                .split(size),
-            Some(crate::ui::PanelPosition::Middle) => Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(title_height),
-                    Constraint::Length(cli.input_panel_height),
-                    Constraint::Min(0),
-                ])
-                .split(size),
-            _ => Layout::default() // Top default
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(title_height),
-                    Constraint::Min(0), // Apps panel
-                    Constraint::Length(cli.input_panel_height),
-                ])
-                .split(size),
-        };
-
-        let (title_area, input_area, apps_area) = match cli.title_panel_position {
-            Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
-            Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
-            // Default: Title (0), Apps (1), Input (2)
-            _ => (chunks[0], chunks[2], chunks[1]),
-        };
+        let (title_area, input_area, apps_area) = launcher_panel_areas(size, cli);
 
         // Render Title/Info Panel
         if should_render_border {
@@ -132,7 +138,11 @@ impl UI {
 
             // Text rendering from state.text which should be populated by state.update_info
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
-            if let Some(icon_preview) = icon_preview {
+            if app_icons
+                .as_ref()
+                .and_then(|icons| icons.preview_key)
+                .is_some()
+            {
                 let inner = info_block.inner(title_area);
                 let (icon_area, text_area) = split_icon_preview(
                     inner,
@@ -144,11 +154,13 @@ impl UI {
                     vertical: 0,
                 });
                 let icon_rendered = if icon_area.width > 0 && icon_area.height > 0 {
-                    Some(icon_preview.image_manager.render_cached(
-                        f,
-                        icon_preview.key,
-                        icon_area,
-                    )?)
+                    let icons = app_icons
+                        .as_mut()
+                        .expect("preview key requires application icon state");
+                    let key = icons
+                        .preview_key
+                        .expect("preview key was checked before rendering");
+                    Some(icons.image_manager.render_cached(f, key, icon_area)?)
                 } else {
                     None
                 };
@@ -229,70 +241,9 @@ impl UI {
             .scroll((0, scroll_x));
         f.render_widget(input, input_area);
 
-        // Calculate max visible rows (subtract borders)
-        let max_visible = apps_area.height.saturating_sub(2) as usize;
-
-        // Apps block with border
-        let apps_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(cli.apps_border_color))
-            .title(Span::styled(
-                " Apps ",
-                Style::default().fg(cli.header_title_color),
-            ))
-            .border_type(if cli.rounded_borders {
-                BorderType::Rounded
-            } else {
-                BorderType::Plain
-            });
-
-        // only render whats on screen, not the whole dang list
-        let items: Vec<ListItem> = state
-            .shown
-            .iter()
-            .skip(state.scroll_offset)
-            .take(max_visible)
-            .map(|app| {
-                let mut spans = Vec::new();
-
-                // Pin support
-                if app.pinned {
-                    spans.push(Span::styled(
-                        &cli.pin_icon,
-                        Style::default().fg(cli.pin_color),
-                    ));
-                    spans.push(Span::raw(" "));
-                }
-
-                spans.push(Span::styled(
-                    &app.name,
-                    Style::default().fg(cli.apps_text_color),
-                ));
-
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
-
-        let list = List::new(items)
-            .block(apps_block)
-            .highlight_style(
-                Style::default()
-                    .fg(cli.highlight_color)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("> ");
-
-        // gotta adjust for the scroll offset innit
-        let mut list_state = ratatui::widgets::ListState::default();
-        if let Some(sel) = state.selected {
-            // Only highlight if selection is within visible range
-            if sel >= state.scroll_offset && sel < state.scroll_offset + max_visible {
-                list_state.select(Some(sel - state.scroll_offset));
-            }
-        }
-
-        f.render_stateful_widget(list, apps_area, &mut list_state);
-        Ok(icon_render_failed)
+        let (list_render_failed, list_rendered) =
+            super::app_list::render(f, state, cli, apps_area, app_icons.as_mut())?;
+        Ok((icon_render_failed, list_render_failed, list_rendered))
     }
 }
 

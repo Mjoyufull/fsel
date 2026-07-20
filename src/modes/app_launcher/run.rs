@@ -132,7 +132,10 @@ pub async fn run(cli: Opts) -> Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     let mut icons = super::icons::IconRuntime::new(&cli);
-    icons.request_if_changed(&state);
+    icons.request_if_changed(
+        &state,
+        crate::ui::launcher_visible_rows(terminal.size()?.height, &cli),
+    );
 
     let mut input = InputConfig {
         disable_mouse: cli.disable_mouse,
@@ -149,12 +152,14 @@ pub async fn run(cli: Opts) -> Result<()> {
             if icons.take_terminal_clear() {
                 terminal.clear()?;
             }
-            let mut render_result = Ok(false);
+            let mut render_result = Ok((false, false, false));
             terminal.draw(|frame| {
-                render_result = UI::new().render(frame, &state, &cli, icons.preview());
+                render_result = UI::new().render(frame, &state, &cli, icons.render_state());
             })?;
-            if render_result? {
-                icons.clear_failed_preview();
+            let (preview_failed, list_failed, list_rendered) = render_result?;
+            icons.finish_render(list_rendered);
+            if preview_failed || list_failed {
+                icons.handle_render_failures(preview_failed, list_failed);
                 needs_redraw = true;
                 continue;
             }
@@ -170,10 +175,13 @@ pub async fn run(cli: Opts) -> Result<()> {
                     break;
                 };
                 let should_handle = matches!(&event, Event::Input(_) | Event::Mouse(_));
+                if matches!(&event, Event::Render) {
+                    icons.handle_terminal_resize();
+                }
                 needs_redraw =
                     matches!(&event, Event::Input(_) | Event::Mouse(_) | Event::Render);
+                let total_height = terminal.size()?.height;
                 if should_handle {
-                    let total_height = terminal.size()?.height;
                     super::events::handle_event(
                         &mut state,
                         event,
@@ -182,8 +190,11 @@ pub async fn run(cli: Opts) -> Result<()> {
                         &hidden_store,
                         total_height,
                     );
-                    icons.request_if_changed(&state);
                 }
+                icons.request_if_changed(
+                    &state,
+                    crate::ui::launcher_visible_rows(total_height, &cli),
+                );
             }
         }
 

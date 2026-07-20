@@ -19,6 +19,7 @@ pub(crate) struct IconResolver {
     icon_roots: Vec<PathBuf>,
     pixmap_roots: Vec<PathBuf>,
     cache: HashMap<String, Option<PathBuf>>,
+    theme_chain: Option<Vec<String>>,
 }
 
 impl IconResolver {
@@ -70,6 +71,7 @@ impl IconResolver {
             icon_roots,
             pixmap_roots,
             cache: HashMap::new(),
+            theme_chain: None,
         }
     }
 
@@ -87,16 +89,22 @@ impl IconResolver {
         }
 
         let icon_name = strip_icon_extension(icon);
+        if self.theme_chain.is_none() {
+            self.theme_chain = Some(self.build_theme_chain());
+        }
         let resolved = self
-            .theme_chain()
-            .into_iter()
+            .theme_chain
+            .as_ref()
+            .expect("theme chain was initialized")
+            .iter()
+            .cloned()
             .find_map(|theme| self.find_in_theme(&theme, icon_name))
             .or_else(|| self.find_unthemed(icon_name));
         self.cache.insert(icon.to_string(), resolved.clone());
         resolved
     }
 
-    fn theme_chain(&self) -> Vec<String> {
+    fn build_theme_chain(&self) -> Vec<String> {
         let mut seen = HashSet::new();
         let mut themes = Vec::new();
         self.append_theme_subtree(&self.theme, &mut seen, &mut themes);
@@ -332,6 +340,7 @@ mod tests {
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -363,6 +372,7 @@ mod tests {
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -384,6 +394,7 @@ mod tests {
         fs::write(&expected, b"png").expect("PNG icon should be written");
         let mut resolver = IconResolver {
             theme: "Selected".to_string(),
+            theme_chain: None,
             size: 64,
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
@@ -422,6 +433,7 @@ mod tests {
             icon_roots: vec![user_root, system_root],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -447,6 +459,7 @@ mod tests {
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -488,6 +501,7 @@ mod tests {
             icon_roots: vec![user_root, system_root, root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -523,6 +537,7 @@ mod tests {
             icon_roots: vec![user_root, system_root],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -554,6 +569,7 @@ mod tests {
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -583,9 +599,10 @@ mod tests {
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
-        let chain = resolver.theme_chain();
+        let chain = resolver.build_theme_chain();
         assert_eq!(chain.len(), super::MAX_THEME_DEPTH + 1);
         assert_eq!(chain.last().map(String::as_str), Some("hicolor"));
         let _ = fs::remove_dir_all(root);
@@ -602,6 +619,7 @@ mod tests {
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -619,6 +637,7 @@ mod tests {
             icon_roots: Vec::new(),
             pixmap_roots: vec![root.clone()],
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("editor"), Some(expected));
@@ -633,6 +652,7 @@ mod tests {
             icon_roots: Vec::new(),
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve("../outside"), None);
@@ -651,6 +671,7 @@ mod tests {
             icon_roots: Vec::new(),
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
+            theme_chain: None,
         };
 
         assert_eq!(resolver.resolve(icon.to_str().unwrap()), Some(icon.clone()));
