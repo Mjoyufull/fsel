@@ -66,7 +66,14 @@ pub(super) struct CommandOutput {
     stderr: Vec<u8>,
     status: String,
     success: bool,
-    truncated: bool,
+    stdout_truncated: bool,
+    stderr_truncated: bool,
+}
+
+impl CommandOutput {
+    fn truncated(&self) -> bool {
+        self.stdout_truncated || self.stderr_truncated
+    }
 }
 
 impl PreviewRuntime {
@@ -222,7 +229,7 @@ impl PreviewRuntime {
             } else {
                 stderr
             };
-            append_truncation_notice(&mut text, output.truncated);
+            append_truncation_notice(&mut text, output.truncated());
             self.content = PreviewContent::Text(text);
             return;
         }
@@ -247,7 +254,7 @@ impl PreviewRuntime {
         }
 
         let mut text = output_text(&output.stdout);
-        append_truncation_notice(&mut text, output.truncated);
+        append_truncation_notice(&mut text, output.truncated());
         self.content = PreviewContent::Text(text);
     }
 
@@ -357,8 +364,36 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                 case_patterns: Vec::new(),
                 arithmetic: remaining.starts_with("$(("),
                 command_position: true,
+                delimiter: SubstitutionDelimiter::Parenthesis,
             });
             quote = ShellQuote::Unquoted;
+            remaining = rest;
+        } else if !escaped
+            && quote != ShellQuote::Single
+            && let Some(rest) = remaining.strip_prefix('`')
+        {
+            command.push('`');
+            if substitutions.last().is_some_and(|substitution| {
+                substitution.delimiter == SubstitutionDelimiter::Backtick
+            }) {
+                quote = substitutions
+                    .pop()
+                    .expect("substitution stack is non-empty")
+                    .outer_quote;
+            } else {
+                if let Some(parent) = substitutions.last_mut() {
+                    parent.command_position = false;
+                }
+                substitutions.push(CommandSubstitution {
+                    outer_quote: quote,
+                    nested_parentheses: 0,
+                    case_patterns: Vec::new(),
+                    arithmetic: false,
+                    command_position: true,
+                    delimiter: SubstitutionDelimiter::Backtick,
+                });
+                quote = ShellQuote::Unquoted;
+            }
             remaining = rest;
         } else if !escaped
             && quote == ShellQuote::Unquoted
@@ -404,10 +439,19 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                     quote = ShellQuote::Unquoted;
                 }
                 (ShellQuote::Unquoted, '(') if !substitutions.is_empty() => {
-                    substitutions
+                    let substitution = substitutions
                         .last_mut()
-                        .expect("substitution stack is non-empty")
-                        .nested_parentheses += 1;
+                        .expect("substitution stack is non-empty");
+                    let starts_case_pattern = command[..command.len() - 1]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|previous| previous.is_whitespace() || previous == '|');
+                    // An optional leading parenthesis is part of a case pattern.
+                    // Parentheses within the pattern (for example, extglobs) still
+                    // need balancing before the command substitution can close.
+                    if substitution.case_patterns.last() != Some(&true) || !starts_case_pattern {
+                        substitution.nested_parentheses += 1;
+                    }
                 }
                 (ShellQuote::Unquoted, ')') if !substitutions.is_empty() => {
                     let substitution = substitutions
@@ -421,12 +465,14 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                         }
                         substitution.command_position = true;
                         continue;
-                    } else if substitution.nested_parentheses == 0 {
+                    } else if substitution.nested_parentheses == 0
+                        && substitution.delimiter == SubstitutionDelimiter::Parenthesis
+                    {
                         quote = substitutions
                             .pop()
                             .expect("substitution stack is non-empty")
                             .outer_quote;
-                    } else {
+                    } else if substitution.nested_parentheses > 0 {
                         substitution.nested_parentheses -= 1;
                     }
                 }
@@ -471,6 +517,13 @@ struct CommandSubstitution {
     case_patterns: Vec<bool>,
     arithmetic: bool,
     command_position: bool,
+    delimiter: SubstitutionDelimiter,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SubstitutionDelimiter {
+    Parenthesis,
+    Backtick,
 }
 
 fn shell_control_keyword(template: &str, remaining: &str) -> Option<&'static str> {
@@ -574,7 +627,8 @@ async fn run_preview_command(
         stderr,
         status: status.to_string(),
         success: status.success(),
-        truncated: stdout_truncated || stderr_truncated,
+        stdout_truncated,
+        stderr_truncated,
     })
 }
 
@@ -649,7 +703,7 @@ fn append_truncation_notice(text: &mut String, truncated: bool) {
 }
 
 fn truncated_image_message(output: &CommandOutput) -> Option<String> {
-    (output.truncated && image::guess_format(&output.stdout).is_ok()).then(|| {
+    (output.stdout_truncated && image::guess_format(&output.stdout).is_ok()).then(|| {
         format!(
             "Preview image exceeds the {} MiB output limit",
             MAX_PREVIEW_BYTES / (1024 * 1024)
@@ -750,6 +804,14 @@ mod tests {
         assert!(command.contains("$FSEL_PREVIEW_ITEM"));
     }
 
+    #[test]
+    fn case_pattern_parentheses_remain_balanced() {
+        let command = expand_preview_command("echo \"$(case x in @(x)) :;; esac){}\"")
+            .expect("parentheses within a case pattern should remain balanced");
+
+        assert!(command.ends_with("$FSEL_PREVIEW_ITEM\"\"\""));
+    }
+
     #[tokio::test]
     async fn case_as_an_argument_does_not_change_shell_context() {
         let command = expand_preview_command("printf '<%s>' \"$(printf case){}\"")
@@ -792,6 +854,49 @@ mod tests {
     async fn grouping_inside_case_preserves_outer_quote_context() {
         let command = expand_preview_command("printf '<%s>' \"$(case x in x) ( : );; esac){}\"")
             .expect("a group inside a case body should not close the substitution");
+        let payload = "two words*.txt";
+
+        let output = tokio::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("FSEL_PREVIEW_ITEM", payload)
+            .output()
+            .await
+            .expect("POSIX preview command should run");
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"<two words*.txt>");
+    }
+
+    #[tokio::test]
+    async fn leading_case_parenthesis_preserves_outer_quote_context() {
+        let command =
+            expand_preview_command("printf '<%s>' \"$(case x in (x) printf x;; esac){}\"")
+                .expect("a leading case parenthesis should not close the substitution");
+        let payload = "two words*.txt";
+
+        let output = tokio::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("FSEL_PREVIEW_ITEM", payload)
+            .output()
+            .await
+            .expect("POSIX preview command should run");
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"<xtwo words*.txt>");
+    }
+
+    #[tokio::test]
+    async fn backtick_substitution_preserves_placeholder_quoting() {
+        let command = expand_preview_command("printf '<%s>' \"`printf %s {}`\"")
+            .expect("a backtick substitution should have its own quote context");
         let payload = "two words*.txt";
 
         let output = tokio::process::Command::new("/bin/sh")
@@ -890,7 +995,8 @@ mod tests {
             stderr: Vec::new(),
             status: "signal: 9".to_string(),
             success: false,
-            truncated: true,
+            stdout_truncated: true,
+            stderr_truncated: false,
         };
 
         assert_eq!(
@@ -900,13 +1006,28 @@ mod tests {
     }
 
     #[test]
+    fn truncated_stderr_does_not_reject_a_complete_image() {
+        let output = CommandOutput {
+            stdout: b"\x89PNG\r\n\x1a\ncomplete".to_vec(),
+            stderr: b"diagnostic".to_vec(),
+            status: "signal: 9".to_string(),
+            success: false,
+            stdout_truncated: false,
+            stderr_truncated: true,
+        };
+
+        assert_eq!(truncated_image_message(&output), None);
+    }
+
+    #[test]
     fn nonzero_commands_keep_nonempty_stdout() {
         let output = CommandOutput {
             stdout: b"useful diff".to_vec(),
             stderr: Vec::new(),
             status: "exit status: 1".to_string(),
             success: false,
-            truncated: false,
+            stdout_truncated: false,
+            stderr_truncated: false,
         };
 
         assert!(!should_report_command_failure(&output));
