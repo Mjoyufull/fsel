@@ -1,3 +1,68 @@
+[3.6.0-kiwicrab]
+
+Added
+
+- Persistent app-launcher entry hiding (from PR #90, closes #81)
+  - `Alt+Delete` hides the exact selected desktop entry or executable without deleting or modifying its source file.
+  - `Alt+U` restores the most recently hidden entry while the launcher is open.
+  - New `--list-hidden`, `--unhide <ID>`, and `--unhide-all` commands manage persistent hides outside the TUI.
+  - Hidden entries stay excluded from the interactive launcher, direct launch, and `--stdout`, including after cache or history cleanup.
+- Optional deterministic duplicate suppression (from PR #90)
+  - New `[app_launcher].auto_hide_duplicates`, `--auto-hide-duplicates[=no]`, and `FSEL_APP_LAUNCHER_AUTO_HIDE_DUPLICATES` controls.
+  - Automatic hiding defaults to `false`; manual hiding remains available regardless of that setting.
+  - Duplicate selection follows XDG application-directory precedence, supports source-specific entries such as Bedrock Linux strata, and exposes the next eligible source when the current winner is manually hidden.
+
+Changed
+
+- App-launcher visibility and diagnostics (from PR #90)
+  - Source-specific entry identities now distinguish equal names and desktop IDs from different paths, including non-UTF-8 paths.
+  - `--vvv` reports manual, automatic, and unavailable hidden-entry counts.
+  - Hidden-entry listing includes stable numeric IDs, timestamps, source paths, and unavailable-source markers.
+
+Fixed
+
+- App-launcher startup cursor race (from PR #84, addresses #83)
+  - Async keyboard input now starts after terminal setup and clearing, preventing cursor-position responses from being consumed by the wrong reader.
+  - App mode no longer intermittently fails with `The cursor position could not be read within a normal duration`.
+- Configured keybinds across interactive modes (from PR #85, closes #82)
+  - Cclip and dmenu navigation, selection, exit, backspace, and mode-specific actions now use configured bindings instead of hard-coded keys.
+  - Standalone `~/.config/fsel/keybinds.toml` is loaded when `config.toml` has no embedded `[keybinds]` table; embedded bindings keep precedence.
+  - The documented `tab` key and shifted letter events now parse and dispatch correctly.
+
+Technical details
+
+- Added typed `hidden_entries` persistence in redb with source-specific, lossless entry keys and automatically created tables; no manual migration is required.
+- Centralized path-key encoding for cache and hidden-entry identities, including Unix non-UTF-8 paths.
+- Duplicate suppression groups by desktop-file ID and normalized visible name, then applies deterministic XDG root and relative-path ordering.
+- Added regression coverage for persistence, visibility filtering, direct and stdout launch paths, CLI validation, custom modifier bindings, Bedrock-style sources, subdirectory desktop IDs, and non-UTF-8 paths.
+
+Documentation
+
+- README and USAGE: documented manual hiding, restore commands, duplicate suppression, defaults, precedence, and troubleshooting.
+- `config.toml` and `keybinds.toml`: documented the new launcher option and hide/restore bindings.
+- Man page and CLI help: documented hidden-entry administration and duplicate-suppression flags.
+- Version references and release metadata updated for 3.6.0-kiwicrab on the release branch.
+
+Notes
+
+- SemVer: MINOR (3.5.2 -> 3.6.0). This release adds persistent manual entry hiding and optional automatic duplicate suppression while retaining backward-compatible defaults.
+- Rationale: 3.6.0 gives users explicit, reversible control over noisy launcher entries, fixes configured keybind behavior across every interactive mode, and removes an intermittent app-launcher startup failure.
+
+Contributors
+
+- @Mjoyufull
+- Code review: @cubic-dev-ai, @chatgpt-codex-connector
+
+Compatibility
+
+- Language/runtime: Rust 1.94+ stable; edition remains 2024.
+- Platforms: GNU/Linux and *BSD for fsel overall.
+- Config: compatible; `auto_hide_duplicates` is optional and defaults to `false`, and new keybind actions have defaults.
+- Database: compatible; hidden-entry tables are created automatically and require no destructive migration.
+- Breaking: none.
+
+---
+
 [3.5.2-kiwicrab]
 
 Fixed
@@ -1601,4 +1666,3 @@ Changed
 * Improved lock file management with automatic cleanup
 * Enhanced error handling and graceful fallbacks
 * Unpinned serde and serde_derive
-

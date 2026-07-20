@@ -58,7 +58,7 @@ Get up and running in 30 seconds:
 nix run github:Mjoyufull/fsel
 
 # Or install from Cargo
-cargo install fsel@3.5.1-kiwicrab
+cargo install fsel@3.6.0-kiwicrab
 
 # Launch fsel
 fsel
@@ -101,11 +101,11 @@ Need install variants, launch methods, or mode-specific examples? See [USAGE.md]
 
 * Build and install via Cargo:
     ```sh
-    $ cargo install fsel@3.5.2-kiwicrab
+    $ cargo install fsel@3.6.0-kiwicrab
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@3.5.1-kiwicrab --force
+    $ cargo install fsel@3.6.0-kiwicrab --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
