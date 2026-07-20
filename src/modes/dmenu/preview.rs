@@ -228,6 +228,10 @@ impl PreviewRuntime {
         }
 
         let image_key = format!("dmenu-preview-{generation}");
+        if let Some(message) = truncated_image_message(&output) {
+            self.content = PreviewContent::Text(message);
+            return;
+        }
         if image::guess_format(&output.stdout).is_ok() {
             let request = DecodeRequest {
                 generation,
@@ -333,7 +337,11 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
             append_placeholder(&mut command, quote, "FSEL_PREVIEW_QUERY")?;
             remaining = rest;
         } else if !escaped && let Some(rest) = remaining.strip_prefix("{n}") {
-            append_placeholder(&mut command, quote, "FSEL_PREVIEW_ORDINAL")?;
+            if arithmetic_context {
+                command.push_str("FSEL_PREVIEW_ORDINAL");
+            } else {
+                append_placeholder(&mut command, quote, "FSEL_PREVIEW_ORDINAL")?;
+            }
             remaining = rest;
         } else if !escaped
             && quote != ShellQuote::Single
@@ -346,7 +354,7 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
             substitutions.push(CommandSubstitution {
                 outer_quote: quote,
                 nested_parentheses: 0,
-                case_depth: 0,
+                case_patterns: Vec::new(),
                 arithmetic: remaining.starts_with("$(("),
                 command_position: true,
             });
@@ -366,11 +374,11 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                 .expect("substitution stack is non-empty");
             match keyword {
                 "case" => {
-                    substitution.case_depth += 1;
+                    substitution.case_patterns.push(true);
                     substitution.command_position = false;
                 }
                 "esac" => {
-                    substitution.case_depth = substitution.case_depth.saturating_sub(1);
+                    substitution.case_patterns.pop();
                     substitution.command_position = false;
                 }
                 "then" | "do" | "else" | "elif" => {
@@ -405,9 +413,12 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                     let substitution = substitutions
                         .last_mut()
                         .expect("substitution stack is non-empty");
-                    if substitution.case_depth > 0 {
+                    if substitution.case_patterns.last() == Some(&true) {
                         // A case pattern terminator belongs to the case grammar,
                         // not to the surrounding command substitution.
+                        if let Some(in_pattern) = substitution.case_patterns.last_mut() {
+                            *in_pattern = false;
+                        }
                         substitution.command_position = true;
                         continue;
                     } else if substitution.nested_parentheses == 0 {
@@ -425,7 +436,15 @@ fn expand_preview_command(template: &str) -> Result<String, String> {
                 && let Some(substitution) = substitutions.last_mut()
             {
                 match character {
-                    ';' | '|' | '&' | '\n' => substitution.command_position = true,
+                    ';' | '|' | '&' | '\n' => {
+                        substitution.command_position = true;
+                        if character == ';'
+                            && remaining.starts_with(';')
+                            && let Some(in_pattern) = substitution.case_patterns.last_mut()
+                        {
+                            *in_pattern = true;
+                        }
+                    }
                     '(' | '{' if substitution.command_position => {
                         substitution.command_position = true;
                     }
@@ -449,7 +468,7 @@ enum ShellQuote {
 struct CommandSubstitution {
     outer_quote: ShellQuote,
     nested_parentheses: usize,
-    case_depth: usize,
+    case_patterns: Vec<bool>,
     arithmetic: bool,
     command_position: bool,
 }
@@ -629,6 +648,15 @@ fn append_truncation_notice(text: &mut String, truncated: bool) {
     }
 }
 
+fn truncated_image_message(output: &CommandOutput) -> Option<String> {
+    (output.truncated && image::guess_format(&output.stdout).is_ok()).then(|| {
+        format!(
+            "Preview image exceeds the {} MiB output limit",
+            MAX_PREVIEW_BYTES / (1024 * 1024)
+        )
+    })
+}
+
 fn should_report_command_failure(output: &CommandOutput) -> bool {
     !output.success && output.stdout.is_empty()
 }
@@ -637,7 +665,7 @@ fn should_report_command_failure(output: &CommandOutput) -> bool {
 mod tests {
     use super::{
         CommandOutput, append_truncation_notice, expand_preview_command, read_limited_to,
-        run_preview_command, should_report_command_failure,
+        run_preview_command, should_report_command_failure, truncated_image_message,
     };
     use tokio::io::AsyncWriteExt;
 
@@ -697,6 +725,23 @@ mod tests {
         assert!(command.contains("$((1 << 8))"));
     }
 
+    #[tokio::test]
+    async fn arithmetic_ordinal_placeholder_uses_an_unquoted_variable() {
+        let command = expand_preview_command("printf '%s' $(({n}+1))")
+            .expect("ordinal placeholders should expand in arithmetic contexts");
+
+        assert_eq!(command, "printf '%s' $((FSEL_PREVIEW_ORDINAL+1))");
+        let output = tokio::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("FSEL_PREVIEW_ORDINAL", "4")
+            .output()
+            .await
+            .expect("POSIX preview command should run");
+
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"5");
+    }
+
     #[test]
     fn case_patterns_do_not_close_command_substitutions() {
         let command = expand_preview_command("echo \"$(case x in x) printf '%s' \"{}\";; esac)\"")
@@ -731,6 +776,27 @@ mod tests {
             .env("FSEL_PREVIEW_ITEM", payload)
             .env("FSEL_PREVIEW_QUERY", "")
             .env("FSEL_PREVIEW_ORDINAL", "0")
+            .output()
+            .await
+            .expect("POSIX preview command should run");
+
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"<two words*.txt>");
+    }
+
+    #[tokio::test]
+    async fn grouping_inside_case_preserves_outer_quote_context() {
+        let command = expand_preview_command("printf '<%s>' \"$(case x in x) ( : );; esac){}\"")
+            .expect("a group inside a case body should not close the substitution");
+        let payload = "two words*.txt";
+
+        let output = tokio::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("FSEL_PREVIEW_ITEM", payload)
             .output()
             .await
             .expect("POSIX preview command should run");
@@ -815,6 +881,22 @@ mod tests {
         append_truncation_notice(&mut text, true);
 
         assert_eq!(text, "command failed\n\n[preview output truncated]");
+    }
+
+    #[test]
+    fn truncated_images_are_reported_before_decode() {
+        let output = CommandOutput {
+            stdout: b"\x89PNG\r\n\x1a\npartial".to_vec(),
+            stderr: Vec::new(),
+            status: "signal: 9".to_string(),
+            success: false,
+            truncated: true,
+        };
+
+        assert_eq!(
+            truncated_image_message(&output).as_deref(),
+            Some("Preview image exceeds the 32 MiB output limit")
+        );
     }
 
     #[test]
