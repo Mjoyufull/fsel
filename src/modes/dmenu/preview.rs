@@ -14,6 +14,7 @@ const MAX_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
 
 pub(super) struct PreviewRuntime {
     command_template: Option<String>,
+    expose_query: bool,
     content: PreviewContent,
     adapter: GraphicsAdapter,
     image_manager: ImageManager,
@@ -86,7 +87,11 @@ impl CommandOutput {
 }
 
 impl PreviewRuntime {
-    pub(super) fn new(command_template: Option<String>, adapter: GraphicsAdapter) -> Self {
+    pub(super) fn new(
+        command_template: Option<String>,
+        adapter: GraphicsAdapter,
+        expose_query: bool,
+    ) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
         let (decode_tx, mut decode_rx) = mpsc::unbounded_channel::<()>();
         let decode_request = Arc::new(Mutex::new(None::<DecodeRequest>));
@@ -121,6 +126,7 @@ impl PreviewRuntime {
         });
         Self {
             command_template,
+            expose_query,
             content: PreviewContent::Empty,
             adapter,
             image_manager: ImageManager::new(adapter.picker()),
@@ -200,11 +206,12 @@ impl PreviewRuntime {
             }
         };
         let item = signature.item.clone();
-        let query = signature.query.clone();
+        let query = self.expose_query.then(|| signature.query.clone());
         let input_ordinal = signature.input_ordinal;
         let result_tx = self.result_tx.clone();
         self.active_request = Some(tokio::spawn(async move {
-            let output = run_preview_command(&command, &item, &query, input_ordinal).await;
+            let output =
+                run_preview_command(&command, &item, query.as_deref(), input_ordinal).await;
             let _ = result_tx.send(PreviewResult::Command { generation, output });
         }));
         self.current_signature = Some(signature);
@@ -290,8 +297,11 @@ impl PreviewRuntime {
     }
 
     pub(super) fn needs_terminal_clear(&self) -> bool {
-        matches!(self.adapter, GraphicsAdapter::Sixel)
-            && image_state_changed(self.previous_image_key.as_deref(), &self.content)
+        graphics_state_changed(
+            self.adapter,
+            self.previous_image_key.as_deref(),
+            &self.content,
+        )
     }
 
     pub(super) fn finish_draw(&mut self) {
@@ -575,7 +585,7 @@ fn append_placeholder(
 async fn run_preview_command(
     command: &str,
     item: &str,
-    query: &str,
+    query: Option<&str>,
     input_ordinal: usize,
 ) -> Result<CommandOutput, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
@@ -583,12 +593,16 @@ async fn run_preview_command(
     process
         .args(["-c", command])
         .env("FSEL_PREVIEW_ITEM", item)
-        .env("FSEL_PREVIEW_QUERY", query)
         .env("FSEL_PREVIEW_ORDINAL", input_ordinal.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    if let Some(query) = query {
+        process.env("FSEL_PREVIEW_QUERY", query);
+    } else {
+        process.env_remove("FSEL_PREVIEW_QUERY");
+    }
     #[cfg(unix)]
     process.process_group(0);
 
@@ -724,17 +738,22 @@ fn should_report_command_failure(output: &CommandOutput) -> bool {
     !output.success && output.stdout.is_empty()
 }
 
-fn image_state_changed(previous_image_key: Option<&str>, content: &PreviewContent) -> bool {
-    previous_image_key != content.image_key()
+fn graphics_state_changed(
+    adapter: GraphicsAdapter,
+    previous_image_key: Option<&str>,
+    content: &PreviewContent,
+) -> bool {
+    !matches!(adapter, GraphicsAdapter::None) && previous_image_key != content.image_key()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
         CommandOutput, PreviewContent, append_truncation_notice, expand_preview_command,
-        image_state_changed, read_limited_to, run_preview_command, should_report_command_failure,
-        truncated_image_message,
+        graphics_state_changed, read_limited_to, run_preview_command,
+        should_report_command_failure, truncated_image_message,
     };
+    use crate::ui::GraphicsAdapter;
     use tokio::io::AsyncWriteExt;
 
     #[test]
@@ -749,11 +768,29 @@ mod tests {
     }
 
     #[test]
-    fn changing_sixel_image_keys_requires_a_clear() {
+    fn changing_out_of_band_image_keys_requires_a_clear() {
         let content = PreviewContent::Image("new-generation".to_string());
 
-        assert!(image_state_changed(Some("old-generation"), &content));
-        assert!(!image_state_changed(Some("new-generation"), &content));
+        assert!(graphics_state_changed(
+            GraphicsAdapter::Kitty,
+            Some("old-generation"),
+            &content
+        ));
+        assert!(graphics_state_changed(
+            GraphicsAdapter::Sixel,
+            Some("old-generation"),
+            &content
+        ));
+        assert!(!graphics_state_changed(
+            GraphicsAdapter::None,
+            Some("old-generation"),
+            &content
+        ));
+        assert!(!graphics_state_changed(
+            GraphicsAdapter::Kitty,
+            Some("new-generation"),
+            &content
+        ));
     }
 
     #[test]
@@ -840,7 +877,7 @@ mod tests {
             .expect("an ordinary case argument is not case grammar");
         let payload = "two words*.txt";
 
-        let output = run_preview_command(&command, payload, "", 0)
+        let output = run_preview_command(&command, payload, Some(""), 0)
             .await
             .expect("preview command should run");
 
@@ -942,7 +979,7 @@ mod tests {
             expand_preview_command("printf '%s' {}").expect("unquoted placeholder should expand");
         let payload = "$(printf injected >&2)";
 
-        let output = run_preview_command(&command, payload, "", 0)
+        let output = run_preview_command(&command, payload, Some(""), 0)
             .await
             .expect("preview command should run");
 
@@ -952,12 +989,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn password_mode_does_not_export_the_query() {
+        let output = run_preview_command("env", "selected", None, 0)
+            .await
+            .expect("preview command should run without a query environment variable");
+
+        assert!(output.success);
+        assert!(
+            !output
+                .stdout
+                .split(|byte| *byte == b'\n')
+                .any(|line| line.starts_with(b"FSEL_PREVIEW_QUERY="))
+        );
+    }
+
+    #[tokio::test]
     async fn double_quoted_placeholder_preserves_one_argument() {
         let command = expand_preview_command("printf '<%s>' \"{}\"")
             .expect("double-quoted placeholder should expand");
         let payload = "two words*.txt";
 
-        let output = run_preview_command(&command, payload, "", 0)
+        let output = run_preview_command(&command, payload, Some(""), 0)
             .await
             .expect("preview command should run");
 
@@ -971,7 +1023,7 @@ mod tests {
             .expect("nested double-quoted placeholder should expand");
         let payload = "two words*.txt";
 
-        let output = run_preview_command(&command, payload, "", 0)
+        let output = run_preview_command(&command, payload, Some(""), 0)
             .await
             .expect("preview command should run");
 
