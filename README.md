@@ -318,9 +318,11 @@ list_executables_in_path = false   # Show CLI tools from $PATH
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
 pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned", "newest_pinned"
-icon_mode = "preview"               # Selected app icon in the title panel; "none" disables
+icon_mode = "preview"               # "preview", "list", "both", or "none"
 icon_position = "right"             # "left" or "right"
 icon_preview_width_percent = 40
+icon_list_width = 4                  # Terminal columns reserved beside each app
+icon_list_height = 2                 # Terminal rows per app when list icons are enabled
 icon_size = 128
 # icon_theme = "Papirus-Dark"       # Optional override; desktop settings are detected by default
 ```
@@ -329,7 +331,8 @@ Desktop icons are resolved from the active XDG icon theme (GTK, KDE, and LXQt se
 detected), including inherited themes and
 absolute `Icon=` paths. PNG and SVG icons render through Kitty, Sixel, or the terminal-independent
 half-block fallback. The selected icon uses the right side of the title panel by default, matching
-the information/preview layout; set `icon_position = "left"` to swap sides.
+the information/preview layout. Set `icon_mode = "list"` for icons beside results or `"both"` for
+both placements; `icon_position`, `icon_list_width`, and `icon_list_height` customize the list.
 
 Field placement matters. Root-level UI options and `[app_launcher]` / `[dmenu]` / `[cclip]` sections are validated separately.
 See [config.toml](./config.toml) and [keybinds.toml](./keybinds.toml) for all options with detailed comments.

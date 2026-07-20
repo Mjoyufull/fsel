@@ -225,6 +225,10 @@ mod tests {
                 "left",
                 "--icon-preview-width",
                 "35",
+                "--icon-list-width",
+                "5",
+                "--icon-list-height",
+                "3",
                 "--icon-size",
                 "96",
                 "--icon-theme",
@@ -243,6 +247,8 @@ mod tests {
             crate::ui::HorizontalPosition::Left
         );
         assert_eq!(opts.desktop_icon_preview_width_percent, 35);
+        assert_eq!(opts.desktop_icon_list_width, 5);
+        assert_eq!(opts.desktop_icon_list_height, 3);
         assert_eq!(opts.desktop_icon_size, 96);
         assert_eq!(opts.desktop_icon_theme.as_deref(), Some("Papirus"));
     }
