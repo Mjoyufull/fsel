@@ -23,7 +23,7 @@ pub(super) struct PreviewRuntime {
     _decode_worker: std::thread::JoinHandle<()>,
     current_signature: Option<PreviewSignature>,
     generation: u64,
-    previous_was_image: bool,
+    previous_image_key: Option<String>,
     result_tx: mpsc::UnboundedSender<PreviewResult>,
     result_rx: mpsc::UnboundedReceiver<PreviewResult>,
 }
@@ -41,6 +41,15 @@ enum PreviewContent {
     Loading,
     Text(String),
     Image(String),
+}
+
+impl PreviewContent {
+    fn image_key(&self) -> Option<&str> {
+        let Self::Image(key) = self else {
+            return None;
+        };
+        Some(key)
+    }
 }
 
 struct DecodeRequest {
@@ -121,7 +130,7 @@ impl PreviewRuntime {
             _decode_worker: decode_worker,
             current_signature: None,
             generation: 0,
-            previous_was_image: false,
+            previous_image_key: None,
             result_tx,
             result_rx,
         }
@@ -282,11 +291,11 @@ impl PreviewRuntime {
 
     pub(super) fn needs_terminal_clear(&self) -> bool {
         matches!(self.adapter, GraphicsAdapter::Sixel)
-            && self.previous_was_image != matches!(&self.content, PreviewContent::Image(_))
+            && image_state_changed(self.previous_image_key.as_deref(), &self.content)
     }
 
     pub(super) fn finish_draw(&mut self) {
-        self.previous_was_image = matches!(&self.content, PreviewContent::Image(_));
+        self.previous_image_key = self.content.image_key().map(str::to_owned);
     }
 
     pub(super) fn render_image(&mut self, frame: &mut Frame, area: Rect) -> Result<bool> {
@@ -715,11 +724,16 @@ fn should_report_command_failure(output: &CommandOutput) -> bool {
     !output.success && output.stdout.is_empty()
 }
 
+fn image_state_changed(previous_image_key: Option<&str>, content: &PreviewContent) -> bool {
+    previous_image_key != content.image_key()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        CommandOutput, append_truncation_notice, expand_preview_command, read_limited_to,
-        run_preview_command, should_report_command_failure, truncated_image_message,
+        CommandOutput, PreviewContent, append_truncation_notice, expand_preview_command,
+        image_state_changed, read_limited_to, run_preview_command, should_report_command_failure,
+        truncated_image_message,
     };
     use tokio::io::AsyncWriteExt;
 
@@ -732,6 +746,14 @@ mod tests {
             command,
             "printf '%s %s %s' \"$FSEL_PREVIEW_ITEM\" \"$FSEL_PREVIEW_QUERY\" \"$FSEL_PREVIEW_ORDINAL\""
         );
+    }
+
+    #[test]
+    fn changing_sixel_image_keys_requires_a_clear() {
+        let content = PreviewContent::Image("new-generation".to_string());
+
+        assert!(image_state_changed(Some("old-generation"), &content));
+        assert!(!image_state_changed(Some("new-generation"), &content));
     }
 
     #[test]
