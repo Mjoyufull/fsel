@@ -9,7 +9,7 @@ mod theme;
 use index::{ThemeDirectory, read_theme_metadata};
 use theme::detect_icon_theme;
 
-const ICON_EXTENSIONS: [&str; 3] = ["png", "svg", "svgz"];
+const ICON_EXTENSIONS: [&str; 4] = ["png", "svg", "svgz", "xpm"];
 const MAX_THEME_DEPTH: usize = 16;
 
 /// Resolves desktop-entry icon names through the active XDG icon theme.
@@ -100,8 +100,9 @@ impl IconResolver {
         let mut seen = HashSet::new();
         let mut themes = Vec::new();
         self.append_theme_subtree(&self.theme, &mut seen, &mut themes);
-        if !seen.contains("hicolor") {
-            self.append_theme_subtree("hicolor", &mut seen, &mut themes);
+        if seen.insert("hicolor".to_string()) {
+            // The required fallback sits outside the inherited-theme depth cap.
+            themes.push("hicolor".to_string());
         }
         themes
     }
@@ -130,7 +131,7 @@ impl IconResolver {
 
     fn find_in_theme(&self, theme: &str, icon: &str) -> Option<PathBuf> {
         let mut candidates = Vec::new();
-        for root in &self.icon_roots {
+        for (root_rank, root) in self.icon_roots.iter().enumerate() {
             let theme_root = root.join(theme);
             if !theme_root.is_dir() {
                 continue;
@@ -144,6 +145,7 @@ impl IconResolver {
                         &directory,
                         icon,
                         self.size,
+                        root_rank,
                         &mut candidates,
                     );
                 }
@@ -157,7 +159,7 @@ impl IconResolver {
                 {
                     let path = entry.path();
                     if path.is_file() && has_icon_name(&path, icon) {
-                        candidates.push(IconCandidate::from_fallback(path, self.size));
+                        candidates.push(IconCandidate::from_fallback(path, self.size, root_rank));
                     }
                 }
             }
@@ -183,6 +185,7 @@ fn collect_named_candidates(
     directory: &ThemeDirectory,
     icon: &str,
     requested_size: u16,
+    root_rank: usize,
     candidates: &mut Vec<IconCandidate>,
 ) {
     for extension in ICON_EXTENSIONS {
@@ -193,6 +196,7 @@ fn collect_named_candidates(
             candidates.push(IconCandidate {
                 path,
                 directory_score: directory.score(requested_size),
+                root_rank,
             });
         }
     }
@@ -201,10 +205,11 @@ fn collect_named_candidates(
 struct IconCandidate {
     path: PathBuf,
     directory_score: (u32, u8),
+    root_rank: usize,
 }
 
 impl IconCandidate {
-    fn from_fallback(path: PathBuf, requested_size: u16) -> Self {
+    fn from_fallback(path: PathBuf, requested_size: u16, root_rank: usize) -> Self {
         let distance = path
             .components()
             .filter_map(|component| component.as_os_str().to_str())
@@ -215,12 +220,18 @@ impl IconCandidate {
         Self {
             path,
             directory_score: (distance, 3),
+            root_rank,
         }
     }
 
-    fn score(&self) -> (u32, u8, u8) {
+    fn score(&self) -> (u32, u8, usize, u8) {
         let (distance, kind_rank) = self.directory_score;
-        (distance, kind_rank, extension_rank(&self.path))
+        (
+            distance,
+            kind_rank,
+            self.root_rank,
+            extension_rank(&self.path),
+        )
     }
 }
 
@@ -384,6 +395,40 @@ mod tests {
     }
 
     #[test]
+    fn higher_priority_root_outranks_extension_preference() {
+        let root = temp_dir();
+        let user_root = root.join("user");
+        let system_root = root.join("system");
+        for icon_root in [&user_root, &system_root] {
+            let theme = icon_root.join("Selected");
+            fs::create_dir_all(theme.join("128x128/apps"))
+                .expect("theme directory should be created");
+            fs::write(
+                theme.join("index.theme"),
+                "[Icon Theme]\nDirectories=128x128/apps\n[128x128/apps]\nSize=128\nType=Fixed\n",
+            )
+            .expect("theme metadata should be written");
+        }
+        let expected = user_root.join("Selected/128x128/apps/editor.svg");
+        fs::write(&expected, b"user SVG").expect("user icon should be written");
+        fs::write(
+            system_root.join("Selected/128x128/apps/editor.png"),
+            b"system PNG",
+        )
+        .expect("system icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 128,
+            icon_roots: vec![user_root, system_root],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn resolves_compressed_svg_theme_icons() {
         let root = temp_dir();
         let theme = root.join("Selected");
@@ -516,6 +561,37 @@ mod tests {
     }
 
     #[test]
+    fn hicolor_is_appended_after_the_inheritance_depth_cap() {
+        let root = temp_dir();
+        for index in 0..super::MAX_THEME_DEPTH {
+            let theme = root.join(format!("Theme{index}"));
+            fs::create_dir_all(&theme).expect("theme should be created");
+            let inherits = if index + 1 < super::MAX_THEME_DEPTH {
+                format!("Theme{}", index + 1)
+            } else {
+                String::new()
+            };
+            fs::write(
+                theme.join("index.theme"),
+                format!("[Icon Theme]\nInherits={inherits}\n"),
+            )
+            .expect("theme metadata should be written");
+        }
+        let resolver = IconResolver {
+            theme: "Theme0".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        let chain = resolver.theme_chain();
+        assert_eq!(chain.len(), super::MAX_THEME_DEPTH + 1);
+        assert_eq!(chain.last().map(String::as_str), Some("hicolor"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn finds_unthemed_icons_in_icon_roots() {
         let root = temp_dir();
         let expected = root.join("editor.png");
@@ -525,6 +601,23 @@ mod tests {
             size: 64,
             icon_roots: vec![root.clone()],
             pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn finds_xpm_icons_in_pixmap_roots() {
+        let root = temp_dir();
+        let expected = root.join("editor.xpm");
+        fs::write(&expected, b"XPM icon").expect("XPM icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Missing".to_string(),
+            size: 64,
+            icon_roots: Vec::new(),
+            pixmap_roots: vec![root.clone()],
             cache: std::collections::HashMap::new(),
         };
 

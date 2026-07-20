@@ -312,6 +312,9 @@ fn decode_icon_image(bytes: &[u8]) -> Result<image::DynamicImage> {
     if looks_like_svg(bytes) {
         return decode_svg(bytes);
     }
+    if looks_like_xpm(bytes) {
+        return decode_xpm(bytes);
+    }
 
     let mut reader = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     let mut limits = image::Limits::default();
@@ -320,6 +323,194 @@ fn decode_icon_image(bytes: &[u8]) -> Result<image::DynamicImage> {
     limits.max_alloc = Some(MAX_ICON_DECODED_BYTES);
     reader.limits(limits);
     Ok(reader.decode()?)
+}
+
+fn looks_like_xpm(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes).is_ok_and(|text| {
+        let text = text.trim_start_matches('\u{feff}').trim_start();
+        text.starts_with("/* XPM */") || text.starts_with("! XPM2")
+    })
+}
+
+fn decode_xpm(bytes: &[u8]) -> Result<image::DynamicImage> {
+    let text = std::str::from_utf8(bytes).map_err(|error| eyre!("Invalid XPM text: {error}"))?;
+    let strings = if text
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .starts_with("! XPM2")
+    {
+        text.lines()
+            .skip_while(|line| !line.trim_start().starts_with("! XPM2"))
+            .skip(1)
+            .map(str::trim_end)
+            .filter(|line| !line.trim_start().starts_with('!'))
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    } else {
+        extract_c_strings(text)?
+    };
+    let header = strings
+        .first()
+        .ok_or_else(|| eyre!("XPM does not contain a header"))?;
+    let mut header_fields = header.split_whitespace();
+    let width = parse_xpm_number(header_fields.next(), "width")?;
+    let height = parse_xpm_number(header_fields.next(), "height")?;
+    let color_count = parse_xpm_number(header_fields.next(), "color count")? as usize;
+    let chars_per_pixel = parse_xpm_number(header_fields.next(), "characters per pixel")? as usize;
+    if width == 0 || height == 0 || color_count == 0 || chars_per_pixel == 0 {
+        return Err(eyre!(
+            "XPM dimensions, colors, and characters per pixel must be non-zero"
+        ));
+    }
+    if width > MAX_ICON_RASTER_DIMENSION || height > MAX_ICON_RASTER_DIMENSION {
+        return Err(eyre!("XPM dimensions exceed the icon decode limit"));
+    }
+    let decoded_bytes = u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| eyre!("XPM dimensions overflow"))?;
+    if decoded_bytes > MAX_ICON_DECODED_BYTES {
+        return Err(eyre!("XPM decoded image exceeds the memory limit"));
+    }
+    let expected_strings = 1usize
+        .checked_add(color_count)
+        .and_then(|count| count.checked_add(height as usize))
+        .ok_or_else(|| eyre!("XPM entry count overflow"))?;
+    if strings.len() < expected_strings {
+        return Err(eyre!("XPM is missing color or pixel rows"));
+    }
+
+    let mut colors = HashMap::<Vec<u8>, [u8; 4]>::with_capacity(color_count);
+    for line in &strings[1..=color_count] {
+        if line.len() < chars_per_pixel || !line.is_char_boundary(chars_per_pixel) {
+            return Err(eyre!("XPM color key is shorter than declared"));
+        }
+        let key = line.as_bytes()[..chars_per_pixel].to_vec();
+        let color = xpm_color_value(&line[chars_per_pixel..])?;
+        colors.insert(key, color);
+    }
+
+    let row_bytes = (width as usize)
+        .checked_mul(chars_per_pixel)
+        .ok_or_else(|| eyre!("XPM row width overflow"))?;
+    let mut pixels = Vec::with_capacity(decoded_bytes as usize);
+    for row in &strings[1 + color_count..expected_strings] {
+        if row.len() != row_bytes {
+            return Err(eyre!("XPM pixel row has an unexpected width"));
+        }
+        for key in row.as_bytes().chunks_exact(chars_per_pixel) {
+            let color = colors
+                .get(key)
+                .ok_or_else(|| eyre!("XPM pixel uses an undefined color key"))?;
+            pixels.extend_from_slice(color);
+        }
+    }
+    let image = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| eyre!("Failed to construct decoded XPM image"))?;
+    Ok(image::DynamicImage::ImageRgba8(image))
+}
+
+fn parse_xpm_number(value: Option<&str>, field: &str) -> Result<u32> {
+    value
+        .ok_or_else(|| eyre!("XPM header is missing {field}"))?
+        .parse()
+        .map_err(|error| eyre!("Invalid XPM {field}: {error}"))
+}
+
+fn xpm_color_value(specification: &str) -> Result<[u8; 4]> {
+    let fields = specification.split_whitespace().collect::<Vec<_>>();
+    let color_index = fields
+        .iter()
+        .position(|field| field.eq_ignore_ascii_case("c"))
+        .ok_or_else(|| eyre!("XPM color entry has no color field"))?;
+    let end = fields[color_index + 1..]
+        .iter()
+        .position(|field| {
+            ["s", "m", "g4", "g", "c"]
+                .iter()
+                .any(|name| field.eq_ignore_ascii_case(name))
+        })
+        .map_or(fields.len(), |offset| color_index + 1 + offset);
+    let value = fields[color_index + 1..end].join("");
+    if value.is_empty() {
+        return Err(eyre!("XPM color field is empty"));
+    }
+    if value.eq_ignore_ascii_case("none") {
+        return Ok([0, 0, 0, 0]);
+    }
+    if let Some(color) = parse_extended_xpm_hex(&value) {
+        return Ok(color);
+    }
+    let lowercase = value.to_ascii_lowercase();
+    if let Some(gray) = lowercase
+        .strip_prefix("gray")
+        .or_else(|| lowercase.strip_prefix("grey"))
+        .and_then(|percent| percent.parse::<u8>().ok())
+        .filter(|percent| *percent <= 100)
+    {
+        let channel = ((u16::from(gray) * 255 + 50) / 100) as u8;
+        return Ok([channel, channel, channel, 255]);
+    }
+    let color = value
+        .parse::<svgtypes::Color>()
+        .map_err(|error| eyre!("Unsupported XPM color {value:?}: {error}"))?;
+    Ok([color.red, color.green, color.blue, color.alpha])
+}
+
+fn parse_extended_xpm_hex(value: &str) -> Option<[u8; 4]> {
+    let hex = value.strip_prefix('#')?;
+    let component_width = match hex.len() {
+        3 | 6 => return None,
+        9 => 3,
+        12 => 4,
+        _ => return None,
+    };
+    let mut color = [0_u8; 4];
+    color[3] = 255;
+    for (index, channel) in color[..3].iter_mut().enumerate() {
+        let start = index * component_width;
+        *channel = u8::from_str_radix(&hex[start..start + 2], 16).ok()?;
+    }
+    Some(color)
+}
+
+fn extract_c_strings(text: &str) -> Result<Vec<String>> {
+    let mut strings = Vec::new();
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character != '"' {
+            continue;
+        }
+        let mut value = String::new();
+        let mut closed = false;
+        while let Some(character) = characters.next() {
+            match character {
+                '"' => {
+                    closed = true;
+                    break;
+                }
+                '\\' => {
+                    let escaped = characters
+                        .next()
+                        .ok_or_else(|| eyre!("XPM string ends after an escape"))?;
+                    match escaped {
+                        '\\' | '"' => value.push(escaped),
+                        'n' => value.push('\n'),
+                        'r' => value.push('\r'),
+                        't' => value.push('\t'),
+                        '\n' => {}
+                        other => value.push(other),
+                    }
+                }
+                other => value.push(other),
+            }
+        }
+        if !closed {
+            return Err(eyre!("XPM contains an unterminated string"));
+        }
+        strings.push(value);
+    }
+    Ok(strings)
 }
 
 fn looks_like_svg(bytes: &[u8]) -> bool {
@@ -686,7 +877,8 @@ impl GraphicsAdapter {
 mod tests {
     use super::{
         ImageManager, MAX_IMAGE_FILE_BYTES, bounded_svg_document, decode_icon_image, decode_image,
-        has_svg_document_root, looks_like_svg, svg_needs_fonts, svg_options, unpremultiply_rgba,
+        decode_xpm, has_svg_document_root, looks_like_svg, svg_needs_fonts, svg_options,
+        unpremultiply_rgba,
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -743,6 +935,29 @@ mod tests {
         assert!(svg_needs_fonts(
             br#"<!DOCTYPE svg [<!ENTITY label "<text>label</text>">]><svg>&label;</svg>"#
         ));
+    }
+
+    #[test]
+    fn decodes_xpm_icons_with_named_and_transparent_colors() {
+        let xpm = br#"/* XPM */
+static char *icon[] = {
+"2 2 3 1",
+". c #ff0000",
+"  c None",
+"+ c navy",
+".+",
+" ."
+};
+"#;
+
+        let image = decode_xpm(xpm).expect("XPM should decode").to_rgba8();
+
+        assert_eq!(image.dimensions(), (2, 2));
+        assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(1, 0).0, [0, 0, 128, 255]);
+        assert_eq!(image.get_pixel(0, 1).0, [0, 0, 0, 0]);
+        assert_eq!(image.get_pixel(1, 1).0, [255, 0, 0, 255]);
+        assert!(decode_icon_image(xpm).is_ok());
     }
 
     #[test]

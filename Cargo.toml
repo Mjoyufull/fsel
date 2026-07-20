@@ -60,6 +60,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 flate2 = "1.1"
 resvg = { version = "0.47", default-features = false, features = ["text", "system-fonts", "raster-images"] }
 roxmltree = "0.21"
+svgtypes = "0.16"
 futures = "0.3"
 unicode-width = "0.2.2"
 
