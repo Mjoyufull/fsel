@@ -184,7 +184,7 @@ impl PreviewRuntime {
             selected,
             input_ordinal: item.line_number.saturating_sub(1),
             item: item.original_line.clone(),
-            query: ui.query.clone(),
+            query: signature_query(self.expose_query, &ui.query),
         };
         if self.current_signature.as_ref() == Some(&signature) {
             return;
@@ -746,12 +746,20 @@ fn graphics_state_changed(
     !matches!(adapter, GraphicsAdapter::None) && previous_image_key != content.image_key()
 }
 
+fn signature_query(expose_query: bool, query: &str) -> String {
+    if expose_query {
+        query.to_string()
+    } else {
+        String::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CommandOutput, PreviewContent, append_truncation_notice, expand_preview_command,
         graphics_state_changed, read_limited_to, run_preview_command,
-        should_report_command_failure, truncated_image_message,
+        should_report_command_failure, signature_query, truncated_image_message,
     };
     use crate::ui::GraphicsAdapter;
     use tokio::io::AsyncWriteExt;
@@ -791,6 +799,12 @@ mod tests {
             Some("new-generation"),
             &content
         ));
+    }
+
+    #[test]
+    fn password_mode_omits_the_query_from_preview_signatures() {
+        assert_eq!(signature_query(false, "secret"), "");
+        assert_eq!(signature_query(true, "visible"), "visible");
     }
 
     #[test]
