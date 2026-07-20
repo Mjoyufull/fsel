@@ -1,5 +1,6 @@
+use eyre::Result;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
@@ -12,8 +13,37 @@ pub(crate) fn effective_title_height(total_height: u16, title_panel_height_perce
     }
 }
 
+fn split_icon_preview(
+    area: Rect,
+    position: crate::ui::HorizontalPosition,
+    icon_width_percent: u16,
+) -> (Rect, Rect) {
+    let text_width_percent = 100u16.saturating_sub(icon_width_percent);
+    let constraints = match position {
+        crate::ui::HorizontalPosition::Left => [
+            Constraint::Percentage(icon_width_percent),
+            Constraint::Percentage(text_width_percent),
+        ],
+        crate::ui::HorizontalPosition::Right => [
+            Constraint::Percentage(text_width_percent),
+            Constraint::Percentage(icon_width_percent),
+        ],
+    };
+    let content = Layout::horizontal(constraints).split(area);
+    match position {
+        crate::ui::HorizontalPosition::Left => (content[0], content[1]),
+        crate::ui::HorizontalPosition::Right => (content[1], content[0]),
+    }
+}
+
 /// App filtering and sorting UI (Stateless Renderer)
 pub struct UI;
+
+/// Borrowed selected-app icon state used by the launcher renderer.
+pub struct AppIconPreview<'a> {
+    pub(crate) image_manager: &'a mut crate::ui::ImageManager,
+    pub(crate) key: &'a str,
+}
 
 impl UI {
     /// Create new stateless UI renderer
@@ -22,8 +52,15 @@ impl UI {
     }
 
     /// Render the UI using the centralized State
-    pub fn render(&self, f: &mut Frame, state: &crate::core::state::State, cli: &crate::cli::Opts) {
+    pub fn render(
+        &self,
+        f: &mut Frame,
+        state: &crate::core::state::State,
+        cli: &crate::cli::Opts,
+        icon_preview: Option<AppIconPreview<'_>>,
+    ) -> Result<bool> {
         let size = f.area();
+        let mut icon_render_failed = false;
         let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
         let should_render_border = title_height > 0;
 
@@ -95,10 +132,45 @@ impl UI {
 
             // Text rendering from state.text which should be populated by state.update_info
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
-            let paragraph = Paragraph::new(info_text)
-                .block(info_block)
-                .style(Style::default().fg(cli.main_text_color));
-            f.render_widget(paragraph, title_area);
+            if let Some(icon_preview) = icon_preview {
+                let inner = info_block.inner(title_area);
+                let (icon_area, text_area) = split_icon_preview(
+                    inner,
+                    cli.desktop_icon_position,
+                    cli.desktop_icon_preview_width_percent,
+                );
+                let icon_area = icon_area.inner(Margin {
+                    horizontal: 1,
+                    vertical: 0,
+                });
+                let icon_rendered = if icon_area.width > 0 && icon_area.height > 0 {
+                    Some(icon_preview.image_manager.render_cached(
+                        f,
+                        icon_preview.key,
+                        icon_area,
+                    )?)
+                } else {
+                    None
+                };
+                if icon_rendered == Some(true) {
+                    f.render_widget(info_block, title_area);
+                    f.render_widget(
+                        Paragraph::new(info_text).style(Style::default().fg(cli.main_text_color)),
+                        text_area,
+                    );
+                } else {
+                    icon_render_failed = icon_rendered == Some(false);
+                    let paragraph = Paragraph::new(info_text)
+                        .block(info_block)
+                        .style(Style::default().fg(cli.main_text_color));
+                    f.render_widget(paragraph, title_area);
+                }
+            } else {
+                let paragraph = Paragraph::new(info_text)
+                    .block(info_block)
+                    .style(Style::default().fg(cli.main_text_color));
+                f.render_widget(paragraph, title_area);
+            }
         }
 
         // Render Input
@@ -220,12 +292,15 @@ impl UI {
         }
 
         f.render_stateful_widget(list, apps_area, &mut list_state);
+        Ok(icon_render_failed)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::effective_title_height;
+    use super::{effective_title_height, split_icon_preview};
+    use crate::ui::HorizontalPosition;
+    use ratatui::layout::Rect;
 
     #[test]
     fn effective_title_height_allows_zero() {
@@ -235,5 +310,23 @@ mod tests {
     #[test]
     fn effective_title_height_matches_percentage_rounding() {
         assert_eq!(effective_title_height(21, 10), 2);
+    }
+
+    #[test]
+    fn icon_preview_defaults_can_place_icon_on_the_right() {
+        let (icon, text) =
+            split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Right, 40);
+
+        assert_eq!(text, Rect::new(0, 0, 60, 10));
+        assert_eq!(icon, Rect::new(60, 0, 40, 10));
+    }
+
+    #[test]
+    fn icon_preview_can_swap_to_the_left() {
+        let (icon, text) =
+            split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Left, 35);
+
+        assert_eq!(icon, Rect::new(0, 0, 35, 10));
+        assert_eq!(text, Rect::new(35, 0, 65, 10));
     }
 }

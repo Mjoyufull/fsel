@@ -499,6 +499,7 @@ dependencies = [
  "serde_json",
  "shell-words",
  "strip-ansi-escapes",
+ "svgtypes",
  "time",
  "tokio",
  "toml",
