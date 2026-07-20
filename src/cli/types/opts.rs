@@ -1,5 +1,5 @@
-use super::{MatchMode, PinnedOrderMode, RankingMode};
-use crate::ui::PanelPosition;
+use super::{DesktopIconMode, MatchMode, PinnedOrderMode, RankingMode};
+use crate::ui::{HorizontalPosition, PanelPosition};
 
 /// Command line interface.
 #[derive(Debug)]
@@ -42,6 +42,11 @@ pub struct Opts {
     pub program: Option<String>,
     pub search_string: Option<String>,
     pub confirm_first_launch: bool,
+    pub desktop_icon_mode: DesktopIconMode,
+    pub desktop_icon_position: HorizontalPosition,
+    pub desktop_icon_preview_width_percent: u16,
+    pub desktop_icon_size: u16,
+    pub desktop_icon_theme: Option<String>,
     pub dmenu_mode: bool,
     pub dmenu_with_nth: Option<Vec<usize>>,
     pub dmenu_delimiter: String,
@@ -155,6 +160,11 @@ impl Default for Opts {
             program: None,
             search_string: None,
             confirm_first_launch: false,
+            desktop_icon_mode: DesktopIconMode::Preview,
+            desktop_icon_position: HorizontalPosition::Right,
+            desktop_icon_preview_width_percent: 40,
+            desktop_icon_size: 128,
+            desktop_icon_theme: None,
             dmenu_mode: false,
             dmenu_with_nth: None,
             dmenu_delimiter: " ".to_string(),
