@@ -399,4 +399,29 @@ up = [{ key = "k", modifiers = "alt" }]
         );
         assert_eq!(backspace_ui.query, "a");
     }
+
+    #[test]
+    fn selected_output_returns_original_line_number() {
+        let cli = Opts {
+            dmenu_index_original_mode: true,
+            ..Opts::default()
+        };
+
+        let options = super::DmenuOptions::from_cli(&cli);
+
+        let mut ui = DmenuUI::new(
+            vec![
+                Item::new_simple("2 Suspend".into(), "2 Suspend".into(), 2),
+                Item::new_simple("4 Shutdown".into(), "4 Shutdown".into(), 4)
+            ],
+            false,
+            false
+        );
+
+        ui.filter();
+
+        let output = super::selected_output(&ui, &options, 1);
+
+        assert_eq!(output, "4");
+    }
 }
