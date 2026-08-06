@@ -214,8 +214,10 @@ fn handle_submit(ui: &mut DmenuUI, options: &DmenuOptions) -> LoopOutcome {
 }
 
 fn selected_output(ui: &DmenuUI, options: &DmenuOptions, selected: usize) -> String {
-    if options.index_mode {
-        selected.to_string()
+    if options.index_original_mode {
+        return ui.shown[selected].line_number.to_string();
+    } else if options.index_mode {
+        return selected.to_string();
     } else if let Some(ref accept_cols) = options.accept_nth {
         ui.shown[selected].get_accept_nth_output(accept_cols)
     } else {

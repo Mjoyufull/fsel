@@ -100,6 +100,7 @@ Usage:
 │  ├─ --dmenu0                     Read NUL-separated input instead of newline-separated input
 │  ├─ --password[=CHAR]            Mask typed input; optionally choose the mask character
 │  ├─ --index                      Print the selected row index instead of the row text
+│  ├─ --index-original             Print the absolute original row index instead of the row text
 │  ├─ --with-nth <COLS>            Show only these 1-based columns (example: 1,3)
 │  ├─ --accept-nth <COLS>          Print only these columns after selection
 │  ├─ --match-nth <COLS>           Search only within these columns
