@@ -39,11 +39,6 @@ pub(super) struct DmenuOptions {
 
 impl DmenuOptions {
     pub(super) fn from_cli(cli: &Opts) -> Self {
-        assert!(
-            !(cli.dmenu_index_mode && cli.dmenu_index_original_mode),
-            "Cannot use both --index and --index-original"
-        );
-
         Self {
             disable_mouse: cli.dmenu_disable_mouse.unwrap_or(cli.disable_mouse),
             prompt_only: cli.dmenu_prompt_only,
