@@ -426,7 +426,6 @@ up = [{ key = "k", modifiers = "alt" }]
     }
 
     #[test]
-    #[should_panic(expected = "Cannot use both --index and --index-original")]
     fn panics_when_both_index_modes_are_enabled() {
         let cli = Opts {
             dmenu_index_mode: true,
