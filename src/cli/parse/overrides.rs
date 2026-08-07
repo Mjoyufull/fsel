@@ -101,6 +101,9 @@ pub(super) fn parse_cli_overrides(
             Long("index") => {
                 default.dmenu_index_mode = true;
             }
+            Long("index-original") => {
+                default.dmenu_index_original_mode = true;
+            }
             Long("accept-nth") => {
                 default.dmenu_accept_nth =
                     Some(parse_column_list(parser, "Invalid column specification")?);

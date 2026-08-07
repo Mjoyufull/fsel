@@ -164,8 +164,12 @@ echo -e "pass1\npass2" | fsel --dmenu --password
 # Custom password character
 echo -e "pass1\npass2" | fsel --dmenu --password=•
 
-# Output index instead of text
+# Output index instead of text (0-indexed)
 echo -e "A\nB\nC" | fsel --dmenu --index
+
+# Output original line number instead of 0-indexed text
+# Note: --index and --index-original are mutually exclusive
+echo -e "A\nB\nC" | fsel --dmenu --index-original
 
 # Prompt-only (no list)
 fsel --dmenu --prompt-only
