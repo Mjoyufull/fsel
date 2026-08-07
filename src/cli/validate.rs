@@ -116,3 +116,22 @@ Available methods: --launch-prefix, --systemd-run, --uwsm\n",
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::cli::types::Opts;
+
+    #[test]
+    fn reject_both_index_modes() {
+        let mut cli = Opts {
+            dmenu_index_mode: true,
+            dmenu_index_original_mode: true,
+            ..Default::default()
+        };
+
+        let result = validate(&mut cli, 0);
+        assert!(result.unwrap_err().to_string().contains("Cannot use --index and --index-original"));
+    }
+}
