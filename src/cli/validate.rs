@@ -132,6 +132,11 @@ mod tests {
         };
 
         let result = validate(&mut cli, 0);
-        assert!(result.unwrap_err().to_string().contains("Cannot use --index and --index-original"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Cannot use --index and --index-original")
+        );
     }
 }
