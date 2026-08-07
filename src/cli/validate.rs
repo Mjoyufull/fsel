@@ -55,7 +55,7 @@ Dmenu mode reads from stdin and outputs to stdout\n",
             "Error: Cannot use --select and --select-index together\n",
         ));
     }
-    
+
     if default.dmenu_index_mode && default.dmenu_index_original_mode {
         return Err(CliError::message(
             "Error: Cannot use --index and --index-original together\n",
