@@ -435,6 +435,6 @@ up = [{ key = "k", modifiers = "alt" }]
         };
 
         let result = crate::cli::validate(&mut cli, 0);
-        assert(result.is_err());
+        assert!(result.is_err());
     }
 }
