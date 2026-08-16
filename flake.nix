@@ -36,7 +36,7 @@
             '';
 
             meta = with pkgs.lib; {
-              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v3.6.0-kiwicrab";
+              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - v3.7.0-kiwicrab";
               homepage = "https://github.com/Mjoyufull/fsel";
               license = licenses.bsd2;
               maintainers = [ ];
