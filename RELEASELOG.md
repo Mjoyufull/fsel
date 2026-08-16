@@ -2,32 +2,55 @@
 
 Added
 
-- `--index-original` flag for dmenu mode (from pr #93 closes #92)
-  - Outputs the original 1-based line number of a selected item as received from stdin, seperate from live filtering.
-  - Cannot be combined with `--index`; using both now produces an error.
+- `--index-original` flag for dmenu mode (from pr #93, closes #92)
+  - Outputs the original 1-based line number of a selected item as received from stdin, separate from live filtering.
+  - `--index` still outputs the 0-based position within the currently filtered list, which shifts as the query narrows results. `--index-original` stays stable, so scripts can map a selection back to the exact input line they fed in.
+  - Cannot be combined with `--index`; using both now fails with a clear CLI error instead of producing an ambiguous index.
+  - Exposed in `--help`, USAGE.md, and the man page.
+
+Changed
+
+- Dmenu selection output path (from pr #93)
+  - `selected_output()` was restructured for clarity while adding the new index branch.
+  - CLI validation error text for conflicting index flags now names both flags explicitly.
 
 Fixed
 
-- Minor formatting cleanup in CLI validation test code.
+- Formatting cleanup in the CLI validation test code so `cargo fmt --check` stays clean on the release branch.
+
+Technical details
+
+- New `dmenu_index_original_mode` option threaded through `Opts`, CLI override parsing (`Long("index-original")`), and `DmenuOptions`.
+- Conflict handling lives in `validate()` and returns a `CliError` rather than panicking, so the failure takes the normal CLI error path instead of aborting.
+- Original line numbers come from the `line_number` field already carried on `Item` and assigned when input is read, so they survive filtering, scoring, and re-query without extra bookkeeping.
+- Regression coverage added for rejecting both index modes together and for returning the original line number out of a filtered list.
 
 Documentation
 
-- Man page: `fsel.1` now documents `--index-original` and clarifies that `--index` outputs the 0-based filtered-list position.
+- USAGE.md: added an `--index-original` example, clarified that `--index` is 0-indexed, and noted that the two flags are mutually exclusive.
+- Man page (`fsel.1`): documents `--index-original` and clarifies that `--index` outputs the 0-based filtered-list position.
+- CLI `--help`: added the `--index-original` entry to the dmenu section.
+- README, USAGE.md, `Cargo.toml`, and `flake.nix` version references updated for 3.7.0-kiwicrab.
 
 Notes
 
-- SemVer: MINOR release — new opt-in flag, no breaking changes.
+- SemVer: MINOR (3.6.0 -> 3.7.0). New opt-in flag; no existing behavior, config, output, or database surface changes.
+- Rationale: 3.7.0 makes dmenu usable as a stable index source for scripts. `--index` was only ever meaningful relative to the current filter, so callers that needed to map a selection back to their own input list had no reliable option.
 
 Contributors
 
-- @Vaishnav-Sabari-Girish
+- @Vaishnav-Sabari-Girish (pr #93 — feature, tests, docs)
+- @Marbowls (co-maintainer — assertion syntax fix, test correction, `selected_output` refactor, formatting)
 - @Mjoyufull
+- Code review: @cubic-dev-ai
 
 Compatibility
 
-- Language/runtime: Rust 1.94+ (unchanged)
-- Platforms: GNU/Linux and *BSD (unchanged)
-- Config / database: compatible, no migration required
+- Language/runtime: Rust 1.94+ stable; edition remains 2024.
+- Platforms: GNU/Linux and *BSD (unchanged).
+- Config / database: compatible; no migration required.
+- CLI: `--index` behavior is unchanged. The only newly rejected invocation is `--index` together with `--index-original`.
+- Breaking: none.
 
 ---
 
