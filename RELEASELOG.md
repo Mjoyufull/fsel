@@ -1,3 +1,36 @@
+[3.7.0-kiwicrab]
+
+Added
+
+- `--index-original` flag for dmenu mode (from pr #93)
+  - Outputs the original 1-based line number of a selected item as received from stdin, seperate from live filtering.
+  - Cannot be combined with `--index`; using both now produces an error.
+
+Fixed
+
+- Minor formatting cleanup in CLI validation test code.
+
+Documentation
+
+- Man page: `fsel.1` now documents `--index-original` and clarifies that `--index` outputs the 0-based filtered-list position.
+
+Notes
+
+- SemVer: MINOR release — new opt-in flag, no breaking changes.
+
+Contributors
+
+- @Vaishnav-Sabari-Girish
+- @Mjoyufull
+
+Compatibility
+
+- Language/runtime: Rust 1.94+ (unchanged)
+- Platforms: GNU/Linux and *BSD (unchanged)
+- Config / database: compatible, no migration required
+
+---
+
 [3.6.0-kiwicrab]
 
 Added
