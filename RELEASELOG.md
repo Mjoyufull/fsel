@@ -2,7 +2,7 @@
 
 Added
 
-- `--index-original` flag for dmenu mode (from pr #93)
+- `--index-original` flag for dmenu mode (from pr #93 closes #92)
   - Outputs the original 1-based line number of a selected item as received from stdin, seperate from live filtering.
   - Cannot be combined with `--index`; using both now produces an error.
 
