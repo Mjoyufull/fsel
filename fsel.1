@@ -97,7 +97,10 @@ Like --dmenu but null-separated input
 Password mode: mask input (default char: *)
 .TP
 .B \-\-index
-Output index instead of text
+Output 0\-based index of the selected item within the filtered list instead of text
+.TP
+.B \-\-index\-original
+Output the original 1\-based line number of the selected item as received from stdin, regardless of filtering. Mutually exclusive with \fB\-\-index\fR.
 .TP
 .BR \-\-with-nth " " \fICOLS\fR
 Display only specified columns (comma-separated, e.g., 1,3)
