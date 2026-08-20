@@ -13,8 +13,8 @@ pub struct CclipItem {
     pub rowid: String,
     pub mime_type: String,
     pub preview: String,
-    pub data_size: Option<u64>,
-    pub timestamp: Option<i64>,
+    data_size: Option<u64>,
+    timestamp: Option<i64>,
     pub original_line: String,
     pub tags: Vec<String>,
 }
@@ -34,21 +34,16 @@ impl CclipItem {
             ));
         }
 
-        let uses_metadata_format = parts.len() >= 5;
-        let data_size = uses_metadata_format
-            .then(|| {
-                parts[3]
-                    .parse()
-                    .map_err(|_| eyre!("Invalid cclip data size: {}", parts[3]))
-            })
-            .transpose()?;
-        let timestamp = uses_metadata_format
-            .then(|| {
-                parts[4]
-                    .parse()
-                    .map_err(|_| eyre!("Invalid cclip timestamp: {}", parts[4]))
-            })
-            .transpose()?;
+        let metadata = parts
+            .get(3)
+            .zip(parts.get(4))
+            .and_then(|(raw_data_size, raw_timestamp)| {
+                Some((raw_data_size.parse().ok()?, raw_timestamp.parse().ok()?))
+            });
+        let (data_size, timestamp) = metadata
+            .map(|(data_size, timestamp)| (Some(data_size), Some(timestamp)))
+            .unwrap_or((None, None));
+        let uses_metadata_format = metadata.is_some();
         let tags_index = if uses_metadata_format { 5 } else { 3 };
         let tags = if let Some(raw_tags) = parts.get(tags_index) {
             raw_tags
@@ -234,6 +229,16 @@ mod tests {
         assert_eq!(item.data_size, None);
         assert_eq!(item.timestamp, None);
         assert_eq!(item.tags, vec!["reference"]);
+    }
+
+    #[test]
+    fn legacy_line_with_extra_tabs_is_not_rejected_as_metadata() {
+        let item = CclipItem::from_line("42\ttext/plain\tpreview\twith\ttabs".into())
+            .expect("legacy cclip line should not require numeric metadata");
+
+        assert_eq!(item.data_size, None);
+        assert_eq!(item.timestamp, None);
+        assert_eq!(item.preview, "preview");
     }
 
     #[test]
