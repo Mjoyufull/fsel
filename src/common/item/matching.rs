@@ -16,6 +16,12 @@ impl Item {
         if let Ok(cclip_item) =
             crate::modes::cclip::CclipItem::from_line(self.original_line.clone())
         {
+            if query.chars().all(|character| character.is_ascii_digit())
+                && cclip_item.rowid == query
+            {
+                return Some(2_000_000);
+            }
+
             for tag in &cclip_item.tags {
                 let tag_lower = tag.to_lowercase();
                 if tag_lower == query_lower {
@@ -69,6 +75,15 @@ impl Item {
 
         if is_quoted {
             return (display_lower == query_lower).then_some(1000);
+        }
+        if search_query
+            .chars()
+            .all(|character| character.is_ascii_digit())
+            && let Ok(cclip_item) =
+                crate::modes::cclip::CclipItem::from_line(self.original_line.clone())
+            && cclip_item.rowid == search_query
+        {
+            return Some(2000);
         }
         if display_lower == query_lower {
             return Some(1000);
@@ -134,5 +149,50 @@ impl Item {
         } else {
             accepted_cols.join("\t")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Item;
+    use nucleo_matcher::{Config, Matcher};
+
+    fn cclip_item(rowid: &str, mime_type: &str, preview: &str, line_number: usize) -> Item {
+        Item::new_simple(
+            format!("{rowid}\t{mime_type}\t{preview}"),
+            format!("{rowid}  {preview}"),
+            line_number,
+        )
+    }
+
+    #[test]
+    fn exact_numeric_cclip_id_outranks_other_text_matches() {
+        let exact_id = cclip_item("2", "image/png", "image/png", 2);
+        let text_match = cclip_item("29", "text/plain", "release 2 notes", 1);
+        let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+
+        let exact_score = exact_id
+            .calculate_score("2", &mut matcher)
+            .expect("exact cclip id should match");
+        let text_score = text_match
+            .calculate_score("2", &mut matcher)
+            .expect("ordinary text should still match");
+
+        assert!(exact_score > text_score);
+    }
+
+    #[test]
+    fn exact_mode_prioritizes_numeric_cclip_id() {
+        let exact_id = cclip_item("2", "image/png", "image/png", 2);
+        let prefixed_id = cclip_item("29", "image/png", "image/png", 1);
+
+        assert!(
+            exact_id
+                .calculate_exact_score("2")
+                .expect("exact cclip id should match")
+                > prefixed_id
+                    .calculate_exact_score("2")
+                    .expect("prefixed cclip id should still match")
+        );
     }
 }

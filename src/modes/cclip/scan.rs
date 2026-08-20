@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
     // Try with tags field first (newer cclip), fall back to without tags (older cclip)
     let output = Command::new("cclip")
-        .args(["list", "rowid,mime_type,preview,tag"])
+        .args(["list", "rowid,mime_type,preview,data_size,timestamp,tag"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?
@@ -20,7 +20,7 @@ pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
         if stderr.contains("invalid field: tag") {
             // Older cclip version without tag support
             Command::new("cclip")
-                .args(["list", "rowid,mime_type,preview"])
+                .args(["list", "rowid,mime_type,preview,data_size,timestamp"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()?
@@ -57,7 +57,12 @@ pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
 pub fn get_clipboard_history_by_tag(tag: &str) -> Result<Vec<CclipItem>> {
     // Query cclip for items with specific tag
     let output = Command::new("cclip")
-        .args(["list", "-T", tag, "rowid,mime_type,preview,tag"])
+        .args([
+            "list",
+            "-T",
+            tag,
+            "rowid,mime_type,preview,data_size,timestamp,tag",
+        ])
         .output()?;
 
     if !output.status.success() {
