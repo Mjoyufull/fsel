@@ -9,14 +9,16 @@ impl Item {
             return Some(0);
         }
 
+        if self.exact_cclip_rowid_match(query) {
+            return Some(2_000_000);
+        }
+
         let query_lower = query.to_lowercase();
         let mut query_chars = Vec::new();
         let query_utf32 = Utf32Str::new(&query_lower, &mut query_chars);
 
-        if let Ok(cclip_item) =
-            crate::modes::cclip::CclipItem::from_line(self.original_line.clone())
-        {
-            for tag in &cclip_item.tags {
+        if let Some(tags) = &self.tags {
+            for tag in tags {
                 let tag_lower = tag.to_lowercase();
                 if tag_lower == query_lower {
                     return Some(1_000_000);
@@ -64,6 +66,10 @@ impl Item {
             (false, query)
         };
 
+        if !is_quoted && self.exact_cclip_rowid_match(search_query) {
+            return Some(2000);
+        }
+
         let query_lower = search_query.to_lowercase();
         let display_lower = self.display_text.to_lowercase();
 
@@ -81,6 +87,16 @@ impl Item {
         }
 
         None
+    }
+
+    fn exact_cclip_rowid_match(&self, query: &str) -> bool {
+        self.tags.is_some()
+            && !query.is_empty()
+            && query.bytes().all(|character| character.is_ascii_digit())
+            && self
+                .original_line
+                .split_once('\t')
+                .is_some_and(|(rowid, _)| rowid == query)
     }
 
     /// Calculate match score based on `match_nth` columns.
@@ -134,5 +150,77 @@ impl Item {
         } else {
             accepted_cols.join("\t")
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Item;
+    use nucleo_matcher::{Config, Matcher};
+
+    fn cclip_item(rowid: &str, mime_type: &str, preview: &str, line_number: usize) -> Item {
+        let mut item = Item::new_simple(
+            format!("{rowid}\t{mime_type}\t{preview}"),
+            format!("{rowid}  {preview}"),
+            line_number,
+        );
+        item.tags = Some(Vec::new());
+        item
+    }
+
+    #[test]
+    fn exact_numeric_cclip_id_outranks_other_text_matches() {
+        let exact_id = cclip_item("2", "image/png", "image/png", 2);
+        let text_match = cclip_item("29", "text/plain", "release 2 notes", 1);
+        let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+
+        let exact_score = exact_id
+            .calculate_score("2", &mut matcher)
+            .expect("exact cclip id should match");
+        let text_score = text_match
+            .calculate_score("2", &mut matcher)
+            .expect("ordinary text should still match");
+
+        assert!(exact_score > text_score);
+    }
+
+    #[test]
+    fn exact_mode_prioritizes_numeric_cclip_id() {
+        let exact_id = cclip_item("2", "image/png", "image/png", 2);
+        let prefixed_id = cclip_item("29", "image/png", "image/png", 1);
+
+        assert!(
+            exact_id
+                .calculate_exact_score("2")
+                .expect("exact cclip id should match")
+                > prefixed_id
+                    .calculate_exact_score("2")
+                    .expect("prefixed cclip id should still match")
+        );
+    }
+
+    #[test]
+    fn cclip_tags_keep_exact_match_priority() {
+        let mut item = cclip_item("2", "image/png", "image/png", 1);
+        item.tags = Some(vec!["receipt".into()]);
+        let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+
+        assert_eq!(
+            item.calculate_score("receipt", &mut matcher),
+            Some(1_000_000)
+        );
+    }
+
+    #[test]
+    fn numeric_dmenu_first_column_is_not_treated_as_cclip_rowid() {
+        let item = Item::new_simple("2\tfoo\tbar".into(), "2  foo  bar".into(), 1);
+        let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+
+        assert!(
+            item.calculate_score("2", &mut matcher)
+                .expect("ordinary dmenu text should match")
+                < 2_000_000
+        );
+        assert_eq!(item.calculate_exact_score("2"), Some(500));
     }
 }

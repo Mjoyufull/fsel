@@ -2,35 +2,22 @@
 
 use super::CclipItem;
 use eyre::{Result, eyre};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
+
+const HISTORY_FIELD_SETS: [&str; 4] = [
+    "rowid,mime_type,preview,data_size,timestamp,tag",
+    "rowid,mime_type,preview,data_size,timestamp",
+    "rowid,mime_type,preview,tag",
+    "rowid,mime_type,preview",
+];
+const TAGGED_HISTORY_FIELD_SETS: [&str; 2] = [
+    "rowid,mime_type,preview,data_size,timestamp,tag",
+    "rowid,mime_type,preview,tag",
+];
 
 /// Get clipboard history from cclip
 pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
-    // Try with tags field first (newer cclip), fall back to without tags (older cclip)
-    let output = Command::new("cclip")
-        .args(["list", "rowid,mime_type,preview,tag"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?
-        .wait_with_output()?;
-
-    // If tags field not supported, try without it
-    let output = if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("invalid field: tag") {
-            // Older cclip version without tag support
-            Command::new("cclip")
-                .args(["list", "rowid,mime_type,preview"])
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()?
-                .wait_with_output()?
-        } else {
-            output
-        }
-    } else {
-        output
-    };
+    let output = run_cclip_list(&[], &HISTORY_FIELD_SETS)?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -55,10 +42,7 @@ pub fn get_clipboard_history() -> Result<Vec<CclipItem>> {
 
 /// Get clipboard items filtered by tag
 pub fn get_clipboard_history_by_tag(tag: &str) -> Result<Vec<CclipItem>> {
-    // Query cclip for items with specific tag
-    let output = Command::new("cclip")
-        .args(["list", "-T", tag, "rowid,mime_type,preview,tag"])
-        .output()?;
+    let output = run_cclip_list(&["-T", tag], &TAGGED_HISTORY_FIELD_SETS)?;
 
     if !output.status.success() {
         return Err(eyre!("Failed to get clipboard history"));
@@ -71,6 +55,29 @@ pub fn get_clipboard_history_by_tag(tag: &str) -> Result<Vec<CclipItem>> {
         .collect();
 
     items
+}
+
+fn run_cclip_list(extra_args: &[&str], field_sets: &[&str]) -> Result<Output> {
+    let mut last_output = None;
+
+    for fields in field_sets {
+        let output = Command::new("cclip")
+            .arg("list")
+            .args(extra_args)
+            .arg(fields)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?
+            .wait_with_output()?;
+        let unsupported_field = String::from_utf8_lossy(&output.stderr).contains("invalid field:");
+
+        if output.status.success() || !unsupported_field {
+            return Ok(output);
+        }
+        last_output = Some(output);
+    }
+
+    last_output.ok_or_else(|| eyre!("No cclip field sets configured"))
 }
 
 /// Get all unique tags from cclip database

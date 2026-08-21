@@ -216,6 +216,10 @@ fsel --cclip -ss image
 fsel --cclip  # Images show automatically if supported
 ```
 
+Image rows show the local timestamp, readable size, and MIME type. When cclip line
+numbers are enabled, the cclip row ID is prefixed; an exact numeric ID search ranks
+that entry first without excluding normal text matches.
+
 ### Tag Management
 ```sh
 # Filter clipboard items by tag
