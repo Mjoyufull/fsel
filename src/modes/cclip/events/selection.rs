@@ -49,7 +49,12 @@ pub(super) fn copy_selected_and_exit_at(
     let original_line = &ctx.ui.shown[index].original_line;
     match super::super::CclipItem::from_line(original_line.clone()) {
         Ok(cclip_item) => {
-            if let Err(error) = cclip_item.copy_to_clipboard() {
+            let copy_result = if ctx.cli.cclip_copy_rendered {
+                cclip_item.copy_rendered_to_clipboard()
+            } else {
+                cclip_item.copy_to_clipboard()
+            };
+            if let Err(error) = copy_result {
                 ctx.ui.set_temp_message(format!("Copy failed: {}", error));
                 return Ok(false);
             }

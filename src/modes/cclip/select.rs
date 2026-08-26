@@ -2,7 +2,7 @@
 
 use super::CclipItem;
 use eyre::{Result, eyre};
-use std::io;
+use std::io::{self, Cursor};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -101,6 +101,70 @@ impl CclipItem {
 
         self.copy_to_clipboard_wayland()
     }
+
+    /// Copy rendered HTML as plain text, preserving the established path for every other MIME type.
+    pub fn copy_rendered_to_clipboard(&self) -> Result<()> {
+        if !super::html::is_html_mime(&self.mime_type) {
+            return self.copy_to_clipboard();
+        }
+        let rendered_content =
+            rendered_clipboard_content(&self.mime_type, self.get_content_for_preview()?)?
+                .ok_or_else(|| eyre!("failed to render HTML clipboard content"))?;
+
+        if std::env::var("WAYLAND_DISPLAY").is_err() {
+            return Err(eyre!("cclip mode requires a Wayland session"));
+        }
+        if !command_is_available("wl-copy") {
+            return Err(eyre!("copying rendered content requires wl-copy"));
+        }
+
+        copy_bytes_with_wl_copy(
+            rendered_content,
+            "text/plain;charset=utf-8",
+            CLIPBOARD_PROVIDER_STARTUP_TIMEOUT,
+        )
+    }
+}
+
+fn rendered_clipboard_content(mime_type: &str, bytes: Vec<u8>) -> Result<Option<Vec<u8>>> {
+    if !super::html::is_html_mime(mime_type) {
+        return Ok(None);
+    }
+
+    let html =
+        String::from_utf8(bytes).map_err(|_| eyre!("HTML clipboard content is not valid UTF-8"))?;
+    Ok(Some(
+        super::html::text_for_display(mime_type, &html).into_bytes(),
+    ))
+}
+
+fn copy_bytes_with_wl_copy(bytes: Vec<u8>, mime_type: &str, timeout: Duration) -> Result<()> {
+    let mut child = Command::new("wl-copy")
+        .args(["--type", mime_type])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let child_stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| eyre!("failed to open wl-copy stdin"))?;
+
+    let pipe_handle = std::thread::spawn(move || {
+        let mut source = Cursor::new(bytes);
+        let mut sink = child_stdin;
+        io::copy(&mut source, &mut sink)
+    });
+    let copied_bytes = pipe_handle
+        .join()
+        .map_err(|_| eyre!("clipboard pipe thread panicked"))??;
+    wait_for_clipboard_provider_start(&mut child, "wl-copy", timeout)?;
+
+    if copied_bytes == 0 {
+        return Err(eyre!("rendered clipboard content is empty"));
+    }
+
+    Ok(())
 }
 
 fn wait_for_clipboard_provider_start(
@@ -217,7 +281,9 @@ pub fn delete_tag(tag: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardProviderState, wait_for_clipboard_provider_start};
+    use super::{
+        ClipboardProviderState, rendered_clipboard_content, wait_for_clipboard_provider_start,
+    };
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
@@ -257,5 +323,22 @@ mod tests {
             wait_for_clipboard_provider_start(&mut child, "test-provider", Duration::from_secs(1));
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn rendered_copy_converts_html_to_plain_text() {
+        let rendered =
+            rendered_clipboard_content("text/html", b"<p>Hello &amp; goodbye</p>".to_vec())
+                .expect("valid HTML should render");
+
+        assert_eq!(rendered.as_deref(), Some(b"Hello & goodbye".as_slice()));
+    }
+
+    #[test]
+    fn rendered_copy_leaves_non_html_on_the_original_copy_path() {
+        let rendered = rendered_clipboard_content("text/plain", b"plain".to_vec())
+            .expect("plain text should be accepted");
+
+        assert_eq!(rendered, None);
     }
 }

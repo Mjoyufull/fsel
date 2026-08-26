@@ -82,6 +82,9 @@ pub(super) fn parse_cli_overrides(
             Long("cclip") => {
                 default.cclip_mode = true;
             }
+            Short('x') | Long("copy-rendered") => {
+                default.cclip_copy_rendered = true;
+            }
             Long("tag") => parse_tag(parser, default)?,
             Long("cclip-show-tag-color-names") => {
                 default.cclip_show_tag_color_names = Some(true);

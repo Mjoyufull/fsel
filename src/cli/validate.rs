@@ -88,6 +88,13 @@ Use one of these forms:\n\
         ));
     }
 
+    if default.cclip_copy_rendered && !default.cclip_mode {
+        return Err(CliError::message(
+            "Error: --copy-rendered requires --cclip mode\n\
+Use: fsel --cclip -x\n",
+        ));
+    }
+
     if default.dmenu_mode && default.cclip_mode {
         return Err(CliError::message(
             "Error: --dmenu and --cclip cannot be used together\n",

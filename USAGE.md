@@ -212,6 +212,25 @@ fsel --cclip -ss image
 fsel --cclip  # Images show automatically if supported
 ```
 
+### Content Preview Diagnostics
+```sh
+# Show raw textual content instead of rendering HTML as readable text
+fsel --cclip -v
+
+# Also identify the selected row ID, MIME type, and active preview view
+fsel --cclip -vvv
+
+# Show raw HTML for inspection, but copy its rendered text when selected
+fsel --cclip -vx
+
+# Verbosity remains independent from rendered copying
+fsel --cclip -vvvvx
+```
+
+Binary clipboard payloads are never printed as text. Image entries continue to use the terminal
+image preview when supported. `-x` changes only HTML copying: rendered HTML is offered as
+`text/plain;charset=utf-8`; plain text, images, and other MIME types retain the original copy path.
+
 ### Tag Management
 ```sh
 # Filter clipboard items by tag
