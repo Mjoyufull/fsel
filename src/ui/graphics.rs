@@ -516,7 +516,8 @@ fn svg_options() -> resvg::usvg::Options<'static> {
 }
 
 fn unpremultiply_rgba(bytes: &mut [u8]) {
-    for pixel in bytes.chunks_exact_mut(4) {
+    let (pixels, _) = bytes.as_chunks_mut::<4>();
+    for pixel in pixels {
         let alpha = u16::from(pixel[3]);
         if alpha == 0 || alpha == 255 {
             continue;
