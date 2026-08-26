@@ -62,6 +62,9 @@ impl<'a> DmenuUI<'a> {
                     Line::from(self.get_image_info(&item)),
                 ]
             };
+            if let Some(diagnostics) = self.get_cclip_diagnostics(&item) {
+                self.text.push(Line::from(diagnostics));
+            }
             return;
         }
 

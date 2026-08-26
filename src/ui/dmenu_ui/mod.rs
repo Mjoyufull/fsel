@@ -41,6 +41,8 @@ pub struct DmenuUI<'a> {
     content_cache: HashMap<String, String>,
     /// In-flight clipboard content fetches keyed by row ID.
     content_requests: HashMap<String, Receiver<Option<String>>>,
+    /// Controls raw content and diagnostics in cclip previews.
+    cclip_verbosity: u64,
     /// Temporary error/info message with expiration time.
     pub temp_message: Option<(String, Instant)>,
     #[doc(hidden)]
@@ -64,6 +66,7 @@ impl<'a> DmenuUI<'a> {
             tag_mode: TagMode::Normal,
             content_cache: HashMap::new(),
             content_requests: HashMap::new(),
+            cclip_verbosity: 0,
             temp_message: None,
             matcher: Matcher::new(Config::DEFAULT.match_paths()),
         };
@@ -79,6 +82,15 @@ impl<'a> DmenuUI<'a> {
     /// Set match_nth columns.
     pub fn set_match_nth(&mut self, columns: Option<Vec<usize>>) {
         self.match_nth = columns;
+    }
+
+    /// Set cclip preview verbosity, clearing content fetched under the previous view.
+    pub fn set_cclip_verbosity(&mut self, verbosity: u64) {
+        if self.cclip_verbosity != verbosity {
+            self.content_cache.clear();
+            self.content_requests.clear();
+        }
+        self.cclip_verbosity = verbosity;
     }
 
     /// Set a temporary message that expires after 2 seconds.

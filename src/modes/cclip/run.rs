@@ -53,6 +53,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
     let mut ui = DmenuUI::new(items, options.wrap_long_lines, options.show_line_numbers);
+    ui.set_cclip_verbosity(cli.verbose.unwrap_or(0));
     if let Some(search) = &cli.search_string {
         ui.query = search.clone();
         ui.filter();
