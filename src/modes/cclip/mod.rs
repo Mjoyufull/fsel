@@ -2,6 +2,7 @@
 
 mod commands;
 mod events;
+pub(crate) mod html;
 mod image;
 mod items;
 mod metadata;

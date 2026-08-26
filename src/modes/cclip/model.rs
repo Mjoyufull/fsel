@@ -1,7 +1,7 @@
 use crate::common::Item;
 use eyre::{Result, eyre};
 
-use super::TagMetadataFormatter;
+use super::{TagMetadataFormatter, html};
 
 /// Represents a clipboard entry from cclip with MIME type information
 #[derive(Debug, Clone)]
@@ -42,10 +42,13 @@ impl CclipItem {
             Vec::new()
         };
 
+        let mime_type = parts[1].to_string();
+        let preview = html::text_for_display(&mime_type, parts[2]);
+
         Ok(CclipItem {
             rowid: parts[0].to_string(),
-            mime_type: parts[1].to_string(),
-            preview: parts[2].to_string(),
+            mime_type,
+            preview,
             original_line: line,
             tags,
         })
@@ -72,7 +75,14 @@ impl CclipItem {
                     mime
                 )
             }
-            mime if mime.starts_with("text/") => self.preview.chars().take(80).collect::<String>(),
+            mime if mime.starts_with("text/") => {
+                let preview = self.preview.chars().take(80).collect::<String>();
+                if preview.is_empty() && html::is_html_mime(mime) {
+                    "[HTML content]".to_string()
+                } else {
+                    preview
+                }
+            }
             _ => {
                 format!(
                     "{} ({})",
@@ -88,6 +98,13 @@ impl CclipItem {
     /// Get a human-readable display name without metadata formatting
     pub fn get_display_name(&self) -> String {
         self.get_display_name_with_formatter(None)
+    }
+
+    pub(super) fn replace_html_preview(&mut self, content: &str) {
+        let preview = html::text_for_display(&self.mime_type, content);
+        if !preview.is_empty() {
+            self.preview = preview;
+        }
     }
 
     /// Get display name with rowid number prefix (for show_line_numbers)
@@ -144,4 +161,25 @@ fn format_tags_for_display(
     };
 
     format!("[{}] {}", display_tags.join(", "), base)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CclipItem;
+
+    #[test]
+    fn html_items_render_text_but_preserve_original_clipboard_record() {
+        let original = concat!(
+            "42\ttext/html\t",
+            r#"<meta content="text/html"><p>Hello &amp; goodbye</p>"#,
+            "\ttag"
+        )
+        .to_string();
+
+        let item = CclipItem::from_line(original.clone()).expect("valid cclip item");
+
+        assert_eq!(item.preview, "Hello & goodbye");
+        assert_eq!(item.get_display_name(), "[tag] Hello & goodbye");
+        assert_eq!(item.original_line, original);
+    }
 }
