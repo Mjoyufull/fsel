@@ -255,7 +255,7 @@ fn decode_svg(bytes: &[u8]) -> Result<image::DynamicImage> {
     if !has_svg_document_root(&document) {
         return Err(eyre!("Input is not an SVG document"));
     }
-    let tree = resvg::usvg::Tree::from_data(&document, &svg_options())?;
+    let tree = resvg::usvg::Tree::from_data(&document, &svg_options(svg_contains_text(&document)))?;
     let source_size = tree.size();
     let scale = (MAX_SVG_DIMENSION / source_size.width())
         .min(MAX_SVG_DIMENSION / source_size.height())
@@ -464,14 +464,33 @@ fn xml_attribute_value(value: &str) -> Option<String> {
     Some(decoded)
 }
 
-fn svg_options() -> resvg::usvg::Options<'static> {
+fn svg_contains_text(document: &[u8]) -> bool {
+    let Ok(document) = std::str::from_utf8(document) else {
+        return false;
+    };
+    document.split('<').skip(1).any(|element| {
+        let name = element
+            .trim_start()
+            .trim_start_matches('/')
+            .split(|character: char| character.is_whitespace() || matches!(character, '/' | '>'))
+            .next()
+            .unwrap_or_default();
+        name.rsplit(':').next() == Some("text")
+    })
+}
+
+fn svg_options(load_system_fonts: bool) -> resvg::usvg::Options<'static> {
     use resvg::usvg::{ImageHrefResolver, ImageKind};
 
-    let fontdb = Arc::clone(SVG_FONT_DATABASE.get_or_init(|| {
-        let mut database = resvg::usvg::fontdb::Database::new();
-        database.load_system_fonts();
-        Arc::new(database)
-    }));
+    let fontdb = if load_system_fonts {
+        Arc::clone(SVG_FONT_DATABASE.get_or_init(|| {
+            let mut database = resvg::usvg::fontdb::Database::new();
+            database.load_system_fonts();
+            Arc::new(database)
+        }))
+    } else {
+        Arc::new(resvg::usvg::fontdb::Database::new())
+    };
     let remaining_raster_pixels = Arc::new(AtomicU64::new(MAX_SVG_EMBEDDED_RASTER_PIXELS));
     resvg::usvg::Options {
         fontdb,
@@ -579,7 +598,7 @@ impl GraphicsAdapter {
 mod tests {
     use super::{
         ImageManager, bounded_svg_document, decode_image, has_svg_document_root, looks_like_svg,
-        svg_options, unpremultiply_rgba,
+        svg_contains_text, svg_options, unpremultiply_rgba,
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -596,6 +615,17 @@ mod tests {
 
         assert_eq!(image.width(), 16);
         assert_eq!(image.height(), 8);
+    }
+
+    #[test]
+    fn font_loading_is_reserved_for_svg_text_elements() {
+        assert!(!svg_contains_text(
+            br#"<svg><path aria-label="text" d="M0 0"/></svg>"#
+        ));
+        assert!(svg_contains_text(br#"<svg><text>label</text></svg>"#));
+        assert!(svg_contains_text(
+            br#"<svg:svg><svg:text>label</svg:text></svg:svg>"#
+        ));
     }
 
     #[test]
@@ -703,7 +733,7 @@ mod tests {
             .write_to(&mut encoded, image::ImageFormat::Png)
             .expect("test PNG should encode");
         let data = Arc::new(encoded.into_inner());
-        let options = svg_options();
+        let options = svg_options(false);
         let resolve = &options.image_href_resolver.resolve_data;
 
         assert!(resolve("image/png", Arc::clone(&data), &options).is_some());
@@ -713,14 +743,14 @@ mod tests {
 
     #[test]
     fn svg_options_reject_external_image_paths() {
-        let options = svg_options();
+        let options = svg_options(false);
 
         assert!((options.image_href_resolver.resolve_string)("/dev/zero", &options).is_none());
     }
 
     #[test]
     fn svg_options_reject_embedded_gifs() {
-        let options = svg_options();
+        let options = svg_options(false);
         let gif = Arc::new(b"GIF89a".to_vec());
 
         assert!((options.image_href_resolver.resolve_data)("image/gif", gif, &options).is_none());
