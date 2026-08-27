@@ -131,6 +131,14 @@ pub async fn run(cli: Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
+    // The graphics capability probe must run before the input reader, but it can
+    // wait for an unanswered terminal response. Show a usable launcher first.
+    let mut initial_render_result = Ok(false);
+    terminal.draw(|frame| {
+        initial_render_result = UI::new().render(frame, &state, &cli, None);
+    })?;
+    initial_render_result?;
+
     let mut icons = super::icons::IconRuntime::new(&cli, &state);
     icons.request_if_changed(&state, terminal.size()?.into(), &cli);
 

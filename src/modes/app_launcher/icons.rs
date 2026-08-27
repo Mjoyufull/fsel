@@ -146,6 +146,7 @@ impl IconRuntime {
         };
         if area.width == 0 || area.height == 0 {
             self.preview_pending = false;
+            self.preview_failed = true;
             self.current_key = None;
             let _ = self.request_tx.send(None);
             return;
