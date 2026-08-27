@@ -15,6 +15,7 @@ const MAX_SVG_DOCUMENT_BYTES: usize = 32 * 1024 * 1024;
 const MAX_SVG_PROBE_BYTES: u64 = 64 * 1024;
 const MAX_SVG_EMBEDDED_RASTER_DIMENSION: u32 = 4096;
 const MAX_SVG_EMBEDDED_RASTER_PIXELS: u64 = 2048 * 2048;
+const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 static SVG_FONT_DATABASE: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
 
 /// Combined display state to track what's currently on screen
@@ -255,7 +256,7 @@ fn decode_svg(bytes: &[u8]) -> Result<image::DynamicImage> {
     if !has_svg_document_root(&document) {
         return Err(eyre!("Input is not an SVG document"));
     }
-    let tree = resvg::usvg::Tree::from_data(&document, &svg_options(svg_contains_text(&document)))?;
+    let tree = resvg::usvg::Tree::from_data(&document, &svg_options(svg_needs_fonts(&document)))?;
     let source_size = tree.size();
     let scale = (MAX_SVG_DIMENSION / source_size.width())
         .min(MAX_SVG_DIMENSION / source_size.height())
@@ -383,7 +384,6 @@ fn skip_doctype(text: &str) -> Option<&str> {
 }
 
 fn svg_root_namespace_matches(mut attributes: &str, prefix: Option<&str>) -> bool {
-    const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
     let mut namespace = None;
 
     loop {
@@ -464,56 +464,23 @@ fn xml_attribute_value(value: &str) -> Option<String> {
     Some(decoded)
 }
 
-fn svg_contains_text(document: &[u8]) -> bool {
-    let Ok(mut document) = std::str::from_utf8(document) else {
-        return false;
+fn svg_needs_fonts(document: &[u8]) -> bool {
+    let Ok(document) = std::str::from_utf8(document) else {
+        return true;
     };
-    while let Some(start) = document.find('<') {
-        document = &document[start..];
-        if let Some(comment) = document.strip_prefix("<!--") {
-            let Some(end) = comment.find("-->") else {
-                return false;
-            };
-            document = &comment[end + "-->".len()..];
-            continue;
-        }
-        if let Some(cdata) = document.strip_prefix("<![CDATA[") {
-            let Some(end) = cdata.find("]]>") else {
-                return false;
-            };
-            document = &cdata[end + "]]>".len()..];
-            continue;
-        }
-        if let Some(instruction) = document.strip_prefix("<?") {
-            let Some(end) = instruction.find("?>") else {
-                return false;
-            };
-            document = &instruction[end + "?>".len()..];
-            continue;
-        }
-        if document.starts_with("<!DOCTYPE") {
-            let Some(rest) = skip_doctype(document) else {
-                return false;
-            };
-            document = rest;
-            continue;
-        }
-
-        let element = &document[1..];
-        if element.starts_with(['!', '/']) {
-            document = element;
-            continue;
-        }
-        let name = element
-            .split(|character: char| character.is_whitespace() || matches!(character, '/' | '>'))
-            .next()
-            .unwrap_or_default();
-        if name.rsplit(':').next() == Some("text") {
-            return true;
-        }
-        document = element;
-    }
-    false
+    let options = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..roxmltree::ParsingOptions::default()
+    };
+    roxmltree::Document::parse_with_options(document, options).map_or(true, |document| {
+        document.descendants().any(|node| {
+            node.is_element() && {
+                let name = node.tag_name();
+                name.name() == "text"
+                    && (name.namespace().is_none() || name.namespace() == Some(SVG_NAMESPACE))
+            }
+        })
+    })
 }
 
 fn svg_options(load_system_fonts: bool) -> resvg::usvg::Options<'static> {
@@ -635,7 +602,7 @@ impl GraphicsAdapter {
 mod tests {
     use super::{
         ImageManager, bounded_svg_document, decode_image, has_svg_document_root, looks_like_svg,
-        svg_contains_text, svg_options, unpremultiply_rgba,
+        svg_needs_fonts, svg_options, unpremultiply_rgba,
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -656,15 +623,18 @@ mod tests {
 
     #[test]
     fn font_loading_is_reserved_for_svg_text_elements() {
-        assert!(!svg_contains_text(
+        assert!(!svg_needs_fonts(
             br#"<svg><path aria-label="text" d="M0 0"/></svg>"#
         ));
-        assert!(!svg_contains_text(
-            br#"<!DOCTYPE svg [<!ENTITY sample "<text>">]><svg><!-- <text> --><![CDATA[<text>]]><?audit <text>?></svg>"#
+        assert!(!svg_needs_fonts(
+            br#"<!DOCTYPE svg [<!-- <text> -->]><svg><!-- <text> --><![CDATA[<text>]]><?audit <text>?></svg>"#
         ));
-        assert!(svg_contains_text(br#"<svg><text>label</text></svg>"#));
-        assert!(svg_contains_text(
-            br#"<svg:svg><svg:text>label</svg:text></svg:svg>"#
+        assert!(svg_needs_fonts(br#"<svg><text>label</text></svg>"#));
+        assert!(svg_needs_fonts(
+            br#"<svg:svg xmlns:svg="http://www.w3.org/2000/svg"><svg:text>label</svg:text></svg:svg>"#
+        ));
+        assert!(svg_needs_fonts(
+            br#"<!DOCTYPE svg [<!ENTITY label "<text>label</text>">]><svg>&label;</svg>"#
         ));
     }
 
