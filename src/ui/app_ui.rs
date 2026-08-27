@@ -13,6 +13,43 @@ pub(crate) fn effective_title_height(total_height: u16, title_panel_height_perce
     }
 }
 
+pub(crate) fn launcher_panel_areas(size: Rect, cli: &crate::cli::Opts) -> (Rect, Rect, Rect) {
+    let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
+    let chunks = match cli.title_panel_position {
+        Some(crate::ui::PanelPosition::Bottom) => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(cli.input_panel_height),
+                Constraint::Length(title_height),
+            ])
+            .split(size),
+        Some(crate::ui::PanelPosition::Middle) => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(title_height),
+                Constraint::Length(cli.input_panel_height),
+                Constraint::Min(0),
+            ])
+            .split(size),
+        _ => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(title_height),
+                Constraint::Min(0),
+                Constraint::Length(cli.input_panel_height),
+            ])
+            .split(size),
+    };
+
+    match cli.title_panel_position {
+        Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
+        Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
+        _ => (chunks[0], chunks[2], chunks[1]),
+    }
+}
+
 fn split_icon_preview(
     area: Rect,
     position: crate::ui::HorizontalPosition,
@@ -34,6 +71,27 @@ fn split_icon_preview(
         crate::ui::HorizontalPosition::Left => (content[0], content[1]),
         crate::ui::HorizontalPosition::Right => (content[1], content[0]),
     }
+}
+
+pub(crate) fn launcher_preview_icon_area(size: Rect, cli: &crate::cli::Opts) -> Rect {
+    let (title_area, _, _) = launcher_panel_areas(size, cli);
+    if effective_title_height(size.height, cli.title_panel_height_percent) == 0 {
+        return Rect::default();
+    }
+    let panel_inner = title_area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    let (icon_area, _) = split_icon_preview(
+        panel_inner,
+        cli.desktop_icon_position,
+        cli.desktop_icon_preview_width_percent,
+    );
+    let icon_area = icon_area.inner(Margin {
+        horizontal: 1,
+        vertical: 0,
+    });
+    Rect::new(0, 0, icon_area.width, icon_area.height)
 }
 
 /// App filtering and sorting UI (Stateless Renderer)
@@ -64,41 +122,7 @@ impl UI {
         let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
         let should_render_border = title_height > 0;
 
-        // Layout calculations
-        let chunks = match cli.title_panel_position {
-            Some(crate::ui::PanelPosition::Bottom) => Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(cli.input_panel_height),
-                    Constraint::Length(title_height),
-                ])
-                .split(size),
-            Some(crate::ui::PanelPosition::Middle) => Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(title_height),
-                    Constraint::Length(cli.input_panel_height),
-                    Constraint::Min(0),
-                ])
-                .split(size),
-            _ => Layout::default() // Top default
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(title_height),
-                    Constraint::Min(0), // Apps panel
-                    Constraint::Length(cli.input_panel_height),
-                ])
-                .split(size),
-        };
-
-        let (title_area, input_area, apps_area) = match cli.title_panel_position {
-            Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
-            Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
-            // Default: Title (0), Apps (1), Input (2)
-            _ => (chunks[0], chunks[2], chunks[1]),
-        };
+        let (title_area, input_area, apps_area) = launcher_panel_areas(size, cli);
 
         // Render Title/Info Panel
         if should_render_border {
@@ -298,7 +322,8 @@ impl UI {
 
 #[cfg(test)]
 mod tests {
-    use super::{effective_title_height, split_icon_preview};
+    use super::{effective_title_height, launcher_preview_icon_area, split_icon_preview};
+    use crate::cli::{DesktopIconMode, Opts};
     use crate::ui::HorizontalPosition;
     use ratatui::layout::Rect;
 
@@ -328,5 +353,20 @@ mod tests {
 
         assert_eq!(icon, Rect::new(0, 0, 35, 10));
         assert_eq!(text, Rect::new(35, 0, 65, 10));
+    }
+
+    #[test]
+    fn preview_worker_area_matches_the_rendered_icon_slot() {
+        let cli = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            title_panel_height_percent: 25,
+            desktop_icon_preview_width_percent: 40,
+            ..Opts::default()
+        };
+
+        assert_eq!(
+            launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &cli),
+            Rect::new(0, 0, 37, 8)
+        );
     }
 }

@@ -131,8 +131,8 @@ pub async fn run(cli: Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     terminal.clear().wrap_err("Failed to clear terminal")?;
 
-    let mut icons = super::icons::IconRuntime::new(&cli);
-    icons.request_if_changed(&state);
+    let mut icons = super::icons::IconRuntime::new(&cli, &state);
+    icons.request_if_changed(&state, terminal.size()?.into(), &cli);
 
     let mut input = InputConfig {
         disable_mouse: cli.disable_mouse,
@@ -146,9 +146,6 @@ pub async fn run(cli: Opts) -> Result<()> {
 
     loop {
         if needs_redraw {
-            if icons.take_terminal_clear() {
-                terminal.clear()?;
-            }
             let mut render_result = Ok(false);
             terminal.draw(|frame| {
                 render_result = UI::new().render(frame, &state, &cli, icons.preview());
@@ -172,8 +169,9 @@ pub async fn run(cli: Opts) -> Result<()> {
                 let should_handle = matches!(&event, Event::Input(_) | Event::Mouse(_));
                 needs_redraw =
                     matches!(&event, Event::Input(_) | Event::Mouse(_) | Event::Render);
+                let terminal_area = terminal.size()?;
+                let total_height = terminal_area.height;
                 if should_handle {
-                    let total_height = terminal.size()?.height;
                     super::events::handle_event(
                         &mut state,
                         event,
@@ -182,8 +180,8 @@ pub async fn run(cli: Opts) -> Result<()> {
                         &hidden_store,
                         total_height,
                     );
-                    icons.request_if_changed(&state);
                 }
+                icons.request_if_changed(&state, terminal_area.into(), &cli);
             }
         }
 

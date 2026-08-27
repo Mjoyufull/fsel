@@ -2,8 +2,8 @@ use eyre::{Result, eyre};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui_image::picker::{Picker, ProtocolType};
-use ratatui_image::protocol::StatefulProtocol;
-use ratatui_image::{Resize, StatefulImage};
+use ratatui_image::protocol::{Protocol, StatefulProtocol};
+use ratatui_image::{Image, Resize, StatefulImage};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Cursor, Read};
 use std::path::Path;
@@ -42,12 +42,17 @@ pub static DISPLAY_STATE: Mutex<DisplayState> = Mutex::new(DisplayState::Empty);
 pub struct ImageManager {
     picker: Picker,
     current_rowid: Option<String>,
-    cache: HashMap<String, StatefulProtocol>,
+    cache: HashMap<String, CachedProtocol>,
     cache_weights: HashMap<String, u64>,
     cache_order: VecDeque<String>,
     cache_capacity: usize,
     cache_weight: u64,
     cache_weight_capacity: u64,
+}
+
+enum CachedProtocol {
+    Fixed(Protocol),
+    Resizable(StatefulProtocol),
 }
 
 impl ImageManager {
@@ -111,28 +116,45 @@ impl ImageManager {
     /// Read and prepare an image file from a blocking worker.
     #[cfg(test)]
     pub(crate) fn prepare_image_path(picker: Picker, path: &Path) -> Result<StatefulProtocol> {
-        Self::prepare_image_path_with_weight(picker, path).map(|(protocol, _)| protocol)
+        let (image, _) = read_icon_image(path)?;
+        Ok(picker.new_resize_protocol(image))
     }
 
-    /// Read an icon and return its protocol plus retained decoded byte size.
-    pub(crate) fn prepare_image_path_with_weight(
+    /// Read, resize, and encode an icon for a fixed terminal-cell area.
+    pub(crate) fn prepare_fixed_image_path_with_weight(
         picker: Picker,
         path: &Path,
-    ) -> Result<(StatefulProtocol, u64)> {
-        let file = std::fs::File::open(path)?;
-        let file_size = file.metadata()?.len();
-        if file_size > MAX_IMAGE_FILE_BYTES {
-            return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
+        area: Rect,
+    ) -> Result<(Protocol, u64)> {
+        let (image, _) = read_icon_image(path)?;
+        let (font_width, font_height) = picker.font_size();
+        let retained_bytes = u64::from(area.width)
+            .saturating_mul(u64::from(font_width))
+            .saturating_mul(u64::from(area.height))
+            .saturating_mul(u64::from(font_height))
+            .saturating_mul(4);
+        let protocol = picker.new_protocol(image, area, Resize::Fit(None))?;
+        Ok((protocol, retained_bytes))
+    }
+
+    /// Insert a fixed-size protocol prepared by a desktop-icon worker.
+    pub(crate) fn insert_fixed_protocol_with_weight(
+        &mut self,
+        key: String,
+        protocol: Protocol,
+        weight: u64,
+    ) {
+        self.insert_cached_protocol(key, CachedProtocol::Fixed(protocol), weight);
+    }
+
+    fn insert_cached_protocol(&mut self, key: String, protocol: CachedProtocol, weight: u64) {
+        if let Some(previous) = self.cache_weights.insert(key.clone(), weight) {
+            self.cache_weight = self.cache_weight.saturating_sub(previous);
         }
-        let mut bytes = Vec::with_capacity(file_size as usize);
-        file.take(MAX_IMAGE_FILE_BYTES + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAX_IMAGE_FILE_BYTES {
-            return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
-        }
-        let image = decode_icon_image(&bytes)?;
-        let decoded_bytes = image.as_bytes().len() as u64;
-        Ok((picker.new_resize_protocol(image), decoded_bytes))
+        self.cache_weight = self.cache_weight.saturating_add(weight);
+        self.cache.insert(key.clone(), protocol);
+        self.update_lru(&key);
+        self.enforce_cache_capacity();
     }
 
     /// Return whether bytes have a supported raster signature or contain SVG markup.
@@ -152,13 +174,7 @@ impl ImageManager {
         protocol: StatefulProtocol,
         weight: u64,
     ) {
-        if let Some(previous) = self.cache_weights.insert(key.clone(), weight) {
-            self.cache_weight = self.cache_weight.saturating_sub(previous);
-        }
-        self.cache_weight = self.cache_weight.saturating_add(weight);
-        self.cache.insert(key.clone(), protocol);
-        self.update_lru(&key);
-        self.enforce_cache_capacity();
+        self.insert_cached_protocol(key, CachedProtocol::Resizable(protocol), weight);
     }
 
     /// Set current image to display (must be in cache)
@@ -232,15 +248,18 @@ impl ImageManager {
         if let Some(rowid) = &self.current_rowid
             && let Some(protocol) = self.cache.get_mut(rowid)
         {
-            f.render_stateful_widget(
-                StatefulImage::default().resize(Resize::Fit(None)),
-                area,
-                protocol,
-            );
-
-            // Propagate encoding/resize errors
-            if let Some(Err(e)) = protocol.last_encoding_result() {
-                return Err(eyre!("Image encoding failed: {}", e));
+            match protocol {
+                CachedProtocol::Fixed(protocol) => f.render_widget(Image::new(protocol), area),
+                CachedProtocol::Resizable(protocol) => {
+                    f.render_stateful_widget(
+                        StatefulImage::default().resize(Resize::Fit(None)),
+                        area,
+                        protocol,
+                    );
+                    if let Some(Err(error)) = protocol.last_encoding_result() {
+                        return Err(eyre!("Image encoding failed: {error}"));
+                    }
+                }
             }
         }
         Ok(())
@@ -253,14 +272,22 @@ impl ImageManager {
                 return Ok(false);
             };
 
-            f.render_stateful_widget(
-                StatefulImage::default().resize(Resize::Fit(None)),
-                area,
-                protocol,
-            );
-            protocol
-                .last_encoding_result()
-                .is_some_and(|result| result.is_err())
+            match protocol {
+                CachedProtocol::Fixed(protocol) => {
+                    f.render_widget(Image::new(protocol), area);
+                    false
+                }
+                CachedProtocol::Resizable(protocol) => {
+                    f.render_stateful_widget(
+                        StatefulImage::default().resize(Resize::Fit(None)),
+                        area,
+                        protocol,
+                    );
+                    protocol
+                        .last_encoding_result()
+                        .is_some_and(|result| result.is_err())
+                }
+            }
         };
         if encoding_failed {
             self.remove_cached(key);
@@ -297,6 +324,23 @@ impl ImageManager {
         }
         self.cache_order.retain(|cached| cached != key);
     }
+}
+
+fn read_icon_image(path: &Path) -> Result<(image::DynamicImage, u64)> {
+    let file = std::fs::File::open(path)?;
+    let file_size = file.metadata()?.len();
+    if file_size > MAX_IMAGE_FILE_BYTES {
+        return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
+    }
+    let mut bytes = Vec::with_capacity(file_size as usize);
+    file.take(MAX_IMAGE_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_IMAGE_FILE_BYTES {
+        return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
+    }
+    let image = decode_icon_image(&bytes)?;
+    let decoded_bytes = image.as_bytes().len() as u64;
+    Ok((image, decoded_bytes))
 }
 
 fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage> {

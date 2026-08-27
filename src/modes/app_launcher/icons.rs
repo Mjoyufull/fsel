@@ -2,9 +2,10 @@ use crate::cli::Opts;
 use crate::core::state::State;
 use crate::desktop::IconResolver;
 use crate::ui::{AppIconPreview, GraphicsAdapter, ImageManager};
+use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
-use ratatui_image::protocol::StatefulProtocol;
-use std::collections::HashMap;
+use ratatui_image::protocol::Protocol;
+use std::collections::{HashMap, HashSet};
 #[cfg(unix)]
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -13,12 +14,13 @@ use tokio::task::JoinHandle;
 
 pub(super) struct IconRuntime {
     enabled: bool,
-    adapter: GraphicsAdapter,
     image_manager: ImageManager,
     selected_icon: Option<String>,
     current_key: Option<String>,
     icon_keys: HashMap<String, String>,
-    needs_terminal_clear: bool,
+    preview_pending: bool,
+    preview_failed: bool,
+    preview_area: Rect,
     generation: u64,
     request_tx: mpsc::UnboundedSender<Option<IconRequest>>,
     worker: JoinHandle<()>,
@@ -29,6 +31,7 @@ pub(super) struct IconRuntime {
 struct IconRequest {
     generation: u64,
     icon: String,
+    area: Rect,
 }
 
 pub(super) struct IconResult {
@@ -39,12 +42,12 @@ pub(super) struct IconResult {
 
 struct PreparedIcon {
     key: String,
-    protocol: Box<StatefulProtocol>,
+    protocol: Box<Protocol>,
     decoded_bytes: u64,
 }
 
 impl IconRuntime {
-    pub(super) fn new(cli: &Opts) -> Self {
+    pub(super) fn new(cli: &Opts, state: &State) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<Option<IconRequest>>();
         let enabled = cli.desktop_icon_mode.shows_preview();
@@ -54,36 +57,50 @@ impl IconRuntime {
         } else {
             fallback_adapter.picker()
         };
-        let adapter = GraphicsAdapter::detect(Some(&picker));
         let worker_picker = picker.clone();
         let mut resolver = IconResolver::from_environment(
             cli.desktop_icon_theme.as_deref(),
             cli.desktop_icon_size,
         );
+        let known_icons = state
+            .apps
+            .iter()
+            .filter_map(|app| app.icon.clone())
+            .collect::<HashSet<_>>();
         let worker = tokio::task::spawn_blocking(move || {
+            let mut preloaded = false;
             while let Some(mut request) = request_rx.blocking_recv() {
                 while let Ok(latest) = request_rx.try_recv() {
                     request = latest;
                 }
-                let Some(request) = request else {
-                    continue;
-                };
-                let prepared = prepare_icon(&mut resolver, worker_picker.clone(), &request.icon);
-                let _ = result_tx.send(IconResult {
-                    generation: request.generation,
-                    icon: request.icon,
-                    prepared,
-                });
+                if let Some(request) = request {
+                    let prepared = prepare_icon(
+                        &mut resolver,
+                        worker_picker.clone(),
+                        &request.icon,
+                        request.area,
+                    );
+                    let _ = result_tx.send(IconResult {
+                        generation: request.generation,
+                        icon: request.icon,
+                        prepared,
+                    });
+                }
+                if !preloaded {
+                    resolver.preload(known_icons.iter().map(String::as_str));
+                    preloaded = true;
+                }
             }
         });
         Self {
             enabled,
-            adapter,
             image_manager: ImageManager::new(picker).with_cache_weight_limit(128 * 1024 * 1024),
             selected_icon: None,
             current_key: None,
             icon_keys: HashMap::new(),
-            needs_terminal_clear: false,
+            preview_pending: false,
+            preview_failed: false,
+            preview_area: Rect::default(),
             generation: 0,
             request_tx,
             worker,
@@ -91,7 +108,7 @@ impl IconRuntime {
         }
     }
 
-    pub(super) fn request_if_changed(&mut self, state: &State) {
+    pub(super) fn request_if_changed(&mut self, state: &State, terminal_area: Rect, cli: &Opts) {
         if !self.enabled {
             return;
         }
@@ -100,29 +117,50 @@ impl IconRuntime {
             .selected
             .and_then(|selected| state.shown.get(selected))
             .and_then(|app| app.icon.clone());
-        if self.selected_icon == icon {
+        let area = crate::ui::launcher_preview_icon_area(terminal_area, cli);
+        let area_changed = self.preview_area != area;
+        let cached = self
+            .current_key
+            .as_deref()
+            .is_some_and(|key| self.image_manager.is_cached(key));
+        if !area_changed
+            && self.selected_icon == icon
+            && (icon.is_none() || cached || self.preview_pending || self.preview_failed)
+        {
             return;
         }
 
         self.generation = self.generation.wrapping_add(1);
+        if area_changed {
+            self.icon_keys.clear();
+            self.preview_area = area;
+        }
         self.selected_icon.clone_from(&icon);
-        self.needs_terminal_clear =
-            self.current_key.is_some() && !matches!(self.adapter, GraphicsAdapter::None);
-        self.current_key = None;
+        self.preview_pending = icon.is_some();
+        self.preview_failed = false;
 
         let Some(icon) = icon else {
+            self.current_key = None;
             let _ = self.request_tx.send(None);
             return;
         };
+        if area.width == 0 || area.height == 0 {
+            self.preview_pending = false;
+            self.current_key = None;
+            let _ = self.request_tx.send(None);
+            return;
+        }
         if let Some(key) = self.icon_keys.get(&icon)
             && self.image_manager.is_cached(key)
         {
+            self.preview_pending = false;
             self.current_key = Some(key.clone());
             return;
         }
         let _ = self.request_tx.send(Some(IconRequest {
             generation: self.generation,
             icon,
+            area,
         }));
     }
 
@@ -134,10 +172,14 @@ impl IconRuntime {
         if result.generation != self.generation {
             return;
         }
+        self.preview_pending = false;
         let Ok(Some(prepared)) = result.prepared else {
+            self.preview_failed = true;
+            self.current_key = None;
             return;
         };
-        self.image_manager.insert_protocol_with_weight(
+        self.preview_failed = false;
+        self.image_manager.insert_fixed_protocol_with_weight(
             prepared.key.clone(),
             *prepared.protocol,
             prepared.decoded_bytes,
@@ -155,13 +197,8 @@ impl IconRuntime {
     }
 
     pub(super) fn clear_failed_preview(&mut self) {
-        if self.current_key.take().is_some() {
-            self.needs_terminal_clear |= !matches!(self.adapter, GraphicsAdapter::None);
-        }
-    }
-
-    pub(super) fn take_terminal_clear(&mut self) -> bool {
-        std::mem::take(&mut self.needs_terminal_clear)
+        self.current_key = None;
+        self.preview_failed = true;
     }
 }
 
@@ -206,17 +243,28 @@ fn prepare_icon(
     resolver: &mut IconResolver,
     picker: Picker,
     icon: &str,
+    area: Rect,
 ) -> Result<Option<PreparedIcon>, String> {
     let Some(path) = resolver.resolve(icon) else {
         return Ok(None);
     };
-    prepare_resolved_icon(picker, path).map(Some)
+    prepare_resolved_icon(picker, path, area).map(Some)
 }
 
-fn prepare_resolved_icon(picker: Picker, path: PathBuf) -> Result<PreparedIcon, String> {
-    let key = path.to_string_lossy().into_owned();
-    let (protocol, decoded_bytes) = ImageManager::prepare_image_path_with_weight(picker, &path)
-        .map_err(|error| format!("Failed to load desktop icon {}: {error}", path.display()))?;
+fn prepare_resolved_icon(
+    picker: Picker,
+    path: PathBuf,
+    area: Rect,
+) -> Result<PreparedIcon, String> {
+    let key = format!(
+        "desktop-preview:{}x{}:{}",
+        area.width,
+        area.height,
+        path.to_string_lossy()
+    );
+    let (protocol, decoded_bytes) =
+        ImageManager::prepare_fixed_image_path_with_weight(picker, &path, area)
+            .map_err(|error| format!("Failed to load desktop icon {}: {error}", path.display()))?;
     Ok(PreparedIcon {
         key,
         protocol: Box::new(protocol),
