@@ -465,18 +465,55 @@ fn xml_attribute_value(value: &str) -> Option<String> {
 }
 
 fn svg_contains_text(document: &[u8]) -> bool {
-    let Ok(document) = std::str::from_utf8(document) else {
+    let Ok(mut document) = std::str::from_utf8(document) else {
         return false;
     };
-    document.split('<').skip(1).any(|element| {
+    while let Some(start) = document.find('<') {
+        document = &document[start..];
+        if let Some(comment) = document.strip_prefix("<!--") {
+            let Some(end) = comment.find("-->") else {
+                return false;
+            };
+            document = &comment[end + "-->".len()..];
+            continue;
+        }
+        if let Some(cdata) = document.strip_prefix("<![CDATA[") {
+            let Some(end) = cdata.find("]]>") else {
+                return false;
+            };
+            document = &cdata[end + "]]>".len()..];
+            continue;
+        }
+        if let Some(instruction) = document.strip_prefix("<?") {
+            let Some(end) = instruction.find("?>") else {
+                return false;
+            };
+            document = &instruction[end + "?>".len()..];
+            continue;
+        }
+        if document.starts_with("<!DOCTYPE") {
+            let Some(rest) = skip_doctype(document) else {
+                return false;
+            };
+            document = rest;
+            continue;
+        }
+
+        let element = &document[1..];
+        if element.starts_with(['!', '/']) {
+            document = element;
+            continue;
+        }
         let name = element
-            .trim_start()
-            .trim_start_matches('/')
             .split(|character: char| character.is_whitespace() || matches!(character, '/' | '>'))
             .next()
             .unwrap_or_default();
-        name.rsplit(':').next() == Some("text")
-    })
+        if name.rsplit(':').next() == Some("text") {
+            return true;
+        }
+        document = element;
+    }
+    false
 }
 
 fn svg_options(load_system_fonts: bool) -> resvg::usvg::Options<'static> {
@@ -621,6 +658,9 @@ mod tests {
     fn font_loading_is_reserved_for_svg_text_elements() {
         assert!(!svg_contains_text(
             br#"<svg><path aria-label="text" d="M0 0"/></svg>"#
+        ));
+        assert!(!svg_contains_text(
+            br#"<!DOCTYPE svg [<!ENTITY sample "<text>">]><svg><!-- <text> --><![CDATA[<text>]]><?audit <text>?></svg>"#
         ));
         assert!(svg_contains_text(br#"<svg><text>label</text></svg>"#));
         assert!(svg_contains_text(
