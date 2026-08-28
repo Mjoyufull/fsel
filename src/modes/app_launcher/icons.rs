@@ -223,12 +223,15 @@ impl IconRuntime {
         if area.width == 0 || area.height == 0 {
             if area_changed || self.list_signature != signature {
                 self.list_generation = self.list_generation.wrapping_add(1);
+                reset_list_generation(
+                    &mut self.failed_list_icons,
+                    &mut self.list_inflight,
+                    &mut self.list_attempted,
+                );
             }
             self.list_area = area;
             self.list_signature = signature;
             self.list_keys.clear();
-            self.list_inflight.clear();
-            self.list_attempted.clear();
             return Vec::new();
         }
         let signature_changed = area_changed || self.list_signature != signature;
@@ -250,8 +253,11 @@ impl IconRuntime {
 
         if signature_changed {
             self.list_generation = self.list_generation.wrapping_add(1);
-            self.list_inflight.clear();
-            self.list_attempted.clear();
+            reset_list_generation(
+                &mut self.failed_list_icons,
+                &mut self.list_inflight,
+                &mut self.list_attempted,
+            );
             if area_changed {
                 self.list_keys.clear();
                 self.list_area = area;
@@ -378,6 +384,16 @@ impl IconRuntime {
 
 fn should_queue_list_icon(failed: bool, inflight: bool, attempted: bool, cached: bool) -> bool {
     !failed && !inflight && !attempted && !cached
+}
+
+fn reset_list_generation(
+    failed: &mut HashSet<String>,
+    inflight: &mut HashSet<String>,
+    attempted: &mut HashSet<String>,
+) {
+    failed.clear();
+    inflight.clear();
+    attempted.clear();
 }
 
 #[cfg(unix)]
@@ -623,9 +639,11 @@ fn prepare_resolved_icon(
 
 #[cfg(test)]
 mod tests {
-    use super::{IconRequest, WorkRequest, merge_work, should_queue_list_icon};
+    use super::{
+        IconRequest, WorkRequest, merge_work, reset_list_generation, should_queue_list_icon,
+    };
     use ratatui::layout::Rect;
-    use std::collections::VecDeque;
+    use std::collections::{HashSet, VecDeque};
 
     fn request(
         preview_generation: u64,
@@ -686,5 +704,18 @@ mod tests {
     fn attempted_list_icon_is_not_requeued_after_cache_eviction() {
         assert!(!should_queue_list_icon(false, false, true, false));
         assert!(should_queue_list_icon(false, false, false, false));
+    }
+
+    #[test]
+    fn new_list_generation_retries_failed_icons() {
+        let mut failed = HashSet::from(["broken".to_string()]);
+        let mut inflight = HashSet::from(["pending".to_string()]);
+        let mut attempted = HashSet::from(["evicted".to_string()]);
+
+        reset_list_generation(&mut failed, &mut inflight, &mut attempted);
+
+        assert!(failed.is_empty());
+        assert!(inflight.is_empty());
+        assert!(attempted.is_empty());
     }
 }
