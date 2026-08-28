@@ -5,7 +5,7 @@ use crate::ui::{AppIconPreview, GraphicsAdapter, ImageManager};
 use ratatui::layout::Rect;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 #[cfg(unix)]
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -47,7 +47,7 @@ struct PreparedIcon {
 }
 
 impl IconRuntime {
-    pub(super) fn new(cli: &Opts, state: &State) -> Self {
+    pub(super) fn new(cli: &Opts) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<Option<IconRequest>>();
         let enabled = cli.desktop_icon_mode.shows_preview();
@@ -62,13 +62,9 @@ impl IconRuntime {
             cli.desktop_icon_theme.as_deref(),
             cli.desktop_icon_size,
         );
-        let known_icons = state
-            .apps
-            .iter()
-            .filter_map(|app| app.icon.clone())
-            .collect::<HashSet<_>>();
+        let horizontal_align = cli.desktop_icon_horizontal_align_percent;
+        let vertical_align = cli.desktop_icon_vertical_align_percent;
         let worker = tokio::task::spawn_blocking(move || {
-            let mut preloaded = false;
             while let Some(mut request) = request_rx.blocking_recv() {
                 while let Ok(latest) = request_rx.try_recv() {
                     request = latest;
@@ -79,16 +75,14 @@ impl IconRuntime {
                         worker_picker.clone(),
                         &request.icon,
                         request.area,
+                        horizontal_align,
+                        vertical_align,
                     );
                     let _ = result_tx.send(IconResult {
                         generation: request.generation,
                         icon: request.icon,
                         prepared,
                     });
-                }
-                if !preloaded {
-                    resolver.preload(known_icons.iter().map(String::as_str));
-                    preloaded = true;
                 }
             }
         });
@@ -245,27 +239,36 @@ fn prepare_icon(
     picker: Picker,
     icon: &str,
     area: Rect,
+    horizontal_align: u16,
+    vertical_align: u16,
 ) -> Result<Option<PreparedIcon>, String> {
     let Some(path) = resolver.resolve(icon) else {
         return Ok(None);
     };
-    prepare_resolved_icon(picker, path, area).map(Some)
+    prepare_resolved_icon(picker, path, area, horizontal_align, vertical_align).map(Some)
 }
 
 fn prepare_resolved_icon(
     picker: Picker,
     path: PathBuf,
     area: Rect,
+    horizontal_align: u16,
+    vertical_align: u16,
 ) -> Result<PreparedIcon, String> {
     let key = format!(
-        "desktop-preview:{}x{}:{}",
+        "desktop-preview:{}x{}:{horizontal_align}x{vertical_align}:{}",
         area.width,
         area.height,
         path.to_string_lossy()
     );
-    let (protocol, decoded_bytes) =
-        ImageManager::prepare_fixed_image_path_with_weight(picker, &path, area)
-            .map_err(|error| format!("Failed to load desktop icon {}: {error}", path.display()))?;
+    let (protocol, decoded_bytes) = ImageManager::prepare_fixed_image_path_with_weight(
+        picker,
+        &path,
+        area,
+        horizontal_align,
+        vertical_align,
+    )
+    .map_err(|error| format!("Failed to load desktop icon {}: {error}", path.display()))?;
     Ok(PreparedIcon {
         key,
         protocol: Box::new(protocol),

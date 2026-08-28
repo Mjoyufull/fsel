@@ -227,6 +227,10 @@ mod tests {
                 "35",
                 "--icon-size",
                 "96",
+                "--icon-horizontal-align",
+                "25",
+                "--icon-vertical-align",
+                "75",
                 "--icon-theme",
                 "Papirus",
             ]),
@@ -244,6 +248,8 @@ mod tests {
         );
         assert_eq!(opts.desktop_icon_preview_width_percent, 35);
         assert_eq!(opts.desktop_icon_size, 96);
+        assert_eq!(opts.desktop_icon_horizontal_align_percent, 25);
+        assert_eq!(opts.desktop_icon_vertical_align_percent, 75);
         assert_eq!(opts.desktop_icon_theme.as_deref(), Some("Papirus"));
     }
 }

@@ -95,6 +95,18 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         &mut cfg.app_launcher.icon_size,
         INTEGER_EXPECTED,
     )?;
+    set_optional_parsed(
+        source,
+        "FSEL_APP_LAUNCHER_ICON_HORIZONTAL_ALIGN_PERCENT",
+        &mut cfg.app_launcher.icon_horizontal_align_percent,
+        INTEGER_EXPECTED,
+    )?;
+    set_optional_parsed(
+        source,
+        "FSEL_APP_LAUNCHER_ICON_VERTICAL_ALIGN_PERCENT",
+        &mut cfg.app_launcher.icon_vertical_align_percent,
+        INTEGER_EXPECTED,
+    )?;
     set_optional_string(
         source,
         "FSEL_APP_LAUNCHER_ICON_THEME",

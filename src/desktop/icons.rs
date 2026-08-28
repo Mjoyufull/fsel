@@ -87,59 +87,18 @@ impl IconResolver {
         }
 
         let icon_name = strip_icon_extension(icon);
-        let resolved = self
-            .theme_chain()
-            .into_iter()
-            .find_map(|theme| self.find_in_theme(&theme, icon_name))
-            .or_else(|| self.find_unthemed(icon_name));
+        let themes = self.theme_chain();
+        let resolved = themes
+            .iter()
+            .find_map(|theme| self.find_declared_in_theme(theme, icon_name))
+            .or_else(|| self.find_unthemed(icon_name))
+            .or_else(|| {
+                themes
+                    .iter()
+                    .find_map(|theme| self.find_fallback_in_theme(theme, icon_name))
+            });
         self.cache.insert(icon.to_string(), resolved.clone());
         resolved
-    }
-
-    /// Resolve a launcher's known icon set with one pass over each theme directory.
-    pub(crate) fn preload<'a>(&mut self, icons: impl IntoIterator<Item = &'a str>) {
-        let mut aliases = HashMap::<String, Vec<String>>::new();
-        for icon in icons {
-            if self.cache.contains_key(icon) {
-                continue;
-            }
-            if let Some(path) = absolute_icon_path(icon) {
-                self.cache.insert(icon.to_string(), Some(path));
-                continue;
-            }
-            if icon.contains(['/', '\\']) {
-                self.cache.insert(icon.to_string(), None);
-                continue;
-            }
-            aliases
-                .entry(strip_icon_extension(icon).to_string())
-                .or_default()
-                .push(icon.to_string());
-        }
-        if aliases.is_empty() {
-            return;
-        }
-
-        for theme in self.theme_chain() {
-            if aliases.is_empty() {
-                break;
-            }
-            let names = aliases.keys().cloned().collect::<HashSet<_>>();
-            for (name, path) in self.find_many_in_theme(&theme, &names) {
-                if let Some(originals) = aliases.remove(&name) {
-                    for original in originals {
-                        self.cache.insert(original, Some(path.clone()));
-                    }
-                }
-            }
-        }
-
-        for (name, originals) in aliases {
-            let resolved = self.find_unthemed(&name);
-            for original in originals {
-                self.cache.insert(original, resolved.clone());
-            }
-        }
     }
 
     fn theme_chain(&self) -> Vec<String> {
@@ -175,7 +134,7 @@ impl IconResolver {
         }
     }
 
-    fn find_in_theme(&self, theme: &str, icon: &str) -> Option<PathBuf> {
+    fn find_declared_in_theme(&self, theme: &str, icon: &str) -> Option<PathBuf> {
         let mut candidates = Vec::new();
         for (root_rank, root) in self.icon_roots.iter().enumerate() {
             let theme_root = root.join(theme);
@@ -183,7 +142,6 @@ impl IconResolver {
                 continue;
             }
 
-            let candidate_count = candidates.len();
             if let Some(metadata) = read_theme_metadata(&theme_root) {
                 for directory in metadata.directories {
                     collect_named_candidates(
@@ -196,66 +154,30 @@ impl IconResolver {
                     );
                 }
             }
-            if candidates.len() == candidate_count {
-                for entry in WalkDir::new(&theme_root)
-                    .min_depth(1)
-                    .max_depth(5)
-                    .into_iter()
-                    .filter_map(Result::ok)
-                {
-                    let path = entry.path();
-                    if path.is_file() && has_icon_name(&path, icon) {
-                        candidates.push(IconCandidate::from_fallback(path, self.size, root_rank));
-                    }
-                }
-            }
         }
         best_candidate(candidates)
     }
 
-    fn find_many_in_theme(&self, theme: &str, icons: &HashSet<String>) -> HashMap<String, PathBuf> {
-        let mut candidates = HashMap::<String, Vec<IconCandidate>>::new();
+    fn find_fallback_in_theme(&self, theme: &str, icon: &str) -> Option<PathBuf> {
+        let mut candidates = Vec::new();
         for (root_rank, root) in self.icon_roots.iter().enumerate() {
             let theme_root = root.join(theme);
             if !theme_root.is_dir() {
                 continue;
             }
-
-            let mut declared = HashMap::<String, Vec<IconCandidate>>::new();
-            if let Some(metadata) = read_theme_metadata(&theme_root) {
-                for directory in metadata.directories {
-                    collect_directory_candidates(
-                        &theme_root,
-                        &directory,
-                        icons,
-                        self.size,
-                        root_rank,
-                        &mut declared,
-                    );
-                }
-            }
-
-            let missing = icons
-                .iter()
-                .filter(|icon| !declared.contains_key(*icon))
-                .cloned()
-                .collect::<HashSet<_>>();
-            let fallback = collect_fallback_candidates(&theme_root, &missing, self.size, root_rank);
-            for icon in icons {
-                let source = declared.get(icon).or_else(|| fallback.get(icon));
-                if let Some(source) = source {
-                    candidates
-                        .entry(icon.clone())
-                        .or_default()
-                        .extend(source.iter().cloned());
+            for entry in WalkDir::new(&theme_root)
+                .min_depth(1)
+                .max_depth(5)
+                .into_iter()
+                .filter_map(Result::ok)
+            {
+                let path = entry.path();
+                if path.is_file() && has_icon_name(&path, icon) {
+                    candidates.push(IconCandidate::from_fallback(path, self.size, root_rank));
                 }
             }
         }
-
-        candidates
-            .into_iter()
-            .filter_map(|(icon, candidates)| best_candidate(candidates).map(|path| (icon, path)))
-            .collect()
+        best_candidate(candidates)
     }
 
     fn find_unthemed(&self, icon: &str) -> Option<PathBuf> {
@@ -298,77 +220,6 @@ struct IconCandidate {
     path: PathBuf,
     directory_score: (u32, u8),
     root_rank: usize,
-}
-
-fn collect_directory_candidates(
-    theme_root: &Path,
-    directory: &ThemeDirectory,
-    icons: &HashSet<String>,
-    requested_size: u16,
-    root_rank: usize,
-    candidates: &mut HashMap<String, Vec<IconCandidate>>,
-) {
-    let Ok(entries) = std::fs::read_dir(theme_root.join(&directory.path)) else {
-        return;
-    };
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        let Some(icon) = supported_icon_name(&path) else {
-            continue;
-        };
-        if icons.contains(icon) {
-            candidates
-                .entry(icon.to_string())
-                .or_default()
-                .push(IconCandidate {
-                    path,
-                    directory_score: directory.score(requested_size),
-                    root_rank,
-                });
-        }
-    }
-}
-
-fn collect_fallback_candidates(
-    theme_root: &Path,
-    icons: &HashSet<String>,
-    requested_size: u16,
-    root_rank: usize,
-) -> HashMap<String, Vec<IconCandidate>> {
-    if icons.is_empty() {
-        return HashMap::new();
-    }
-    let mut candidates = HashMap::<String, Vec<IconCandidate>>::new();
-    for entry in WalkDir::new(theme_root)
-        .min_depth(1)
-        .max_depth(5)
-        .into_iter()
-        .filter_map(Result::ok)
-    {
-        let path = entry.path();
-        let Some(icon) = supported_icon_name(&path) else {
-            continue;
-        };
-        if icons.contains(icon) {
-            candidates
-                .entry(icon.to_string())
-                .or_default()
-                .push(IconCandidate::from_fallback(
-                    path,
-                    requested_size,
-                    root_rank,
-                ));
-        }
-    }
-    candidates
-}
-
-fn supported_icon_name(path: &Path) -> Option<&str> {
-    let extension = path.extension()?.to_str()?;
-    if !ICON_EXTENSIONS.contains(&extension) {
-        return None;
-    }
-    path.file_stem()?.to_str()
 }
 
 impl IconCandidate {
@@ -502,20 +353,32 @@ mod tests {
     }
 
     #[test]
-    fn preloads_known_icons_with_one_theme_scan() {
+    fn declared_inherited_icon_precedes_selected_theme_directory_scan() {
         let root = temp_dir();
-        let theme = root.join("Selected");
-        let apps = theme.join("64x64/apps");
-        fs::create_dir_all(&apps).expect("theme directory should be created");
+        let selected_theme = root.join("Selected");
+        let inherited_theme = root.join("Inherited");
+        fs::create_dir_all(selected_theme.join("undeclared/apps"))
+            .expect("undeclared directory should be created");
         fs::write(
-            theme.join("index.theme"),
+            selected_theme.join("index.theme"),
+            "[Icon Theme]\nInherits=Inherited\n",
+        )
+        .expect("selected theme metadata should be written");
+        fs::write(
+            selected_theme.join("undeclared/apps/editor.png"),
+            b"fallback",
+        )
+        .expect("fallback icon should be written");
+        fs::create_dir_all(inherited_theme.join("64x64/apps"))
+            .expect("inherited directory should be created");
+        fs::write(
+            inherited_theme.join("index.theme"),
             "[Icon Theme]\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n",
         )
-        .expect("theme metadata should be written");
-        let editor = apps.join("editor.png");
-        let viewer = apps.join("viewer.svg");
-        fs::write(&editor, b"editor").expect("editor icon should be written");
-        fs::write(&viewer, b"viewer").expect("viewer icon should be written");
+        .expect("inherited theme metadata should be written");
+        let expected = inherited_theme.join("64x64/apps/editor.png");
+        fs::write(&expected, b"declared").expect("declared icon should be written");
+
         let mut resolver = IconResolver {
             theme: "Selected".to_string(),
             size: 64,
@@ -524,13 +387,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
         };
 
-        resolver.preload(["editor", "viewer.svg", "missing"]);
-        fs::remove_file(&editor).expect("editor fixture should be removable");
-        fs::remove_file(&viewer).expect("viewer fixture should be removable");
-
-        assert_eq!(resolver.resolve("editor"), Some(editor));
-        assert_eq!(resolver.resolve("viewer.svg"), Some(viewer));
-        assert_eq!(resolver.resolve("missing"), None);
+        assert_eq!(resolver.resolve("editor"), Some(expected));
         let _ = fs::remove_dir_all(root);
     }
 

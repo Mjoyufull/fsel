@@ -139,7 +139,7 @@ pub async fn run(cli: Opts) -> Result<()> {
     })?;
     initial_render_result?;
 
-    let mut icons = super::icons::IconRuntime::new(&cli, &state);
+    let mut icons = super::icons::IconRuntime::new(&cli);
     icons.request_if_changed(&state, terminal.size()?.into(), &cli);
 
     let mut input = InputConfig {

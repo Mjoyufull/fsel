@@ -211,6 +211,26 @@ pub(super) fn parse_cli_overrides(
                         .parse::<u16>()
                         .map_err(|_| CliError::message("Desktop icon size must be an integer"))?;
             }
+            Long("icon-horizontal-align") => {
+                default.desktop_icon_horizontal_align_percent = value_as_string(
+                    parser,
+                    "Desktop icon horizontal alignment must be valid UTF-8",
+                )?
+                .parse::<u16>()
+                .map_err(|_| {
+                    CliError::message("Desktop icon horizontal alignment must be an integer")
+                })?;
+            }
+            Long("icon-vertical-align") => {
+                default.desktop_icon_vertical_align_percent = value_as_string(
+                    parser,
+                    "Desktop icon vertical alignment must be valid UTF-8",
+                )?
+                .parse::<u16>()
+                .map_err(|_| {
+                    CliError::message("Desktop icon vertical alignment must be an integer")
+                })?;
+            }
             Long("icon-theme") => {
                 default.desktop_icon_theme = Some(value_as_string(
                     parser,

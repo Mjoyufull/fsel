@@ -77,6 +77,8 @@ prefix_depth = 2
             ("FSEL_APP_LAUNCHER_PREFIX_DEPTH", "8"),
             ("FSEL_APP_LAUNCHER_ICON_MODE", "preview"),
             ("FSEL_APP_LAUNCHER_ICON_POSITION", "left"),
+            ("FSEL_APP_LAUNCHER_ICON_HORIZONTAL_ALIGN_PERCENT", "25"),
+            ("FSEL_APP_LAUNCHER_ICON_VERTICAL_ALIGN_PERCENT", "75"),
         ]);
 
         apply_overrides(&mut config, &source).unwrap();
@@ -95,6 +97,8 @@ prefix_depth = 2
             config.app_launcher.icon_position,
             Some(HorizontalPosition::Left)
         );
+        assert_eq!(config.app_launcher.icon_horizontal_align_percent, Some(25));
+        assert_eq!(config.app_launcher.icon_vertical_align_percent, Some(75));
     }
 
     #[test]

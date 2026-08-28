@@ -43,6 +43,8 @@ pub struct AppLauncherConfig {
     pub icon_position: Option<HorizontalPosition>,
     pub icon_preview_width_percent: Option<u16>,
     pub icon_size: Option<u16>,
+    pub icon_horizontal_align_percent: Option<u16>,
+    pub icon_vertical_align_percent: Option<u16>,
     pub icon_theme: Option<String>,
 }
 

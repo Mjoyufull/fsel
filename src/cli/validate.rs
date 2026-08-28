@@ -48,6 +48,15 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
             "Error: Desktop icon size must be between 1 and 4096\n",
         ));
     }
+    if uses_desktop_icons
+        && default.desktop_icon_mode != DesktopIconMode::None
+        && (default.desktop_icon_horizontal_align_percent > 100
+            || default.desktop_icon_vertical_align_percent > 100)
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon alignment must be between 0 and 100\n",
+        ));
+    }
 
     if default.program.is_some() && default.search_string.is_some() {
         return Err(CliError::message(
@@ -174,6 +183,21 @@ mod tests {
         };
 
         assert!(validate(&mut options, 0).is_ok());
+    }
+
+    #[test]
+    fn active_icon_layout_rejects_alignment_over_one_hundred() {
+        let mut options = Opts {
+            desktop_icon_horizontal_align_percent: 101,
+            ..Opts::default()
+        };
+
+        let error = validate(&mut options, 0).expect_err("alignment should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("alignment must be between 0 and 100")
+        );
     }
 
     #[test]

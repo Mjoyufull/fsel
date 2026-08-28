@@ -125,15 +125,26 @@ impl ImageManager {
         picker: Picker,
         path: &Path,
         area: Rect,
+        horizontal_align: u16,
+        vertical_align: u16,
     ) -> Result<(Protocol, u64)> {
         let (image, _) = read_icon_image(path)?;
         let (font_width, font_height) = picker.font_size();
+        let pixel_width = u32::from(area.width).saturating_mul(u32::from(font_width));
+        let pixel_height = u32::from(area.height).saturating_mul(u32::from(font_height));
+        let image = normalize_desktop_icon(
+            image,
+            pixel_width,
+            pixel_height,
+            horizontal_align,
+            vertical_align,
+        );
         let retained_bytes = u64::from(area.width)
             .saturating_mul(u64::from(font_width))
             .saturating_mul(u64::from(area.height))
             .saturating_mul(u64::from(font_height))
             .saturating_mul(4);
-        let protocol = picker.new_protocol(image, area, Resize::Fit(None))?;
+        let protocol = picker.new_protocol(image, area, Resize::Scale(None))?;
         Ok((protocol, retained_bytes))
     }
 
@@ -324,6 +335,67 @@ impl ImageManager {
         }
         self.cache_order.retain(|cached| cached != key);
     }
+}
+
+fn normalize_desktop_icon(
+    image: image::DynamicImage,
+    target_width: u32,
+    target_height: u32,
+    horizontal_align: u16,
+    vertical_align: u16,
+) -> image::DynamicImage {
+    let source = image.into_rgba8();
+    let mut bounds = None::<(u32, u32, u32, u32)>;
+    for (x, y, pixel) in source.enumerate_pixels() {
+        if pixel[3] <= 8 {
+            continue;
+        }
+        bounds = Some(bounds.map_or((x, y, x, y), |(left, top, right, bottom)| {
+            (left.min(x), top.min(y), right.max(x), bottom.max(y))
+        }));
+    }
+
+    let mut canvas = image::RgbaImage::new(target_width.max(1), target_height.max(1));
+    let Some((left, top, right, bottom)) = bounds else {
+        return image::DynamicImage::ImageRgba8(canvas);
+    };
+    let source_width = right - left + 1;
+    let source_height = bottom - top + 1;
+    let cropped =
+        image::imageops::crop_imm(&source, left, top, source_width, source_height).to_image();
+
+    // A small common inset makes differently padded source files occupy the same visual box.
+    let max_width = target_width.saturating_mul(88).div_ceil(100).max(1);
+    let max_height = target_height.saturating_mul(88).div_ceil(100).max(1);
+    let (width, height) = if u64::from(max_width) * u64::from(source_height)
+        <= u64::from(max_height) * u64::from(source_width)
+    {
+        let height = u64::from(source_height)
+            .saturating_mul(u64::from(max_width))
+            .div_ceil(u64::from(source_width)) as u32;
+        (max_width, height.max(1))
+    } else {
+        let width = u64::from(source_width)
+            .saturating_mul(u64::from(max_height))
+            .div_ceil(u64::from(source_height)) as u32;
+        (width.max(1), max_height)
+    };
+    let resized = image::imageops::resize(
+        &cropped,
+        width,
+        height,
+        image::imageops::FilterType::Triangle,
+    );
+    let x = target_width
+        .saturating_sub(width)
+        .saturating_mul(u32::from(horizontal_align.min(100)))
+        / 100;
+    let y = target_height
+        .saturating_sub(height)
+        .saturating_mul(u32::from(vertical_align.min(100)))
+        / 100;
+    image::imageops::overlay(&mut canvas, &resized, i64::from(x), i64::from(y));
+    image::DynamicImage::ImageRgba8(canvas)
 }
 
 fn read_icon_image(path: &Path) -> Result<(image::DynamicImage, u64)> {
@@ -921,14 +993,72 @@ impl GraphicsAdapter {
 mod tests {
     use super::{
         ImageManager, MAX_IMAGE_FILE_BYTES, bounded_svg_document, decode_icon_image, decode_image,
-        decode_xpm, has_svg_document_root, looks_like_svg, svg_needs_fonts, svg_options,
-        unpremultiply_rgba,
+        decode_xpm, has_svg_document_root, looks_like_svg, normalize_desktop_icon, svg_needs_fonts,
+        svg_options, unpremultiply_rgba,
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
     use ratatui_image::picker::Picker;
     use std::io::{Cursor, Write};
     use std::sync::Arc;
+
+    fn alpha_bounds(image: &image::DynamicImage) -> (u32, u32, u32, u32) {
+        let image = image.to_rgba8();
+        let points = image
+            .enumerate_pixels()
+            .filter(|(_, _, pixel)| pixel[3] > 8)
+            .map(|(x, y, _)| (x, y))
+            .collect::<Vec<_>>();
+        let left = points.iter().map(|(x, _)| *x).min().expect("visible pixel");
+        let top = points.iter().map(|(_, y)| *y).min().expect("visible pixel");
+        let right = points.iter().map(|(x, _)| *x).max().expect("visible pixel");
+        let bottom = points.iter().map(|(_, y)| *y).max().expect("visible pixel");
+        (left, top, right, bottom)
+    }
+
+    #[test]
+    fn desktop_icons_with_different_source_padding_share_one_visual_box() {
+        let mut padded = image::RgbaImage::new(64, 64);
+        for pixel in padded.enumerate_pixels_mut() {
+            let (x, y, pixel) = pixel;
+            if (24..40).contains(&x) && (24..40).contains(&y) {
+                *pixel = image::Rgba([255, 255, 255, 255]);
+            }
+        }
+        let full = image::RgbaImage::from_pixel(128, 128, image::Rgba([255, 255, 255, 255]));
+
+        let padded =
+            normalize_desktop_icon(image::DynamicImage::ImageRgba8(padded), 100, 100, 50, 50);
+        let full = normalize_desktop_icon(image::DynamicImage::ImageRgba8(full), 100, 100, 50, 50);
+
+        assert_eq!(alpha_bounds(&padded), (6, 6, 93, 93));
+        assert_eq!(alpha_bounds(&full), alpha_bounds(&padded));
+    }
+
+    #[test]
+    fn desktop_icon_alignment_uses_the_available_canvas_space() {
+        let source = image::RgbaImage::from_pixel(10, 10, image::Rgba([255, 255, 255, 255]));
+        let left = normalize_desktop_icon(
+            image::DynamicImage::ImageRgba8(source.clone()),
+            100,
+            100,
+            0,
+            0,
+        );
+        let centered = normalize_desktop_icon(
+            image::DynamicImage::ImageRgba8(source.clone()),
+            100,
+            100,
+            50,
+            50,
+        );
+        let right =
+            normalize_desktop_icon(image::DynamicImage::ImageRgba8(source), 100, 100, 100, 100);
+
+        assert_eq!(alpha_bounds(&left), (0, 0, 87, 87));
+        assert_eq!(alpha_bounds(&centered), (6, 6, 93, 93));
+        assert_eq!(alpha_bounds(&right), (12, 12, 99, 99));
+    }
 
     #[test]
     fn weighted_cache_evicts_oldest_decoded_image() {

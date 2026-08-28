@@ -86,6 +86,12 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(size) = fsel_config.app_launcher.icon_size {
         default.desktop_icon_size = size;
     }
+    if let Some(align) = fsel_config.app_launcher.icon_horizontal_align_percent {
+        default.desktop_icon_horizontal_align_percent = align;
+    }
+    if let Some(align) = fsel_config.app_launcher.icon_vertical_align_percent {
+        default.desktop_icon_vertical_align_percent = align;
+    }
     default.desktop_icon_theme = fsel_config.app_launcher.icon_theme.clone();
 }
 
