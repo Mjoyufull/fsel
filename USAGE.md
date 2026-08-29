@@ -122,14 +122,14 @@ Persistent configuration belongs in `[app_launcher]`:
 
 ```toml
 icon_mode = "preview"               # "preview", "list", "both", or "none"
-icon_position = "right"             # "left" or "right"
+icon_position = "right"             # Preview: "left", "center", or "right"
 icon_preview_width_percent = 40      # 10-90
 icon_list_width = 4                  # 1-16 terminal columns
 icon_list_height = 2                 # 1-8 terminal rows per app
 icon_arrow_before = false            # Arrow before left-side list icons
 icon_size = 128                      # 1-4096
-icon_horizontal_align_percent = 50  # 0=left, 50=center, 100=right
-icon_vertical_align_percent = 50    # 0=top, 50=center, 100=bottom
+icon_horizontal_align_percent = 0   # Fine adjustment inside the chosen icon area
+icon_vertical_align_percent = 0     # Fine adjustment inside the chosen icon area
 # icon_theme = "Papirus-Dark"
 ```
 

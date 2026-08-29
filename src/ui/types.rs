@@ -36,6 +36,8 @@ impl FromStr for PanelPosition {
 pub enum HorizontalPosition {
     /// Place content on the left.
     Left,
+    /// Place preview content in the center.
+    Center,
     /// Place content on the right.
     #[default]
     Right,
@@ -47,9 +49,10 @@ impl FromStr for HorizontalPosition {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_lowercase().as_str() {
             "left" => Ok(Self::Left),
+            "center" => Ok(Self::Center),
             "right" => Ok(Self::Right),
             _ => Err(format!(
-                "Invalid horizontal position: '{value}'. Valid options: left, right"
+                "Invalid horizontal position: '{value}'. Valid options: left, center, right"
             )),
         }
     }

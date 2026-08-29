@@ -55,7 +55,17 @@ fn split_icon_preview(
     area: Rect,
     position: crate::ui::HorizontalPosition,
     icon_width_percent: u16,
-) -> (Rect, Rect) {
+) -> (Rect, Option<Rect>) {
+    if position == crate::ui::HorizontalPosition::Center {
+        let icon_width = area
+            .width
+            .saturating_mul(icon_width_percent)
+            .checked_div(100)
+            .unwrap_or_default();
+        let icon_x = area.x + area.width.saturating_sub(icon_width) / 2;
+        return (Rect::new(icon_x, area.y, icon_width, area.height), None);
+    }
+
     let text_width_percent = 100u16.saturating_sub(icon_width_percent);
     let constraints = match position {
         crate::ui::HorizontalPosition::Left => [
@@ -66,11 +76,13 @@ fn split_icon_preview(
             Constraint::Percentage(text_width_percent),
             Constraint::Percentage(icon_width_percent),
         ],
+        crate::ui::HorizontalPosition::Center => unreachable!("center was handled above"),
     };
     let content = Layout::horizontal(constraints).split(area);
     match position {
-        crate::ui::HorizontalPosition::Left => (content[0], content[1]),
-        crate::ui::HorizontalPosition::Right => (content[1], content[0]),
+        crate::ui::HorizontalPosition::Left => (content[0], Some(content[1])),
+        crate::ui::HorizontalPosition::Right => (content[1], Some(content[0])),
+        crate::ui::HorizontalPosition::Center => unreachable!("center was handled above"),
     }
 }
 
@@ -187,10 +199,13 @@ impl UI {
                 };
                 if icon_rendered == Some(true) {
                     f.render_widget(info_block, title_area);
-                    f.render_widget(
-                        Paragraph::new(info_text).style(Style::default().fg(cli.main_text_color)),
-                        text_area,
-                    );
+                    if let Some(text_area) = text_area {
+                        f.render_widget(
+                            Paragraph::new(info_text)
+                                .style(Style::default().fg(cli.main_text_color)),
+                            text_area,
+                        );
+                    }
                 } else {
                     icon_render_failed = icon_rendered == Some(false);
                     let paragraph = Paragraph::new(info_text)
@@ -290,7 +305,7 @@ mod tests {
         let (icon, text) =
             split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Right, 40);
 
-        assert_eq!(text, Rect::new(0, 0, 60, 10));
+        assert_eq!(text, Some(Rect::new(0, 0, 60, 10)));
         assert_eq!(icon, Rect::new(60, 0, 40, 10));
     }
 
@@ -300,7 +315,16 @@ mod tests {
             split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Left, 35);
 
         assert_eq!(icon, Rect::new(0, 0, 35, 10));
-        assert_eq!(text, Rect::new(35, 0, 65, 10));
+        assert_eq!(text, Some(Rect::new(35, 0, 65, 10)));
+    }
+
+    #[test]
+    fn icon_preview_can_use_the_center_of_the_title_panel() {
+        let (icon, text) =
+            split_icon_preview(Rect::new(10, 3, 100, 10), HorizontalPosition::Center, 40);
+
+        assert_eq!(icon, Rect::new(40, 3, 40, 10));
+        assert_eq!(text, None);
     }
 
     #[test]

@@ -202,6 +202,17 @@ fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
             )),
             selection: None,
         },
+        // Center is a title-preview placement. Keep list icons on the default side.
+        super::HorizontalPosition::Center => ListAreas {
+            text: Rect::new(area.x, area.y, area.width - icon_width, area.height),
+            icon: Some(Rect::new(
+                area.x + area.width - icon_width,
+                area.y,
+                icon_width,
+                area.height,
+            )),
+            selection: None,
+        },
     }
 }
 

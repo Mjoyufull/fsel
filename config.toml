@@ -128,14 +128,14 @@ prefix_depth = 3
 # Desktop icon rendering: "preview", "list", "both", or "none".
 # The default selected preview uses the right side of the title panel.
 icon_mode = "preview"
-icon_position = "right"            # "left" or "right"
+icon_position = "right"            # Preview: "left", "center", or "right"; center keeps list icons right
 icon_preview_width_percent = 40     # 10-90 percent of title panel width
 icon_list_width = 4                 # 1-16 terminal columns
 icon_list_height = 2                # 1-8 terminal rows per app
 icon_arrow_before = false           # Put selection arrow before left-side list icons
 icon_size = 128                     # Preferred size for themed icon lookup
-icon_horizontal_align_percent = 50  # 0=left, 50=center, 100=right within the icon area
-icon_vertical_align_percent = 50    # 0=top, 50=center, 100=bottom within the icon area
+icon_horizontal_align_percent = 0   # Fine adjustment within the chosen icon area
+icon_vertical_align_percent = 0     # Fine adjustment within the chosen icon area
 # icon_theme = "Papirus-Dark"       # Override desktop theme auto-detection
 
 # ===== DMENU MODE =====
