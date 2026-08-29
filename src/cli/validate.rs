@@ -73,6 +73,14 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
             "Error: Desktop icon list height must be between 1 and 8\n",
         ));
     }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_list()
+        && default.desktop_icon_list_gap > 16
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon list gap must be between 0 and 16\n",
+        ));
+    }
 
     if default.program.is_some() && default.search_string.is_some() {
         return Err(CliError::message(

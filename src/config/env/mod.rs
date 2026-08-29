@@ -80,6 +80,9 @@ prefix_depth = 2
             ("FSEL_APP_LAUNCHER_ICON_ARROW_BEFORE", "true"),
             ("FSEL_APP_LAUNCHER_ICON_HORIZONTAL_ALIGN_PERCENT", "25"),
             ("FSEL_APP_LAUNCHER_ICON_VERTICAL_ALIGN_PERCENT", "75"),
+            ("FSEL_APP_LAUNCHER_ICON_LIST_GAP", "2"),
+            ("FSEL_APPS_BACKGROUND_COLOR", "#101010"),
+            ("FSEL_APPS_SELECTION_BACKGROUND_COLOR", "Blue"),
         ]);
 
         apply_overrides(&mut config, &source).unwrap();
@@ -101,6 +104,9 @@ prefix_depth = 2
         assert_eq!(config.app_launcher.icon_arrow_before, Some(true));
         assert_eq!(config.app_launcher.icon_horizontal_align_percent, Some(25));
         assert_eq!(config.app_launcher.icon_vertical_align_percent, Some(75));
+        assert_eq!(config.app_launcher.icon_list_gap, Some(2));
+        assert_eq!(config.ui.apps_background_color, "#101010");
+        assert_eq!(config.ui.apps_selection_background_color, "Blue");
     }
 
     #[test]

@@ -354,6 +354,8 @@ title_panel_position = "upside_down"
         assert_eq!(ui.highlight_color, "LightBlue");
         assert_eq!(ui.cursor, "█");
         assert!(ui.rounded_borders);
+        assert_eq!(ui.apps_background_color, "Reset");
+        assert_eq!(ui.apps_selection_background_color, "Reset");
 
         assert_eq!(layout.title_panel_height_percent, 30);
         assert_eq!(layout.input_panel_height, 3);

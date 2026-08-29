@@ -309,6 +309,8 @@ terminal_launcher = "alacritty -e"
 # Pin/favorite settings (root-level UI options)
 pin_color = "rgb(255,165,0)"       # Color for pin icon (orange)
 pin_icon = "📌"                     # Icon for pinned apps
+apps_background_color = "Reset"   # Apps panel background
+apps_selection_background_color = "Reset" # Selected row background
 
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment
@@ -323,6 +325,7 @@ icon_position = "right"             # Preview: "left", "center", or "right"
 icon_preview_width_percent = 40
 icon_list_width = 4                  # Terminal columns reserved beside each app
 icon_list_height = 2                 # Terminal rows per app when list icons are enabled
+icon_list_gap = 0                    # Columns between each list icon and label
 icon_arrow_before = false            # Put selection arrow before left-side list icons
 icon_size = 128
 icon_horizontal_align_percent = 0   # Fine adjustment inside the chosen icon area
@@ -336,7 +339,8 @@ absolute `Icon=` paths. PNG and SVG icons render through Kitty, Sixel, or the te
 half-block fallback. The selected icon uses the right side of the title panel by default, matching
 the information/preview layout. Set `icon_mode = "list"` for icons beside results or `"both"` for
 both placements; `icon_position = "center"` uses the middle of the title panel while keeping list
-icons on the default right side. `icon_list_width` and `icon_list_height` customize the list.
+icons on the default right side. `icon_list_width`, `icon_list_height`, and `icon_list_gap`
+customize the list.
 Transparent source padding is normalized so icons occupy a consistent visual box. The horizontal
 and vertical percentages provide optional fine adjustment within the chosen icon area.
 

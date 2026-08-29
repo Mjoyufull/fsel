@@ -36,6 +36,8 @@ rounded_borders = true
 # Border colors for each panel
 main_border_color = "White"      # Border color for the main info panel (top)
 apps_border_color = "White"      # Border color for the apps list panel (middle)
+apps_background_color = "Reset"  # Apps panel background; Reset preserves terminal background
+apps_selection_background_color = "Reset" # Selected app row background
 input_border_color = "White"     # Border color for the input panel (bottom)
 
 # Text Colors (non-highlighted text in each panel)
@@ -132,6 +134,7 @@ icon_position = "right"            # Preview: "left", "center", or "right"; cent
 icon_preview_width_percent = 40     # 10-90 percent of title panel width
 icon_list_width = 4                 # 1-16 terminal columns
 icon_list_height = 2                # 1-8 terminal rows per app
+icon_list_gap = 0                   # 0-16 columns between each list icon and label
 icon_arrow_before = false           # Put selection arrow before left-side list icons
 icon_size = 128                     # Preferred size for themed icon lookup
 icon_horizontal_align_percent = 0   # Fine adjustment within the chosen icon area

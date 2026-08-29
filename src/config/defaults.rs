@@ -34,6 +34,10 @@ pub(super) fn default_white() -> String {
     "White".to_string()
 }
 
+pub(super) fn default_reset() -> String {
+    "Reset".to_string()
+}
+
 pub(super) fn default_pin_color() -> String {
     "rgb(255, 165, 0)".to_string()
 }
@@ -88,6 +92,8 @@ impl Default for UiConfig {
             disable_mouse: false,
             main_border_color: default_white(),
             apps_border_color: default_white(),
+            apps_background_color: default_reset(),
+            apps_selection_background_color: default_reset(),
             input_border_color: default_white(),
             main_text_color: default_white(),
             apps_text_color: default_white(),

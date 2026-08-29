@@ -56,6 +56,7 @@ pub(super) fn render(
 ) -> Result<bool> {
     let block = Block::default()
         .borders(Borders::ALL)
+        .style(Style::default().bg(cli.apps_background_color))
         .border_style(Style::default().fg(cli.apps_border_color))
         .title(Span::styled(
             " Apps ",
@@ -102,9 +103,11 @@ pub(super) fn render(
         .collect::<Vec<_>>();
     let highlight_style = Style::default()
         .fg(cli.highlight_color)
+        .bg(cli.apps_selection_background_color)
         .add_modifier(Modifier::BOLD);
     let arrow_before_icon = areas.selection.is_some();
     let list = List::new(items)
+        .style(Style::default().bg(cli.apps_background_color))
         .highlight_style(highlight_style)
         .highlight_symbol(if arrow_before_icon { "" } else { "> " })
         .highlight_spacing(if arrow_before_icon {
@@ -118,6 +121,14 @@ pub(super) fn render(
         && selected < state.scroll_offset + max_visible
     {
         list_state.select(Some(selected - state.scroll_offset));
+    }
+    if let Some(selected) = list_state.selected() {
+        let y = inner.y + selected as u16 * row_height;
+        let height = row_height.min(inner.y + inner.height - y);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(cli.apps_selection_background_color)),
+            Rect::new(inner.x, y, inner.width, height),
+        );
     }
     frame.render_stateful_widget(list, areas.text, &mut list_state);
 
@@ -171,29 +182,32 @@ fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
 
     // Preserve two columns for the selection marker and one for visible label text.
     let icon_width = cli.desktop_icon_list_width.min(area.width - 3);
+    let gap = cli
+        .desktop_icon_list_gap
+        .min(area.width.saturating_sub(icon_width + 3));
     match cli.desktop_icon_position {
         super::HorizontalPosition::Left if cli.desktop_icon_arrow_before => ListAreas {
             selection: Some(Rect::new(area.x, area.y, 2, area.height)),
             icon: Some(Rect::new(area.x + 2, area.y, icon_width, area.height)),
             text: Rect::new(
-                area.x + 2 + icon_width,
+                area.x + 2 + icon_width + gap,
                 area.y,
-                area.width - 2 - icon_width,
+                area.width - 2 - icon_width - gap,
                 area.height,
             ),
         },
         super::HorizontalPosition::Left => ListAreas {
             text: Rect::new(
-                area.x + icon_width,
+                area.x + icon_width + gap,
                 area.y,
-                area.width - icon_width,
+                area.width - icon_width - gap,
                 area.height,
             ),
             icon: Some(Rect::new(area.x, area.y, icon_width, area.height)),
             selection: None,
         },
         super::HorizontalPosition::Right => ListAreas {
-            text: Rect::new(area.x, area.y, area.width - icon_width, area.height),
+            text: Rect::new(area.x, area.y, area.width - icon_width - gap, area.height),
             icon: Some(Rect::new(
                 area.x + area.width - icon_width,
                 area.y,
@@ -204,7 +218,7 @@ fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
         },
         // Center is a title-preview placement. Keep list icons on the default side.
         super::HorizontalPosition::Center => ListAreas {
-            text: Rect::new(area.x, area.y, area.width - icon_width, area.height),
+            text: Rect::new(area.x, area.y, area.width - icon_width - gap, area.height),
             icon: Some(Rect::new(
                 area.x + area.width - icon_width,
                 area.y,
@@ -308,6 +322,22 @@ mod tests {
         assert_eq!(areas.selection, Some(Rect::new(2, 4, 2, 6)));
         assert_eq!(areas.icon, Some(Rect::new(4, 4, 5, 6)));
         assert_eq!(areas.text, Rect::new(9, 4, 13, 6));
+    }
+
+    #[test]
+    fn list_icon_gap_is_reserved_between_icon_and_label() {
+        let cli = Opts {
+            desktop_icon_mode: DesktopIconMode::List,
+            desktop_icon_position: HorizontalPosition::Left,
+            desktop_icon_list_width: 5,
+            desktop_icon_list_gap: 3,
+            ..Opts::default()
+        };
+
+        let areas = list_areas(Rect::new(2, 4, 20, 6), &cli);
+
+        assert_eq!(areas.icon, Some(Rect::new(2, 4, 5, 6)));
+        assert_eq!(areas.text, Rect::new(10, 4, 12, 6));
     }
 
     #[test]

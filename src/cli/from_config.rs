@@ -89,6 +89,9 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(height) = fsel_config.app_launcher.icon_list_height {
         default.desktop_icon_list_height = height;
     }
+    if let Some(gap) = fsel_config.app_launcher.icon_list_gap {
+        default.desktop_icon_list_gap = gap;
+    }
     if let Some(arrow_before) = fsel_config.app_launcher.icon_arrow_before {
         default.desktop_icon_arrow_before = arrow_before;
     }
@@ -117,6 +120,12 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
     }
     if let Ok(color) = string_to_color(&fsel_config.ui.apps_border_color) {
         default.apps_border_color = color;
+    }
+    if let Ok(color) = string_to_color(&fsel_config.ui.apps_background_color) {
+        default.apps_background_color = color;
+    }
+    if let Ok(color) = string_to_color(&fsel_config.ui.apps_selection_background_color) {
+        default.apps_selection_background_color = color;
     }
     if let Ok(color) = string_to_color(&fsel_config.ui.input_border_color) {
         default.input_border_color = color;
