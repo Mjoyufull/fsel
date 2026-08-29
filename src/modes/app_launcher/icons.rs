@@ -70,7 +70,7 @@ pub(super) struct PreparedIcon {
 }
 
 impl IconRuntime {
-    pub(super) fn new(cli: &Opts) -> Self {
+    pub(super) fn new(cli: &Opts, db: std::sync::Arc<redb::Database>) -> Self {
         let (result_tx, result_rx) = mpsc::unbounded_channel();
         let (request_tx, request_rx) = mpsc::unbounded_channel();
         let preview_enabled = cli.desktop_icon_mode.shows_preview();
@@ -81,9 +81,10 @@ impl IconRuntime {
         } else {
             fallback_adapter.picker()
         };
-        let resolver = IconResolver::from_environment(
+        let resolver = IconResolver::from_environment_with_cache(
             cli.desktop_icon_theme.as_deref(),
             cli.desktop_icon_size,
+            db,
         );
         let worker = spawn_worker(
             resolver,
@@ -488,15 +489,18 @@ fn spawn_worker(
                 }
                 let batch = (0..4)
                     .filter_map(|_| request.list_icons.pop_front())
-                    .filter_map(|icon| match resolver.resolve(&icon) {
-                        Some(path) => Some((icon, path)),
-                        None => {
-                            let _ = result_tx.send(IconResult::List {
-                                generation: request.list_generation,
-                                icon,
-                                prepared: Ok(None),
-                            });
-                            None
+                    .filter_map(|icon| {
+                        let size = icon_lookup_size(&resolver, &picker, request.list_area);
+                        match resolver.resolve_at_size(&icon, size) {
+                            Some(path) => Some((icon, path)),
+                            None => {
+                                let _ = result_tx.send(IconResult::List {
+                                    generation: request.list_generation,
+                                    icon,
+                                    prepared: Ok(None),
+                                });
+                                None
+                            }
                         }
                     })
                     .collect::<Vec<_>>();
@@ -594,7 +598,8 @@ fn prepare_icon(
     horizontal_align: u16,
     vertical_align: u16,
 ) -> Result<Option<PreparedIcon>, String> {
-    let Some(path) = resolver.resolve(icon) else {
+    let lookup_size = icon_lookup_size(resolver, &picker, area);
+    let Some(path) = resolver.resolve_at_size(icon, lookup_size) else {
         return Ok(None);
     };
     prepare_resolved_icon(
@@ -606,6 +611,14 @@ fn prepare_icon(
         vertical_align,
     )
     .map(Some)
+}
+
+fn icon_lookup_size(resolver: &IconResolver, picker: &Picker, area: Rect) -> u16 {
+    let (font_width, font_height) = picker.font_size();
+    let width = u32::from(area.width).saturating_mul(u32::from(font_width));
+    let height = u32::from(area.height).saturating_mul(u32::from(font_height));
+    let rendered_size = width.min(height).min(u32::from(u16::MAX)) as u16;
+    rendered_size.max(resolver.minimum_size())
 }
 
 fn prepare_resolved_icon(

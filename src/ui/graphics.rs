@@ -121,7 +121,7 @@ impl ImageManager {
     /// Read and prepare an image file from a blocking worker.
     #[cfg(test)]
     pub(crate) fn prepare_image_path(picker: Picker, path: &Path) -> Result<StatefulProtocol> {
-        let (image, _) = read_icon_image(path)?;
+        let (image, _) = read_icon_image(path, MAX_SVG_DIMENSION as u32)?;
         Ok(picker.new_resize_protocol(image))
     }
 
@@ -133,10 +133,11 @@ impl ImageManager {
         horizontal_align: u16,
         vertical_align: u16,
     ) -> Result<(Protocol, u64)> {
-        let (image, _) = read_icon_image(path)?;
         let (font_width, font_height) = picker.font_size();
         let pixel_width = u32::from(area.width).saturating_mul(u32::from(font_width));
         let pixel_height = u32::from(area.height).saturating_mul(u32::from(font_height));
+        let svg_dimension = pixel_width.max(pixel_height).max(1);
+        let (image, _) = read_icon_image(path, svg_dimension)?;
         let image = normalize_desktop_icon(
             image,
             pixel_width,
@@ -392,7 +393,7 @@ fn normalize_desktop_icon(
         &cropped,
         width,
         height,
-        image::imageops::FilterType::Triangle,
+        image::imageops::FilterType::CatmullRom,
     );
     let x = target_width
         .saturating_sub(width)
@@ -406,7 +407,7 @@ fn normalize_desktop_icon(
     image::DynamicImage::ImageRgba8(canvas)
 }
 
-fn read_icon_image(path: &Path) -> Result<(image::DynamicImage, u64)> {
+fn read_icon_image(path: &Path, svg_dimension: u32) -> Result<(image::DynamicImage, u64)> {
     let file = std::fs::File::open(path)?;
     let file_size = file.metadata()?.len();
     if file_size > MAX_IMAGE_FILE_BYTES {
@@ -418,7 +419,7 @@ fn read_icon_image(path: &Path) -> Result<(image::DynamicImage, u64)> {
     if bytes.len() as u64 > MAX_IMAGE_FILE_BYTES {
         return Err(eyre!("Image file exceeds {} bytes", MAX_IMAGE_FILE_BYTES));
     }
-    let image = decode_icon_image(&bytes)?;
+    let image = decode_icon_image_at_size(&bytes, svg_dimension)?;
     let decoded_bytes = image.as_bytes().len() as u64;
     Ok((image, decoded_bytes))
 }
@@ -432,9 +433,14 @@ fn decode_image(bytes: &[u8]) -> Result<image::DynamicImage> {
     }
 }
 
+#[cfg(test)]
 fn decode_icon_image(bytes: &[u8]) -> Result<image::DynamicImage> {
+    decode_icon_image_at_size(bytes, MAX_SVG_DIMENSION as u32)
+}
+
+fn decode_icon_image_at_size(bytes: &[u8], svg_dimension: u32) -> Result<image::DynamicImage> {
     if looks_like_svg(bytes) {
-        return decode_svg(bytes);
+        return decode_icon_svg(bytes, svg_dimension);
     }
     if looks_like_xpm(bytes) {
         return decode_xpm(bytes);
@@ -651,15 +657,30 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
 }
 
 fn decode_svg(bytes: &[u8]) -> Result<image::DynamicImage> {
+    decode_svg_with_limit(bytes, MAX_SVG_DIMENSION, false)
+}
+
+fn decode_icon_svg(bytes: &[u8], dimension: u32) -> Result<image::DynamicImage> {
+    let dimension = dimension.clamp(1, MAX_SVG_DIMENSION as u32) as f32;
+    decode_svg_with_limit(bytes, dimension, true)
+}
+
+fn decode_svg_with_limit(
+    bytes: &[u8],
+    maximum_dimension: f32,
+    allow_upscale: bool,
+) -> Result<image::DynamicImage> {
     let document = bounded_svg_document(bytes, MAX_SVG_DOCUMENT_BYTES)?;
     if !has_svg_document_root(&document) {
         return Err(eyre!("Input is not an SVG document"));
     }
     let tree = resvg::usvg::Tree::from_data(&document, &svg_options(svg_needs_fonts(&document)))?;
     let source_size = tree.size();
-    let scale = (MAX_SVG_DIMENSION / source_size.width())
-        .min(MAX_SVG_DIMENSION / source_size.height())
-        .min(1.0);
+    let mut scale =
+        (maximum_dimension / source_size.width()).min(maximum_dimension / source_size.height());
+    if !allow_upscale {
+        scale = scale.min(1.0);
+    }
     let width = (source_size.width() * scale).round().max(1.0) as u32;
     let height = (source_size.height() * scale).round().max(1.0) as u32;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)
@@ -1000,9 +1021,9 @@ impl GraphicsAdapter {
 #[cfg(test)]
 mod tests {
     use super::{
-        ImageManager, MAX_IMAGE_FILE_BYTES, bounded_svg_document, decode_icon_image, decode_image,
-        decode_xpm, has_svg_document_root, looks_like_svg, normalize_desktop_icon, svg_needs_fonts,
-        svg_options, unpremultiply_rgba,
+        ImageManager, MAX_IMAGE_FILE_BYTES, bounded_svg_document, decode_icon_image,
+        decode_icon_image_at_size, decode_image, decode_xpm, has_svg_document_root, looks_like_svg,
+        normalize_desktop_icon, svg_needs_fonts, svg_options, unpremultiply_rgba,
     };
     use flate2::Compression;
     use flate2::write::GzEncoder;
@@ -1100,6 +1121,17 @@ mod tests {
 
         assert_eq!(image.width(), 16);
         assert_eq!(image.height(), 8);
+    }
+
+    #[test]
+    fn desktop_svg_icons_render_at_the_requested_resolution() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="8">
+            <rect width="16" height="8" fill="#ff0000"/>
+        </svg>"##;
+
+        let image = decode_icon_image_at_size(svg, 128).expect("SVG icon should decode");
+
+        assert_eq!((image.width(), image.height()), (128, 64));
     }
 
     #[test]
