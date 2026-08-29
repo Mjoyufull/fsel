@@ -311,6 +311,17 @@ pin_color = "rgb(255,165,0)"       # Color for pin icon (orange)
 pin_icon = "📌"                     # Icon for pinned apps
 apps_background_color = "Reset"   # Apps panel background
 apps_selection_background_color = "Reset" # Selected row background
+apps_selection_rounded = false     # Optional half-cell rounded row ends
+main_background_color = "Reset"   # Main info panel background
+input_background_color = "Reset"  # Input panel background
+show_main_border = true
+show_apps_border = true
+show_input_border = true
+show_panel_titles = true
+show_input_count = true
+show_input_prompt = true
+show_selection_marker = true
+show_pin_icons = true
 
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment

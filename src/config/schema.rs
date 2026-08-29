@@ -101,18 +101,40 @@ pub struct UiConfig {
     pub hard_stop: bool,
     #[serde(default = "super::defaults::default_true")]
     pub rounded_borders: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_main_border: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_apps_border: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_input_border: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_panel_titles: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_input_count: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_input_prompt: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_selection_marker: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_pin_icons: bool,
     #[serde(default)]
     pub disable_mouse: bool,
     #[serde(default = "super::defaults::default_white")]
     pub main_border_color: String,
+    #[serde(default = "super::defaults::default_reset")]
+    pub main_background_color: String,
     #[serde(default = "super::defaults::default_white")]
     pub apps_border_color: String,
     #[serde(default = "super::defaults::default_reset")]
     pub apps_background_color: String,
     #[serde(default = "super::defaults::default_reset")]
     pub apps_selection_background_color: String,
+    #[serde(default)]
+    pub apps_selection_rounded: bool,
     #[serde(default = "super::defaults::default_white")]
     pub input_border_color: String,
+    #[serde(default = "super::defaults::default_reset")]
+    pub input_background_color: String,
     #[serde(default = "super::defaults::default_white")]
     pub main_text_color: String,
     #[serde(default = "super::defaults::default_white")]

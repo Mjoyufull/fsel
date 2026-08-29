@@ -137,6 +137,34 @@ icon_vertical_align_percent = 0     # Fine adjustment inside the chosen icon are
 # icon_theme = "Papirus-Dark"
 ```
 
+### Launcher Chrome and Backgrounds
+
+Launcher panels use semantic background colors and independently configurable chrome. `Reset`
+inherits the terminal background. An OpenCode-like flat layout can be built without changing the
+compatibility defaults:
+
+```toml
+main_background_color = "#101010"
+apps_background_color = "#141414"
+apps_selection_background_color = "#ffb07c"
+input_background_color = "#101010"
+apps_selection_rounded = false
+show_main_border = false
+show_apps_border = false
+show_input_border = false
+show_panel_titles = false
+show_input_count = false
+show_input_prompt = false
+show_selection_marker = false
+
+# Optional: hide either bar completely.
+title_panel_height_percent = 0
+input_panel_height = 0
+```
+
+Set `apps_selection_rounded = true` for half-cell rounded ends around the selected row. List text
+and icons are inset automatically so the caps are not overwritten.
+
 ### Launch Methods
 ```sh
 # Default (direct execution)
@@ -662,8 +690,8 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 ### Field Reference
 
 **Root Level Fields:**
-- Colors: `highlight_color`, `main_border_color`, `apps_border_color`, `apps_background_color`, `apps_selection_background_color`, `input_border_color`, `main_text_color`, `apps_text_color`, `input_text_color`, `header_title_color`, `pin_color`
-- UI: `cursor`, `rounded_borders`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
+- Colors: `highlight_color`, `main_border_color`, `main_background_color`, `apps_border_color`, `apps_background_color`, `apps_selection_background_color`, `input_border_color`, `input_background_color`, `main_text_color`, `apps_text_color`, `input_text_color`, `header_title_color`, `pin_color`
+- UI: `cursor`, `rounded_borders`, `apps_selection_rounded`, `show_main_border`, `show_apps_border`, `show_input_border`, `show_panel_titles`, `show_input_count`, `show_input_prompt`, `show_selection_marker`, `show_pin_icons`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
 - Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 

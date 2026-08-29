@@ -91,10 +91,17 @@ pub(crate) fn launcher_preview_icon_area(size: Rect, cli: &crate::cli::Opts) -> 
     if effective_title_height(size.height, cli.title_panel_height_percent) == 0 {
         return Rect::default();
     }
-    let panel_inner = title_area.inner(Margin {
-        horizontal: 1,
-        vertical: 1,
-    });
+    let horizontal = u16::from(cli.show_main_border);
+    let top = u16::from(cli.show_main_border || cli.show_panel_titles);
+    let bottom = u16::from(cli.show_main_border);
+    let panel_inner = Rect::new(
+        title_area.x.saturating_add(horizontal),
+        title_area.y.saturating_add(top),
+        title_area
+            .width
+            .saturating_sub(horizontal.saturating_mul(2)),
+        title_area.height.saturating_sub(top.saturating_add(bottom)),
+    );
     let (icon_area, _) = split_icon_preview(
         panel_inner,
         cli.desktop_icon_position,
@@ -156,18 +163,25 @@ impl UI {
                 "Fsel".to_string()
             };
 
-            let info_block = Block::default()
-                .borders(Borders::ALL)
+            let mut info_block = Block::default()
+                .borders(if cli.show_main_border {
+                    Borders::ALL
+                } else {
+                    Borders::NONE
+                })
+                .style(Style::default().bg(cli.main_background_color))
                 .border_style(Style::default().fg(cli.main_border_color))
-                .title(Span::styled(
-                    format!(" {} ", title),
-                    Style::default().fg(cli.header_title_color),
-                ))
                 .border_type(if cli.rounded_borders {
                     BorderType::Rounded
                 } else {
                     BorderType::Plain
                 });
+            if cli.show_panel_titles {
+                info_block = info_block.title(Span::styled(
+                    format!(" {} ", title),
+                    Style::default().fg(cli.header_title_color),
+                ));
+            }
 
             // Text rendering from state.text which should be populated by state.update_info
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
@@ -186,6 +200,7 @@ impl UI {
                     horizontal: 1,
                     vertical: 0,
                 });
+                f.render_widget(info_block, title_area);
                 let icon_rendered = if icon_area.width > 0 && icon_area.height > 0 {
                     let icons = app_icons
                         .as_mut()
@@ -198,7 +213,6 @@ impl UI {
                     None
                 };
                 if icon_rendered == Some(true) {
-                    f.render_widget(info_block, title_area);
                     if let Some(text_area) = text_area {
                         f.render_widget(
                             Paragraph::new(info_text)
@@ -208,10 +222,10 @@ impl UI {
                     }
                 } else {
                     icon_render_failed = icon_rendered == Some(false);
-                    let paragraph = Paragraph::new(info_text)
-                        .block(info_block)
-                        .style(Style::default().fg(cli.main_text_color));
-                    f.render_widget(paragraph, title_area);
+                    f.render_widget(
+                        Paragraph::new(info_text).style(Style::default().fg(cli.main_text_color)),
+                        inner,
+                    );
                 }
             } else {
                 let paragraph = Paragraph::new(info_text)
@@ -222,18 +236,25 @@ impl UI {
         }
 
         // Render Input
-        let input_block = Block::default()
-            .borders(Borders::ALL)
+        let mut input_block = Block::default()
+            .borders(if cli.show_input_border {
+                Borders::ALL
+            } else {
+                Borders::NONE
+            })
+            .style(Style::default().bg(cli.input_background_color))
             .border_style(Style::default().fg(cli.input_border_color))
-            .title(Span::styled(
-                " Input ",
-                Style::default().fg(cli.header_title_color),
-            ))
             .border_type(if cli.rounded_borders {
                 BorderType::Rounded
             } else {
                 BorderType::Plain
             });
+        if cli.show_panel_titles {
+            input_block = input_block.title(Span::styled(
+                " Input ",
+                Style::default().fg(cli.header_title_color),
+            ));
+        }
 
         // Legacy Formatting: (Selected/Total) >> Query
         // Colors:
@@ -242,28 +263,38 @@ impl UI {
         // - > Cursor: Highlight Color
         // - Cursor Block: Highlight Color
 
-        let spans = vec![
-            Span::styled("(", Style::default().fg(cli.input_text_color)),
-            Span::styled(
-                (state.selected.map_or(0, |v| v + 1)).to_string(),
-                Style::default().fg(cli.highlight_color),
-            ),
-            Span::styled("/", Style::default().fg(cli.input_text_color)),
-            Span::styled(
-                state.shown.len().to_string(),
-                Style::default().fg(cli.input_text_color),
-            ),
-            Span::styled(") ", Style::default().fg(cli.input_text_color)),
-            Span::styled(">", Style::default().fg(cli.highlight_color)),
-            Span::styled("> ", Style::default().fg(cli.input_text_color)),
+        let mut spans = Vec::new();
+        if cli.show_input_count {
+            spans.extend([
+                Span::styled("(", Style::default().fg(cli.input_text_color)),
+                Span::styled(
+                    (state.selected.map_or(0, |v| v + 1)).to_string(),
+                    Style::default().fg(cli.highlight_color),
+                ),
+                Span::styled("/", Style::default().fg(cli.input_text_color)),
+                Span::styled(
+                    state.shown.len().to_string(),
+                    Style::default().fg(cli.input_text_color),
+                ),
+                Span::styled(") ", Style::default().fg(cli.input_text_color)),
+            ]);
+        }
+        if cli.show_input_prompt {
+            spans.extend([
+                Span::styled(">", Style::default().fg(cli.highlight_color)),
+                Span::styled("> ", Style::default().fg(cli.input_text_color)),
+            ]);
+        }
+        spans.extend([
             Span::styled(&state.query, Style::default().fg(cli.input_text_color)),
             Span::styled(&cli.cursor, Style::default().fg(cli.highlight_color)),
-        ];
+        ]);
 
         let line = Line::from(spans);
         let text_len = line.width();
 
-        let available_width = input_area.width.saturating_sub(2) as usize; // Account for borders
+        let border_width = u16::from(cli.show_input_border).saturating_mul(2);
+        let available_width = input_area.width.saturating_sub(border_width) as usize;
 
         let scroll_x = if text_len > available_width {
             (text_len - available_width) as u16
@@ -273,9 +304,15 @@ impl UI {
 
         let input = Paragraph::new(line)
             .block(input_block)
-            .style(Style::default().fg(cli.input_text_color))
+            .style(
+                Style::default()
+                    .fg(cli.input_text_color)
+                    .bg(cli.input_background_color),
+            )
             .scroll((0, scroll_x));
-        f.render_widget(input, input_area);
+        if input_area.height > 0 {
+            f.render_widget(input, input_area);
+        }
 
         let list_render_failed =
             super::app_list::render(f, state, cli, apps_area, app_icons.as_mut())?;
@@ -339,6 +376,22 @@ mod tests {
         assert_eq!(
             launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &cli),
             Rect::new(0, 0, 37, 8)
+        );
+    }
+
+    #[test]
+    fn borderless_preview_uses_the_released_panel_cells() {
+        let cli = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            title_panel_height_percent: 25,
+            desktop_icon_preview_width_percent: 40,
+            show_main_border: false,
+            ..Opts::default()
+        };
+
+        assert_eq!(
+            launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &cli),
+            Rect::new(0, 0, 38, 9)
         );
     }
 }

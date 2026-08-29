@@ -114,9 +114,20 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.cursor = fsel_config.ui.cursor.clone();
     default.hard_stop = fsel_config.ui.hard_stop;
     default.rounded_borders = fsel_config.ui.rounded_borders;
+    default.show_main_border = fsel_config.ui.show_main_border;
+    default.show_apps_border = fsel_config.ui.show_apps_border;
+    default.show_input_border = fsel_config.ui.show_input_border;
+    default.show_panel_titles = fsel_config.ui.show_panel_titles;
+    default.show_input_count = fsel_config.ui.show_input_count;
+    default.show_input_prompt = fsel_config.ui.show_input_prompt;
+    default.show_selection_marker = fsel_config.ui.show_selection_marker;
+    default.show_pin_icons = fsel_config.ui.show_pin_icons;
     default.disable_mouse = fsel_config.ui.disable_mouse;
     if let Ok(color) = string_to_color(&fsel_config.ui.main_border_color) {
         default.main_border_color = color;
+    }
+    if let Ok(color) = string_to_color(&fsel_config.ui.main_background_color) {
+        default.main_background_color = color;
     }
     if let Ok(color) = string_to_color(&fsel_config.ui.apps_border_color) {
         default.apps_border_color = color;
@@ -127,8 +138,12 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
     if let Ok(color) = string_to_color(&fsel_config.ui.apps_selection_background_color) {
         default.apps_selection_background_color = color;
     }
+    default.apps_selection_rounded = fsel_config.ui.apps_selection_rounded;
     if let Ok(color) = string_to_color(&fsel_config.ui.input_border_color) {
         default.input_border_color = color;
+    }
+    if let Ok(color) = string_to_color(&fsel_config.ui.input_background_color) {
+        default.input_background_color = color;
     }
     if let Ok(color) = string_to_color(&fsel_config.ui.main_text_color) {
         default.main_text_color = color;

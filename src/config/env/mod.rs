@@ -83,6 +83,12 @@ prefix_depth = 2
             ("FSEL_APP_LAUNCHER_ICON_LIST_GAP", "2"),
             ("FSEL_APPS_BACKGROUND_COLOR", "#101010"),
             ("FSEL_APPS_SELECTION_BACKGROUND_COLOR", "Blue"),
+            ("FSEL_MAIN_BACKGROUND_COLOR", "#111111"),
+            ("FSEL_INPUT_BACKGROUND_COLOR", "#121212"),
+            ("FSEL_SHOW_APPS_BORDER", "false"),
+            ("FSEL_SHOW_INPUT_PROMPT", "false"),
+            ("FSEL_SHOW_SELECTION_MARKER", "false"),
+            ("FSEL_APPS_SELECTION_ROUNDED", "true"),
         ]);
 
         apply_overrides(&mut config, &source).unwrap();
@@ -107,6 +113,12 @@ prefix_depth = 2
         assert_eq!(config.app_launcher.icon_list_gap, Some(2));
         assert_eq!(config.ui.apps_background_color, "#101010");
         assert_eq!(config.ui.apps_selection_background_color, "Blue");
+        assert_eq!(config.ui.main_background_color, "#111111");
+        assert_eq!(config.ui.input_background_color, "#121212");
+        assert!(!config.ui.show_apps_border);
+        assert!(!config.ui.show_input_prompt);
+        assert!(!config.ui.show_selection_marker);
+        assert!(config.ui.apps_selection_rounded);
     }
 
     #[test]

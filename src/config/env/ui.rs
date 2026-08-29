@@ -5,6 +5,11 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
     set_string(source, "FSEL_HIGHLIGHT_COLOR", &mut cfg.ui.highlight_color);
     set_string(
         source,
+        "FSEL_MAIN_BACKGROUND_COLOR",
+        &mut cfg.ui.main_background_color,
+    );
+    set_string(
+        source,
         "FSEL_APPS_BACKGROUND_COLOR",
         &mut cfg.ui.apps_background_color,
     );
@@ -12,6 +17,11 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         source,
         "FSEL_APPS_SELECTION_BACKGROUND_COLOR",
         &mut cfg.ui.apps_selection_background_color,
+    );
+    set_string(
+        source,
+        "FSEL_INPUT_BACKGROUND_COLOR",
+        &mut cfg.ui.input_background_color,
     );
     set_string(source, "FSEL_CURSOR", &mut cfg.ui.cursor);
     set_parsed(
@@ -24,6 +34,60 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         source,
         "FSEL_ROUNDED_BORDERS",
         &mut cfg.ui.rounded_borders,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_MAIN_BORDER",
+        &mut cfg.ui.show_main_border,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_APPS_BORDER",
+        &mut cfg.ui.show_apps_border,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_INPUT_BORDER",
+        &mut cfg.ui.show_input_border,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_PANEL_TITLES",
+        &mut cfg.ui.show_panel_titles,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_INPUT_COUNT",
+        &mut cfg.ui.show_input_count,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_INPUT_PROMPT",
+        &mut cfg.ui.show_input_prompt,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_SELECTION_MARKER",
+        &mut cfg.ui.show_selection_marker,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_SHOW_PIN_ICONS",
+        &mut cfg.ui.show_pin_icons,
+        BOOLEAN_EXPECTED,
+    )?;
+    set_parsed(
+        source,
+        "FSEL_APPS_SELECTION_ROUNDED",
+        &mut cfg.ui.apps_selection_rounded,
         BOOLEAN_EXPECTED,
     )?;
     set_parsed(
