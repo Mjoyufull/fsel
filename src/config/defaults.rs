@@ -97,6 +97,7 @@ impl Default for UiConfig {
             show_input_prompt: true,
             show_selection_marker: true,
             show_pin_icons: true,
+            input_panel_style: crate::ui::InputPanelStyle::Classic,
             disable_mouse: false,
             main_border_color: default_white(),
             main_background_color: default_reset(),

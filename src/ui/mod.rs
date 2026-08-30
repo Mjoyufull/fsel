@@ -3,6 +3,7 @@ mod app_ui;
 mod dmenu_ui;
 mod graphics;
 mod input;
+mod input_panel;
 mod keybinds;
 mod panel_layout;
 pub(crate) mod terminal;

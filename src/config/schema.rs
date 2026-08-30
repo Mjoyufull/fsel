@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 
 use crate::cli::{DesktopIconMode, MatchMode, PinnedOrderMode, RankingMode};
-use crate::ui::{HorizontalPosition, PanelPosition};
+use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition, VerticalAlignment};
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct FselConfig {
@@ -45,6 +45,8 @@ pub struct AppLauncherConfig {
     pub icon_list_width: Option<u16>,
     pub icon_list_height: Option<u16>,
     pub icon_list_gap: Option<u16>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
+    pub icon_list_label_align: Option<VerticalAlignment>,
     pub icon_arrow_before: Option<bool>,
     pub icon_size: Option<u16>,
     pub icon_horizontal_align_percent: Option<u16>,
@@ -117,6 +119,8 @@ pub struct UiConfig {
     pub show_selection_marker: bool,
     #[serde(default = "super::defaults::default_true")]
     pub show_pin_icons: bool,
+    #[serde(default, deserialize_with = "deserialize_parsed_or_default")]
+    pub input_panel_style: InputPanelStyle,
     #[serde(default)]
     pub disable_mouse: bool,
     #[serde(default = "super::defaults::default_white")]

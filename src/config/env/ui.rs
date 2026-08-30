@@ -86,6 +86,12 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
     )?;
     set_parsed(
         source,
+        "FSEL_INPUT_PANEL_STYLE",
+        &mut cfg.ui.input_panel_style,
+        "classic or command",
+    )?;
+    set_parsed(
+        source,
         "FSEL_APPS_SELECTION_ROUNDED",
         &mut cfg.ui.apps_selection_rounded,
         BOOLEAN_EXPECTED,

@@ -37,6 +37,7 @@ show_input_count = true
 show_input_prompt = true
 show_selection_marker = true
 show_pin_icons = true
+input_panel_style = "classic" # "classic" or the accent-rail "command" layout
 
 # ===== COLORS =====
 # WARNING: Color options go at ROOT LEVEL (not in [app_launcher])
@@ -142,17 +143,18 @@ confirm_first_launch = false
 prefix_depth = 3
 
 # Desktop icon rendering: "preview", "list", "both", or "none".
-# The default selected preview uses the right side of the title panel.
+# The default selected preview uses the center of the title panel.
 icon_mode = "preview"
-icon_position = "right"            # Preview: "left", "center", or "right"; center keeps list icons right
+icon_position = "center"           # Preview: "left", "center", or "right"; center keeps list icons right
 icon_preview_width_percent = 40     # 10-90 percent of title panel width
 icon_list_width = 4                 # 1-16 terminal columns
 icon_list_height = 2                # 1-8 terminal rows per app
 icon_list_gap = 0                   # 0-16 columns between each list icon and label
+icon_list_label_align = "top"       # Label placement: "top", "center", or "bottom"
 icon_arrow_before = false           # Put selection arrow before left-side list icons
 icon_size = 128                     # Preferred size for themed icon lookup
-icon_horizontal_align_percent = 0   # Fine adjustment within the chosen icon area
-icon_vertical_align_percent = 0     # Fine adjustment within the chosen icon area
+icon_horizontal_align_percent = 50  # Fine adjustment within the chosen icon area
+icon_vertical_align_percent = 50    # Fine adjustment within the chosen icon area
 # icon_theme = "Papirus-Dark"       # Override desktop theme auto-detection
 
 # ===== DMENU MODE =====

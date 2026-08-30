@@ -362,6 +362,7 @@ title_panel_position = "upside_down"
         assert!(ui.show_input_prompt);
         assert!(ui.show_selection_marker);
         assert!(ui.show_pin_icons);
+        assert_eq!(ui.input_panel_style, crate::ui::InputPanelStyle::Classic);
         assert!(!ui.apps_selection_rounded);
         assert_eq!(ui.main_background_color, "Reset");
         assert_eq!(ui.apps_background_color, "Reset");

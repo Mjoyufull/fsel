@@ -235,84 +235,7 @@ impl UI {
             }
         }
 
-        // Render Input
-        let mut input_block = Block::default()
-            .borders(if cli.show_input_border {
-                Borders::ALL
-            } else {
-                Borders::NONE
-            })
-            .style(Style::default().bg(cli.input_background_color))
-            .border_style(Style::default().fg(cli.input_border_color))
-            .border_type(if cli.rounded_borders {
-                BorderType::Rounded
-            } else {
-                BorderType::Plain
-            });
-        if cli.show_panel_titles {
-            input_block = input_block.title(Span::styled(
-                " Input ",
-                Style::default().fg(cli.header_title_color),
-            ));
-        }
-
-        // Legacy Formatting: (Selected/Total) >> Query
-        // Colors:
-        // - Brackets/Slash/Text: Input Text Color
-        // - Selected Number: Highlight Color
-        // - > Cursor: Highlight Color
-        // - Cursor Block: Highlight Color
-
-        let mut spans = Vec::new();
-        if cli.show_input_count {
-            spans.extend([
-                Span::styled("(", Style::default().fg(cli.input_text_color)),
-                Span::styled(
-                    (state.selected.map_or(0, |v| v + 1)).to_string(),
-                    Style::default().fg(cli.highlight_color),
-                ),
-                Span::styled("/", Style::default().fg(cli.input_text_color)),
-                Span::styled(
-                    state.shown.len().to_string(),
-                    Style::default().fg(cli.input_text_color),
-                ),
-                Span::styled(") ", Style::default().fg(cli.input_text_color)),
-            ]);
-        }
-        if cli.show_input_prompt {
-            spans.extend([
-                Span::styled(">", Style::default().fg(cli.highlight_color)),
-                Span::styled("> ", Style::default().fg(cli.input_text_color)),
-            ]);
-        }
-        spans.extend([
-            Span::styled(&state.query, Style::default().fg(cli.input_text_color)),
-            Span::styled(&cli.cursor, Style::default().fg(cli.highlight_color)),
-        ]);
-
-        let line = Line::from(spans);
-        let text_len = line.width();
-
-        let border_width = u16::from(cli.show_input_border).saturating_mul(2);
-        let available_width = input_area.width.saturating_sub(border_width) as usize;
-
-        let scroll_x = if text_len > available_width {
-            (text_len - available_width) as u16
-        } else {
-            0
-        };
-
-        let input = Paragraph::new(line)
-            .block(input_block)
-            .style(
-                Style::default()
-                    .fg(cli.input_text_color)
-                    .bg(cli.input_background_color),
-            )
-            .scroll((0, scroll_x));
-        if input_area.height > 0 {
-            f.render_widget(input, input_area);
-        }
+        super::input_panel::render(f, state, cli, input_area);
 
         let list_render_failed =
             super::app_list::render(f, state, cli, apps_area, app_icons.as_mut())?;
@@ -338,7 +261,7 @@ mod tests {
     }
 
     #[test]
-    fn icon_preview_defaults_can_place_icon_on_the_right() {
+    fn icon_preview_can_place_icon_on_the_right() {
         let (icon, text) =
             split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Right, 40);
 

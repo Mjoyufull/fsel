@@ -1,5 +1,5 @@
 use super::{DesktopIconMode, MatchMode, PinnedOrderMode, RankingMode};
-use crate::ui::{HorizontalPosition, PanelPosition};
+use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition, VerticalAlignment};
 
 /// Command line interface.
 #[derive(Debug)]
@@ -33,6 +33,7 @@ pub struct Opts {
     pub show_input_prompt: bool,
     pub show_selection_marker: bool,
     pub show_pin_icons: bool,
+    pub input_panel_style: InputPanelStyle,
     pub main_border_color: ratatui::style::Color,
     pub main_background_color: ratatui::style::Color,
     pub apps_border_color: ratatui::style::Color,
@@ -61,6 +62,7 @@ pub struct Opts {
     pub desktop_icon_list_width: u16,
     pub desktop_icon_list_height: u16,
     pub desktop_icon_list_gap: u16,
+    pub desktop_icon_list_label_align: VerticalAlignment,
     pub desktop_icon_arrow_before: bool,
     pub desktop_icon_size: u16,
     pub desktop_icon_horizontal_align_percent: u16,
@@ -171,6 +173,7 @@ impl Default for Opts {
             show_input_prompt: true,
             show_selection_marker: true,
             show_pin_icons: true,
+            input_panel_style: InputPanelStyle::Classic,
             main_border_color: ratatui::style::Color::White,
             main_background_color: ratatui::style::Color::Reset,
             apps_border_color: ratatui::style::Color::White,
@@ -194,15 +197,16 @@ impl Default for Opts {
             search_string: None,
             confirm_first_launch: false,
             desktop_icon_mode: DesktopIconMode::Preview,
-            desktop_icon_position: HorizontalPosition::Right,
+            desktop_icon_position: HorizontalPosition::Center,
             desktop_icon_preview_width_percent: 40,
             desktop_icon_list_width: 4,
             desktop_icon_list_height: 2,
             desktop_icon_list_gap: 0,
+            desktop_icon_list_label_align: VerticalAlignment::Top,
             desktop_icon_arrow_before: false,
             desktop_icon_size: 128,
-            desktop_icon_horizontal_align_percent: 0,
-            desktop_icon_vertical_align_percent: 0,
+            desktop_icon_horizontal_align_percent: 50,
+            desktop_icon_vertical_align_percent: 50,
             desktop_icon_theme: None,
             dmenu_mode: false,
             dmenu_with_nth: None,

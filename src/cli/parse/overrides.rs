@@ -229,6 +229,12 @@ pub(super) fn parse_cli_overrides(
                             CliError::message("Desktop list icon gap must be an integer")
                         })?;
             }
+            Long("icon-list-label-align") => {
+                default.desktop_icon_list_label_align =
+                    value_as_string(parser, "Desktop list label alignment must be valid UTF-8")?
+                        .parse()
+                        .map_err(CliError::message)?;
+            }
             Long("icon-arrow-before") => {
                 default.desktop_icon_arrow_before = true;
             }
