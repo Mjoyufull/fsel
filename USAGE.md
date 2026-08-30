@@ -93,12 +93,12 @@ Bedrock Linux and for duplicates inside the same application directory.
 
 ### Desktop Icons
 
-The selected application's icon appears in the center of the title panel by default. fsel
+The selected application's icon appears on the left side of the title panel by default. fsel
 detects GTK, KDE, and LXQt icon-theme settings, follows XDG theme inheritance, and supports absolute desktop-entry icon
 paths. PNG and SVG icons render with Kitty, Sixel, or the half-block fallback.
 
 ```sh
-# Default centered selected-icon preview
+# Default left-side selected-icon preview
 fsel --desktop-icons
 
 # Icons beside results, or both placements
@@ -125,7 +125,7 @@ Persistent configuration belongs in `[app_launcher]`:
 
 ```toml
 icon_mode = "preview"               # "preview", "list", "both", or "none"
-icon_position = "center"            # Preview: "left", "center", or "right"
+icon_position = "left"              # Preview: "left", "center", or "right"
 icon_preview_width_percent = 40      # 10-90
 icon_list_width = 4                  # 1-16 terminal columns
 icon_list_height = 2                 # 1-8 terminal rows per app
@@ -153,11 +153,12 @@ apps_selection_rounded = false
 input_panel_style = "command"
 show_main_border = false
 show_apps_border = false
-show_input_border = true
+show_input_border = false
 show_panel_titles = false
 show_input_count = true
 show_input_prompt = false
 show_selection_marker = true
+selection_marker = "█"
 show_pin_icons = true
 input_panel_height = 5
 
@@ -168,9 +169,9 @@ input_panel_height = 5
 
 Set `apps_selection_rounded = true` for half-cell rounded ends around the selected row. List text
 and icons are inset automatically so the caps are not overwritten. The `command` input style uses
-an accent rail and moves the selection count plus launch hints into a footer; an input height of five
-leaves enough room for that footer when its border is enabled. `classic` preserves the original
-inline `(selected/total) >> query` design.
+a thicker accent rail, highlights the selected application name, and moves the selection count plus
+launch hints into a footer. `selection_marker` accepts arbitrary marker text independently of the
+input `cursor`. `classic` preserves the original inline `(selected/total) >> query` design.
 
 ### Launch Methods
 ```sh
@@ -698,7 +699,7 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 
 **Root Level Fields:**
 - Colors: `highlight_color`, `main_border_color`, `main_background_color`, `apps_border_color`, `apps_background_color`, `apps_selection_background_color`, `input_border_color`, `input_background_color`, `main_text_color`, `apps_text_color`, `input_text_color`, `header_title_color`, `pin_color`
-- UI: `cursor`, `rounded_borders`, `apps_selection_rounded`, `input_panel_style`, `show_main_border`, `show_apps_border`, `show_input_border`, `show_panel_titles`, `show_input_count`, `show_input_prompt`, `show_selection_marker`, `show_pin_icons`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
+- UI: `cursor`, `selection_marker`, `rounded_borders`, `apps_selection_rounded`, `input_panel_style`, `show_main_border`, `show_apps_border`, `show_input_border`, `show_panel_titles`, `show_input_count`, `show_input_prompt`, `show_selection_marker`, `show_pin_icons`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
 - Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 

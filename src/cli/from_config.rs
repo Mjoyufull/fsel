@@ -124,6 +124,7 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.show_input_count = fsel_config.ui.show_input_count;
     default.show_input_prompt = fsel_config.ui.show_input_prompt;
     default.show_selection_marker = fsel_config.ui.show_selection_marker;
+    default.selection_marker = fsel_config.ui.selection_marker.clone();
     default.show_pin_icons = fsel_config.ui.show_pin_icons;
     default.input_panel_style = fsel_config.ui.input_panel_style;
     default.disable_mouse = fsel_config.ui.disable_mouse;

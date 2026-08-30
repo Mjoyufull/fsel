@@ -35,9 +35,9 @@ impl FromStr for PanelPosition {
 #[serde(rename_all = "lowercase")]
 pub enum HorizontalPosition {
     /// Place content on the left.
+    #[default]
     Left,
     /// Place preview content in the center.
-    #[default]
     Center,
     /// Place content on the right.
     Right,

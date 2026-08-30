@@ -53,7 +53,7 @@ fn render_command_query(frame: &mut Frame, state: &State, cli: &Opts, header: Re
     if rail_width > 0 {
         for y in header.y..header.y + header.height {
             frame.render_widget(
-                Paragraph::new("▎").style(
+                Paragraph::new("▍").style(
                     Style::default()
                         .fg(cli.highlight_color)
                         .bg(cli.input_background_color),
@@ -94,15 +94,16 @@ fn render_command_footer(frame: &mut Frame, state: &State, cli: &Opts, footer: R
     } else {
         "enter launch  esc close".to_string()
     };
-    let right_width = right.chars().count();
-    if usize::from(footer.width) > right_width.saturating_add(2) {
+    let right_width = right.chars().count().min(usize::from(footer.width)) as u16;
+    let left_width = footer.width.saturating_sub(right_width.saturating_add(2));
+    if left_width > 0 {
         frame.render_widget(
             Paragraph::new(selected_name).style(
                 Style::default()
-                    .fg(cli.input_text_color)
+                    .fg(cli.highlight_color)
                     .bg(cli.input_background_color),
             ),
-            footer,
+            Rect::new(footer.x, footer.y, left_width, footer.height),
         );
     }
     frame.render_widget(
@@ -111,7 +112,12 @@ fn render_command_footer(frame: &mut Frame, state: &State, cli: &Opts, footer: R
                 .fg(cli.input_text_color)
                 .bg(cli.input_background_color),
         ),
-        footer,
+        Rect::new(
+            footer.x + footer.width - right_width,
+            footer.y,
+            right_width,
+            footer.height,
+        ),
     );
 }
 
@@ -248,7 +254,8 @@ mod tests {
             .expect("command input should render");
         let buffer = terminal.backend().buffer();
 
-        assert_eq!(buffer[(0, 0)].symbol(), "▎");
+        assert_eq!(buffer[(0, 0)].symbol(), "▍");
+        assert_eq!(buffer[(0, 2)].fg, cli.highlight_color);
         assert_eq!(buffer[(2, 0)].symbol(), "f");
         assert_eq!(buffer[(0, 2)].symbol(), "f");
         let footer =

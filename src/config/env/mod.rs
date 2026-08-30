@@ -88,6 +88,7 @@ prefix_depth = 2
             ("FSEL_INPUT_BACKGROUND_COLOR", "#121212"),
             ("FSEL_SHOW_APPS_BORDER", "false"),
             ("FSEL_SHOW_INPUT_PROMPT", "false"),
+            ("FSEL_SELECTION_MARKER", "█"),
             ("FSEL_INPUT_PANEL_STYLE", "command"),
             ("FSEL_SHOW_SELECTION_MARKER", "false"),
             ("FSEL_APPS_SELECTION_ROUNDED", "true"),
@@ -123,6 +124,7 @@ prefix_depth = 2
         assert_eq!(config.ui.input_background_color, "#121212");
         assert!(!config.ui.show_apps_border);
         assert!(!config.ui.show_input_prompt);
+        assert_eq!(config.ui.selection_marker, "█");
         assert_eq!(config.ui.input_panel_style, InputPanelStyle::Command);
         assert!(!config.ui.show_selection_marker);
         assert!(config.ui.apps_selection_rounded);

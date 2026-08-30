@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn launcher_visual_defaults_use_centered_artwork() {
+    fn launcher_visual_defaults_use_left_placement() {
         let command = parse_with_config(&args(&["fsel"]), FselConfig::default()).unwrap();
         let CliCommand::Run(opts) = command else {
             panic!("expected run command");
@@ -279,7 +279,7 @@ mod tests {
 
         assert_eq!(
             opts.desktop_icon_position,
-            crate::ui::HorizontalPosition::Center
+            crate::ui::HorizontalPosition::Left
         );
         assert_eq!(opts.desktop_icon_horizontal_align_percent, 50);
         assert_eq!(opts.desktop_icon_vertical_align_percent, 50);

@@ -36,6 +36,7 @@ show_panel_titles = true
 show_input_count = true
 show_input_prompt = true
 show_selection_marker = true
+selection_marker = ">" # Any marker text, for example "█"
 show_pin_icons = true
 input_panel_style = "classic" # "classic" or the accent-rail "command" layout
 
@@ -143,9 +144,9 @@ confirm_first_launch = false
 prefix_depth = 3
 
 # Desktop icon rendering: "preview", "list", "both", or "none".
-# The default selected preview uses the center of the title panel.
+# The default selected preview uses the left side of the title panel.
 icon_mode = "preview"
-icon_position = "center"           # Preview: "left", "center", or "right"; center keeps list icons right
+icon_position = "left"             # Preview: "left", "center", or "right"
 icon_preview_width_percent = 40     # 10-90 percent of title panel width
 icon_list_width = 4                 # 1-16 terminal columns
 icon_list_height = 2                # 1-8 terminal rows per app

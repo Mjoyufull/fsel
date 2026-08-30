@@ -78,6 +78,11 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
         &mut cfg.ui.show_selection_marker,
         BOOLEAN_EXPECTED,
     )?;
+    set_string(
+        source,
+        "FSEL_SELECTION_MARKER",
+        &mut cfg.ui.selection_marker,
+    );
     set_parsed(
         source,
         "FSEL_SHOW_PIN_ICONS",

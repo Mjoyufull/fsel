@@ -321,6 +321,7 @@ show_panel_titles = true
 show_input_count = true
 show_input_prompt = true
 show_selection_marker = true
+selection_marker = ">"              # Any marker text, for example "█"
 show_pin_icons = true
 input_panel_style = "classic"       # "classic" or "command"
 
@@ -333,7 +334,7 @@ match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
 pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned", "newest_pinned"
 icon_mode = "preview"               # "preview", "list", "both", or "none"
-icon_position = "center"            # Preview: "left", "center", or "right"
+icon_position = "left"              # Preview: "left", "center", or "right"
 icon_preview_width_percent = 40
 icon_list_width = 4                  # Terminal columns reserved beside each app
 icon_list_height = 2                 # Terminal rows per app when list icons are enabled
@@ -349,10 +350,9 @@ icon_vertical_align_percent = 50    # Fine adjustment inside the chosen icon are
 Desktop icons are resolved from the active XDG icon theme (GTK, KDE, and LXQt settings are
 detected), including inherited themes and
 absolute `Icon=` paths. PNG and SVG icons render through Kitty, Sixel, or the terminal-independent
-half-block fallback. The selected icon uses the center of the title panel by default. Set
-`icon_mode = "list"` for icons beside results or `"both"` for both placements; centered preview
-placement keeps list icons on the right. `icon_list_width`, `icon_list_height`, `icon_list_gap`, and
-`icon_list_label_align` customize the list.
+half-block fallback. The selected icon uses the left side of the title panel by default. Set
+`icon_mode = "list"` for icons beside results or `"both"` for both placements. `icon_list_width`,
+`icon_list_height`, `icon_list_gap`, and `icon_list_label_align` customize the list.
 Transparent source padding is normalized so icons occupy a consistent visual box. The horizontal
 and vertical percentages provide optional fine adjustment within the chosen icon area.
 

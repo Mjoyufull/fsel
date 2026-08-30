@@ -6,9 +6,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, BorderType, Borders, HighlightSpacing, List, ListItem, ListState, Paragraph,
-};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ListAreas {
@@ -66,11 +65,19 @@ pub(super) fn render(
         .take(max_visible)
         .collect::<Vec<_>>();
     let areas = list_areas(content, cli);
+    let selected_row = state.selected.and_then(|selected| {
+        (selected >= state.scroll_offset && selected < state.scroll_offset + max_visible)
+            .then_some(selected - state.scroll_offset)
+    });
 
     let items = visible_apps
         .iter()
-        .map(|app| {
+        .enumerate()
+        .map(|(row, app)| {
             let mut spans = Vec::new();
+            if areas.selection.is_none() {
+                spans.extend(selection_marker_spans(cli, selected_row == Some(row)));
+            }
             if app.pinned && cli.show_pin_icons {
                 spans.push(Span::styled(
                     &cli.pin_icon,
@@ -91,25 +98,12 @@ pub(super) fn render(
     let highlight_style = Style::default()
         .fg(cli.highlight_color)
         .add_modifier(Modifier::BOLD);
-    let arrow_before_icon = areas.selection.is_some();
     let list = List::new(items)
         .highlight_style(highlight_style)
-        .highlight_symbol(if arrow_before_icon || !cli.show_selection_marker {
-            ""
-        } else {
-            "> "
-        })
-        .highlight_spacing(if arrow_before_icon || !cli.show_selection_marker {
-            HighlightSpacing::Never
-        } else {
-            HighlightSpacing::Always
-        });
+        .highlight_symbol("");
     let mut list_state = ListState::default();
-    if let Some(selected) = state.selected
-        && selected >= state.scroll_offset
-        && selected < state.scroll_offset + max_visible
-    {
-        list_state.select(Some(selected - state.scroll_offset));
+    if let Some(selected) = selected_row {
+        list_state.select(Some(selected));
     }
     if let Some(selected) = list_state.selected() {
         let y = inner.y + selected as u16 * row_height;
@@ -125,10 +119,15 @@ pub(super) fn render(
     frame.render_stateful_widget(list, areas.text, &mut list_state);
 
     if let (Some(selected), Some(selection_area)) = (list_state.selected(), areas.selection) {
-        let y = selection_area.y + selected as u16 * row_height;
+        let marker_area = selection_marker_area(
+            selection_area,
+            selected,
+            row_height,
+            cli.desktop_icon_list_label_align,
+        );
         frame.render_widget(
-            Paragraph::new("> ").style(highlight_style),
-            Rect::new(selection_area.x, y, selection_area.width, 1),
+            Paragraph::new(format!("{} ", cli.selection_marker)).style(highlight_style),
+            marker_area,
         );
     }
 
@@ -171,6 +170,41 @@ fn label_row(row_height: u16, alignment: super::VerticalAlignment) -> usize {
     })
 }
 
+fn selection_marker_spans(cli: &Opts, selected: bool) -> Vec<Span<'_>> {
+    let width = marker_gutter_width(cli);
+    if width == 0 {
+        return Vec::new();
+    }
+    if selected {
+        vec![Span::raw(format!("{} ", cli.selection_marker))]
+    } else {
+        vec![Span::raw(" ".repeat(usize::from(width)))]
+    }
+}
+
+fn marker_gutter_width(cli: &Opts) -> u16 {
+    if !cli.show_selection_marker || cli.selection_marker.is_empty() {
+        return 0;
+    }
+    let width =
+        UnicodeWidthStr::width(cli.selection_marker.as_str()).min(usize::from(u16::MAX - 1));
+    width as u16 + 1
+}
+
+fn selection_marker_area(
+    area: Rect,
+    selected: usize,
+    row_height: u16,
+    alignment: super::VerticalAlignment,
+) -> Rect {
+    Rect::new(
+        area.x,
+        area.y + selected as u16 * row_height + label_row(row_height, alignment) as u16,
+        area.width,
+        1,
+    )
+}
+
 fn apps_block(cli: &Opts) -> Block<'static> {
     let mut block = Block::default()
         .borders(if cli.show_apps_border {
@@ -203,7 +237,7 @@ fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
         };
     }
 
-    let marker_width = u16::from(cli.show_selection_marker).saturating_mul(2);
+    let marker_width = marker_gutter_width(cli);
     let fixed_width = marker_width + 1;
     if area.width <= fixed_width {
         return ListAreas {
@@ -217,16 +251,19 @@ fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
         .desktop_icon_list_gap
         .min(area.width.saturating_sub(icon_width + fixed_width));
     match cli.desktop_icon_position {
-        super::HorizontalPosition::Left
-            if cli.desktop_icon_arrow_before && cli.show_selection_marker =>
-        {
+        super::HorizontalPosition::Left if cli.desktop_icon_arrow_before && marker_width > 0 => {
             ListAreas {
-                selection: Some(Rect::new(area.x, area.y, 2, area.height)),
-                icon: Some(Rect::new(area.x + 2, area.y, icon_width, area.height)),
-                text: Rect::new(
-                    area.x + 2 + icon_width + gap,
+                selection: Some(Rect::new(area.x, area.y, marker_width, area.height)),
+                icon: Some(Rect::new(
+                    area.x + marker_width,
                     area.y,
-                    area.width - 2 - icon_width - gap,
+                    icon_width,
+                    area.height,
+                )),
+                text: Rect::new(
+                    area.x + marker_width + icon_width + gap,
+                    area.y,
+                    area.width - marker_width - icon_width - gap,
                     area.height,
                 ),
             }

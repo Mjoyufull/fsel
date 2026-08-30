@@ -30,6 +30,10 @@ pub(super) fn default_cursor() -> String {
     "█".to_string()
 }
 
+pub(super) fn default_selection_marker() -> String {
+    ">".to_string()
+}
+
 pub(super) fn default_white() -> String {
     "White".to_string()
 }
@@ -96,6 +100,7 @@ impl Default for UiConfig {
             show_input_count: true,
             show_input_prompt: true,
             show_selection_marker: true,
+            selection_marker: default_selection_marker(),
             show_pin_icons: true,
             input_panel_style: crate::ui::InputPanelStyle::Classic,
             disable_mouse: false,

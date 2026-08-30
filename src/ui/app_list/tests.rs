@@ -1,6 +1,6 @@
 use super::{
-    label_row, launcher_list_icon_area, launcher_visible_rows, list_areas,
-    render_selection_background,
+    label_row, launcher_list_icon_area, launcher_visible_rows, list_areas, marker_gutter_width,
+    render_selection_background, selection_marker_area,
 };
 use crate::cli::{DesktopIconMode, Opts};
 use crate::ui::{HorizontalPosition, PanelPosition, VerticalAlignment};
@@ -28,6 +28,44 @@ fn list_label_alignment_preserves_top_and_supports_center_and_bottom() {
     assert_eq!(label_row(3, VerticalAlignment::Center), 1);
     assert_eq!(label_row(3, VerticalAlignment::Bottom), 2);
     assert_eq!(label_row(2, VerticalAlignment::Center), 1);
+}
+
+#[test]
+fn selection_marker_uses_the_same_aligned_row_as_the_label() {
+    let area = Rect::new(2, 4, 2, 12);
+
+    assert_eq!(
+        selection_marker_area(area, 1, 3, VerticalAlignment::Top),
+        Rect::new(2, 7, 2, 1)
+    );
+    assert_eq!(
+        selection_marker_area(area, 1, 3, VerticalAlignment::Center),
+        Rect::new(2, 8, 2, 1)
+    );
+    assert_eq!(
+        selection_marker_area(area, 1, 3, VerticalAlignment::Bottom),
+        Rect::new(2, 9, 2, 1)
+    );
+}
+
+#[test]
+fn selection_marker_gutter_follows_configured_glyph_width() {
+    let block = Opts {
+        selection_marker: "█".to_string(),
+        ..Opts::default()
+    };
+    let wide = Opts {
+        selection_marker: "界".to_string(),
+        ..Opts::default()
+    };
+    let hidden = Opts {
+        show_selection_marker: false,
+        ..Opts::default()
+    };
+
+    assert_eq!(marker_gutter_width(&block), 2);
+    assert_eq!(marker_gutter_width(&wide), 3);
+    assert_eq!(marker_gutter_width(&hidden), 0);
 }
 
 #[test]

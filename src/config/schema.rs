@@ -117,6 +117,8 @@ pub struct UiConfig {
     pub show_input_prompt: bool,
     #[serde(default = "super::defaults::default_true")]
     pub show_selection_marker: bool,
+    #[serde(default = "super::defaults::default_selection_marker")]
+    pub selection_marker: String,
     #[serde(default = "super::defaults::default_true")]
     pub show_pin_icons: bool,
     #[serde(default, deserialize_with = "deserialize_parsed_or_default")]
