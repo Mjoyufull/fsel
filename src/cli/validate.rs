@@ -90,10 +90,10 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
     }
     if uses_desktop_icons
         && default.desktop_icon_mode.shows_list()
-        && default.desktop_icon_list_vertical_align_percent > 100
+        && !(-100..=100).contains(&default.desktop_icon_list_vertical_align_percent)
     {
         return Err(CliError::message(
-            "Error: Desktop list icon vertical alignment must be between 0 and 100\n",
+            "Error: Desktop list icon vertical alignment must be between -100 and 100\n",
         ));
     }
 
@@ -281,19 +281,21 @@ mod tests {
     }
 
     #[test]
-    fn active_list_layout_rejects_vertical_alignment_over_one_hundred() {
-        let mut options = Opts {
-            desktop_icon_mode: DesktopIconMode::List,
-            desktop_icon_list_vertical_align_percent: 101,
-            ..Opts::default()
-        };
+    fn active_list_layout_rejects_vertical_alignment_outside_the_signed_range() {
+        for align in [-101, 101] {
+            let mut options = Opts {
+                desktop_icon_mode: DesktopIconMode::List,
+                desktop_icon_list_vertical_align_percent: align,
+                ..Opts::default()
+            };
 
-        let error = validate(&mut options, 0).expect_err("alignment should be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("list icon vertical alignment must be between 0 and 100")
-        );
+            let error = validate(&mut options, 0).expect_err("alignment should be rejected");
+            assert!(
+                error
+                    .to_string()
+                    .contains("list icon vertical alignment must be between -100 and 100")
+            );
+        }
     }
 
     #[test]

@@ -131,7 +131,7 @@ impl ImageManager {
         path: &Path,
         area: Rect,
         horizontal_align: u16,
-        vertical_align: u16,
+        vertical_align: i16,
     ) -> Result<(Protocol, u64)> {
         let (font_width, font_height) = picker.font_size();
         let pixel_width = u32::from(area.width).saturating_mul(u32::from(font_width));
@@ -351,7 +351,7 @@ fn normalize_desktop_icon(
     target_width: u32,
     target_height: u32,
     horizontal_align: u16,
-    vertical_align: u16,
+    vertical_align: i16,
 ) -> image::DynamicImage {
     let source = image.into_rgba8();
     let mut bounds = None::<(u32, u32, u32, u32)>;
@@ -399,11 +399,10 @@ fn normalize_desktop_icon(
         .saturating_sub(width)
         .saturating_mul(u32::from(horizontal_align.min(100)))
         / 100;
-    let y = target_height
-        .saturating_sub(height)
-        .saturating_mul(u32::from(vertical_align.min(100)))
+    let y = i64::from(target_height.saturating_sub(height))
+        .saturating_mul(i64::from(vertical_align.clamp(-100, 100)))
         / 100;
-    image::imageops::overlay(&mut canvas, &resized, i64::from(x), i64::from(y));
+    image::imageops::overlay(&mut canvas, &resized, i64::from(x), y);
     image::DynamicImage::ImageRgba8(canvas)
 }
 
@@ -1067,6 +1066,13 @@ mod tests {
     #[test]
     fn desktop_icon_alignment_uses_the_available_canvas_space() {
         let source = image::RgbaImage::from_pixel(10, 10, image::Rgba([255, 255, 255, 255]));
+        let above = normalize_desktop_icon(
+            image::DynamicImage::ImageRgba8(source.clone()),
+            100,
+            100,
+            0,
+            -100,
+        );
         let left = normalize_desktop_icon(
             image::DynamicImage::ImageRgba8(source.clone()),
             100,
@@ -1084,6 +1090,7 @@ mod tests {
         let right =
             normalize_desktop_icon(image::DynamicImage::ImageRgba8(source), 100, 100, 100, 100);
 
+        assert_eq!(alpha_bounds(&above), (0, 0, 87, 75));
         assert_eq!(alpha_bounds(&left), (0, 0, 87, 87));
         assert_eq!(alpha_bounds(&centered), (6, 6, 93, 93));
         assert_eq!(alpha_bounds(&right), (12, 12, 99, 99));

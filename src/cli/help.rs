@@ -41,7 +41,7 @@ Usage:
 │  ├─ --icon-position <POSITION>   Place the preview left, center, or right
 │  ├─ --icon-arrow-before          Put the selection arrow before a left list icon
 │  ├─ --icon-list-gap <N>          Add 0-16 columns between each icon and label
-│  ├─ --icon-list-vertical-align <N>  Align list artwork top (0) to bottom (100)
+│  ├─ --icon-list-vertical-align <N>  Shift list artwork from above (-100) to bottom (100)
 │  ├─ --icon-horizontal-align <N>  Align icon content from left (0) to right (100)
 │  ├─ --icon-vertical-align <N>    Align preview artwork top (0) to bottom (100)
 │  ├─ --icon-theme <THEME>         Override automatic desktop icon-theme detection
@@ -107,7 +107,7 @@ Usage:
 │  ├─ --icon-list-width <N>        Reserve 1-16 terminal columns for each list icon
 │  ├─ --icon-list-height <N>       Give each icon/list row 1-8 terminal rows
 │  ├─ --icon-list-gap <N>          Add 0-16 columns between each icon and label
-│  ├─ --icon-list-vertical-align <N>  Align list artwork top (0) to bottom (100)
+│  ├─ --icon-list-vertical-align <N>  Shift list artwork from above (-100) to bottom (100)
 │  ├─ --icon-arrow-before          Put the selection arrow before a left list icon
 │  ├─ --icon-size <PX>             Request a themed icon size from 1-4096 pixels
 │  ├─ --icon-horizontal-align <N>  Align icon content from left (0) to right (100)

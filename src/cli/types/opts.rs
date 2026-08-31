@@ -63,7 +63,7 @@ pub struct Opts {
     pub desktop_icon_list_width: u16,
     pub desktop_icon_list_height: u16,
     pub desktop_icon_list_gap: u16,
-    pub desktop_icon_list_vertical_align_percent: u16,
+    pub desktop_icon_list_vertical_align_percent: i16,
     pub desktop_icon_arrow_before: bool,
     pub desktop_icon_size: u16,
     pub desktop_icon_horizontal_align_percent: u16,

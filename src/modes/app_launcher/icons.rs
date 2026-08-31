@@ -90,7 +90,7 @@ impl IconRuntime {
             resolver,
             picker.clone(),
             cli.desktop_icon_horizontal_align_percent,
-            cli.desktop_icon_vertical_align_percent,
+            cli.desktop_icon_vertical_align_percent.min(100) as i16,
             cli.desktop_icon_list_vertical_align_percent,
             request_rx,
             result_tx,
@@ -439,8 +439,8 @@ fn spawn_worker(
     mut resolver: IconResolver,
     picker: Picker,
     horizontal_align: u16,
-    preview_vertical_align: u16,
-    list_vertical_align: u16,
+    preview_vertical_align: i16,
+    list_vertical_align: i16,
     mut request_rx: mpsc::UnboundedReceiver<WorkRequest>,
     result_tx: mpsc::UnboundedSender<IconResult>,
 ) -> JoinHandle<()> {
@@ -572,7 +572,7 @@ fn prepare_preview(
     result_tx: &mpsc::UnboundedSender<IconResult>,
     preview: IconRequest,
     horizontal_align: u16,
-    vertical_align: u16,
+    vertical_align: i16,
 ) -> bool {
     let prepared = prepare_icon(
         resolver,
@@ -598,7 +598,7 @@ fn prepare_icon(
     namespace: &str,
     area: Rect,
     horizontal_align: u16,
-    vertical_align: u16,
+    vertical_align: i16,
 ) -> Result<Option<PreparedIcon>, String> {
     let lookup_size = icon_lookup_size(resolver, &picker, area);
     let Some(path) = resolver.resolve_at_size(icon, lookup_size) else {
@@ -629,7 +629,7 @@ fn prepare_resolved_icon(
     namespace: &str,
     area: Rect,
     horizontal_align: u16,
-    vertical_align: u16,
+    vertical_align: i16,
 ) -> Result<PreparedIcon, String> {
     let key = format!(
         "{namespace}:{}x{}:{horizontal_align}x{vertical_align}:{}",

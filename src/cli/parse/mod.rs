@@ -232,7 +232,7 @@ mod tests {
                 "--icon-list-gap",
                 "2",
                 "--icon-list-vertical-align",
-                "35",
+                "-35",
                 "--icon-arrow-before",
                 "--icon-size",
                 "96",
@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(opts.desktop_icon_list_width, 5);
         assert_eq!(opts.desktop_icon_list_height, 3);
         assert_eq!(opts.desktop_icon_list_gap, 2);
-        assert_eq!(opts.desktop_icon_list_vertical_align_percent, 35);
+        assert_eq!(opts.desktop_icon_list_vertical_align_percent, -35);
         assert!(opts.desktop_icon_arrow_before);
         assert_eq!(opts.desktop_icon_size, 96);
         assert_eq!(opts.desktop_icon_horizontal_align_percent, 25);

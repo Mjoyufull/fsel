@@ -234,7 +234,7 @@ pub(super) fn parse_cli_overrides(
                     parser,
                     "Desktop list icon vertical alignment must be valid UTF-8",
                 )?
-                .parse::<u16>()
+                .parse::<i16>()
                 .map_err(|_| {
                     CliError::message("Desktop list icon vertical alignment must be an integer")
                 })?;
