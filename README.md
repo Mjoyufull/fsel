@@ -338,8 +338,9 @@ icon_position = "left"              # Preview: "left", "center", or "right"
 icon_preview_width_percent = 40
 icon_list_width = 4                  # Terminal columns reserved beside each app
 icon_list_height = 2                 # Terminal rows per app when list icons are enabled
-icon_list_gap = 0                    # Columns between each list icon and label
+icon_list_gap = 1                    # Columns between each list icon and label
 icon_list_label_align = "top"        # "top", "center", or "bottom"
+# icon_list_label_row = 2            # Optional exact 1-based row; overrides alignment
 icon_arrow_before = false            # Put selection arrow before left-side list icons
 icon_size = 128
 icon_horizontal_align_percent = 50  # Fine adjustment inside the chosen icon area
@@ -352,7 +353,8 @@ detected), including inherited themes and
 absolute `Icon=` paths. PNG and SVG icons render through Kitty, Sixel, or the terminal-independent
 half-block fallback. The selected icon uses the left side of the title panel by default. Set
 `icon_mode = "list"` for icons beside results or `"both"` for both placements. `icon_list_width`,
-`icon_list_height`, `icon_list_gap`, and `icon_list_label_align` customize the list.
+`icon_list_height`, `icon_list_gap`, and `icon_list_label_align` customize the list. Set
+`icon_list_label_row` when a specific 1-based row is preferable to automatic alignment.
 Transparent source padding is normalized so icons occupy a consistent visual box. The horizontal
 and vertical percentages provide optional fine adjustment within the chosen icon area.
 

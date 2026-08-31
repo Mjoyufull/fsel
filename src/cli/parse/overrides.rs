@@ -235,6 +235,15 @@ pub(super) fn parse_cli_overrides(
                         .parse()
                         .map_err(CliError::message)?;
             }
+            Long("icon-list-label-row") => {
+                default.desktop_icon_list_label_row = Some(
+                    value_as_string(parser, "Desktop list label row must be valid UTF-8")?
+                        .parse::<u16>()
+                        .map_err(|_| {
+                            CliError::message("Desktop list label row must be an integer")
+                        })?,
+                );
+            }
             Long("icon-arrow-before") => {
                 default.desktop_icon_arrow_before = true;
             }

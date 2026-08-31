@@ -82,6 +82,7 @@ prefix_depth = 2
             ("FSEL_APP_LAUNCHER_ICON_VERTICAL_ALIGN_PERCENT", "75"),
             ("FSEL_APP_LAUNCHER_ICON_LIST_GAP", "2"),
             ("FSEL_APP_LAUNCHER_ICON_LIST_LABEL_ALIGN", "center"),
+            ("FSEL_APP_LAUNCHER_ICON_LIST_LABEL_ROW", "2"),
             ("FSEL_APPS_BACKGROUND_COLOR", "#101010"),
             ("FSEL_APPS_SELECTION_BACKGROUND_COLOR", "Blue"),
             ("FSEL_MAIN_BACKGROUND_COLOR", "#111111"),
@@ -118,6 +119,7 @@ prefix_depth = 2
             config.app_launcher.icon_list_label_align,
             Some(VerticalAlignment::Center)
         );
+        assert_eq!(config.app_launcher.icon_list_label_row, Some(2));
         assert_eq!(config.ui.apps_background_color, "#101010");
         assert_eq!(config.ui.apps_selection_background_color, "Blue");
         assert_eq!(config.ui.main_background_color, "#111111");

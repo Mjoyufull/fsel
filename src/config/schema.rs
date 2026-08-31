@@ -47,6 +47,7 @@ pub struct AppLauncherConfig {
     pub icon_list_gap: Option<u16>,
     #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub icon_list_label_align: Option<VerticalAlignment>,
+    pub icon_list_label_row: Option<u16>,
     pub icon_arrow_before: Option<bool>,
     pub icon_size: Option<u16>,
     pub icon_horizontal_align_percent: Option<u16>,

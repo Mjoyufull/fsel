@@ -233,6 +233,8 @@ mod tests {
                 "2",
                 "--icon-list-label-align",
                 "center",
+                "--icon-list-label-row",
+                "2",
                 "--icon-arrow-before",
                 "--icon-size",
                 "96",
@@ -263,6 +265,7 @@ mod tests {
             opts.desktop_icon_list_label_align,
             crate::ui::VerticalAlignment::Center
         );
+        assert_eq!(opts.desktop_icon_list_label_row, Some(2));
         assert!(opts.desktop_icon_arrow_before);
         assert_eq!(opts.desktop_icon_size, 96);
         assert_eq!(opts.desktop_icon_horizontal_align_percent, 25);
@@ -283,9 +286,11 @@ mod tests {
         );
         assert_eq!(opts.desktop_icon_horizontal_align_percent, 50);
         assert_eq!(opts.desktop_icon_vertical_align_percent, 50);
+        assert_eq!(opts.desktop_icon_list_gap, 1);
         assert_eq!(
             opts.desktop_icon_list_label_align,
             crate::ui::VerticalAlignment::Top
         );
+        assert_eq!(opts.desktop_icon_list_label_row, None);
     }
 }

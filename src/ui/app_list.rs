@@ -91,7 +91,11 @@ pub(super) fn render(
             ));
 
             let mut lines = vec![Line::default(); usize::from(row_height)];
-            lines[label_row(row_height, cli.desktop_icon_list_label_align)] = Line::from(spans);
+            lines[label_row(
+                row_height,
+                cli.desktop_icon_list_label_align,
+                cli.desktop_icon_list_label_row,
+            )] = Line::from(spans);
             ListItem::new(lines)
         })
         .collect::<Vec<_>>();
@@ -124,6 +128,7 @@ pub(super) fn render(
             selected,
             row_height,
             cli.desktop_icon_list_label_align,
+            cli.desktop_icon_list_label_row,
         );
         frame.render_widget(
             Paragraph::new(format!("{} ", cli.selection_marker)).style(highlight_style),
@@ -162,10 +167,17 @@ pub(super) fn render(
     Ok(render_failed)
 }
 
-fn label_row(row_height: u16, alignment: super::VerticalAlignment) -> usize {
+fn label_row(
+    row_height: u16,
+    alignment: super::VerticalAlignment,
+    exact_row: Option<u16>,
+) -> usize {
+    if let Some(row) = exact_row {
+        return usize::from(row.saturating_sub(1).min(row_height.saturating_sub(1)));
+    }
     usize::from(match alignment {
         super::VerticalAlignment::Top => 0,
-        super::VerticalAlignment::Center => row_height / 2,
+        super::VerticalAlignment::Center => row_height.saturating_sub(1) / 2,
         super::VerticalAlignment::Bottom => row_height.saturating_sub(1),
     })
 }
@@ -196,10 +208,11 @@ fn selection_marker_area(
     selected: usize,
     row_height: u16,
     alignment: super::VerticalAlignment,
+    exact_row: Option<u16>,
 ) -> Rect {
     Rect::new(
         area.x,
-        area.y + selected as u16 * row_height + label_row(row_height, alignment) as u16,
+        area.y + selected as u16 * row_height + label_row(row_height, alignment, exact_row) as u16,
         area.width,
         1,
     )

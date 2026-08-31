@@ -115,6 +115,12 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
     )?;
     set_optional_parsed(
         source,
+        "FSEL_APP_LAUNCHER_ICON_LIST_LABEL_ROW",
+        &mut cfg.app_launcher.icon_list_label_row,
+        INTEGER_EXPECTED,
+    )?;
+    set_optional_parsed(
+        source,
         "FSEL_APP_LAUNCHER_ICON_ARROW_BEFORE",
         &mut cfg.app_launcher.icon_arrow_before,
         BOOLEAN_EXPECTED,

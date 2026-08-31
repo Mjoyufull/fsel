@@ -81,6 +81,16 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
             "Error: Desktop icon list gap must be between 0 and 16\n",
         ));
     }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_list()
+        && default
+            .desktop_icon_list_label_row
+            .is_some_and(|row| row == 0 || row > default.desktop_icon_list_height)
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon list label row must be between 1 and the configured list height\n",
+        ));
+    }
 
     if default.program.is_some() && default.search_string.is_some() {
         return Err(CliError::message(
@@ -236,6 +246,32 @@ mod tests {
                 .to_string()
                 .contains("alignment must be between 0 and 100")
         );
+    }
+
+    #[test]
+    fn active_list_layout_rejects_label_rows_outside_the_item() {
+        for row in [0, 4] {
+            let mut options = Opts {
+                desktop_icon_mode: DesktopIconMode::List,
+                desktop_icon_list_height: 3,
+                desktop_icon_list_label_row: Some(row),
+                ..Opts::default()
+            };
+
+            let error = validate(&mut options, 0).expect_err("label row should be rejected");
+            assert!(error.to_string().contains("label row must be between 1"));
+        }
+    }
+
+    #[test]
+    fn disabled_list_layout_ignores_an_unused_label_row() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            desktop_icon_list_label_row: Some(0),
+            ..Opts::default()
+        };
+
+        assert!(validate(&mut options, 0).is_ok());
     }
 
     #[test]

@@ -24,10 +24,18 @@ fn list_icons_reduce_visible_apps_by_configured_row_height() {
 
 #[test]
 fn list_label_alignment_preserves_top_and_supports_center_and_bottom() {
-    assert_eq!(label_row(3, VerticalAlignment::Top), 0);
-    assert_eq!(label_row(3, VerticalAlignment::Center), 1);
-    assert_eq!(label_row(3, VerticalAlignment::Bottom), 2);
-    assert_eq!(label_row(2, VerticalAlignment::Center), 1);
+    assert_eq!(label_row(3, VerticalAlignment::Top, None), 0);
+    assert_eq!(label_row(3, VerticalAlignment::Center, None), 1);
+    assert_eq!(label_row(3, VerticalAlignment::Bottom, None), 2);
+    assert_eq!(label_row(2, VerticalAlignment::Center, None), 0);
+    assert_eq!(label_row(8, VerticalAlignment::Center, None), 3);
+}
+
+#[test]
+fn exact_label_row_overrides_named_alignment() {
+    assert_eq!(label_row(8, VerticalAlignment::Top, Some(6)), 5);
+    assert_eq!(label_row(3, VerticalAlignment::Bottom, Some(1)), 0);
+    assert_eq!(label_row(3, VerticalAlignment::Top, Some(9)), 2);
 }
 
 #[test]
@@ -35,15 +43,15 @@ fn selection_marker_uses_the_same_aligned_row_as_the_label() {
     let area = Rect::new(2, 4, 2, 12);
 
     assert_eq!(
-        selection_marker_area(area, 1, 3, VerticalAlignment::Top),
+        selection_marker_area(area, 1, 3, VerticalAlignment::Top, None),
         Rect::new(2, 7, 2, 1)
     );
     assert_eq!(
-        selection_marker_area(area, 1, 3, VerticalAlignment::Center),
+        selection_marker_area(area, 1, 3, VerticalAlignment::Center, None),
         Rect::new(2, 8, 2, 1)
     );
     assert_eq!(
-        selection_marker_area(area, 1, 3, VerticalAlignment::Bottom),
+        selection_marker_area(area, 1, 3, VerticalAlignment::Bottom, None),
         Rect::new(2, 9, 2, 1)
     );
 }
@@ -118,7 +126,7 @@ fn list_icons_can_reserve_the_right_side() {
 
     let areas = list_areas(Rect::new(10, 3, 30, 8), &cli);
 
-    assert_eq!(areas.text, Rect::new(10, 3, 26, 8));
+    assert_eq!(areas.text, Rect::new(10, 3, 25, 8));
     assert_eq!(areas.icon, Some(Rect::new(36, 3, 4, 8)));
     assert_eq!(areas.selection, None);
 }
@@ -134,7 +142,7 @@ fn list_icons_can_reserve_the_left_side() {
 
     let areas = list_areas(Rect::new(2, 4, 20, 6), &cli);
 
-    assert_eq!(areas.text, Rect::new(7, 4, 15, 6));
+    assert_eq!(areas.text, Rect::new(8, 4, 14, 6));
     assert_eq!(areas.icon, Some(Rect::new(2, 4, 5, 6)));
     assert_eq!(areas.selection, None);
 }
@@ -153,7 +161,7 @@ fn selection_arrow_can_be_reserved_before_a_left_icon() {
 
     assert_eq!(areas.selection, Some(Rect::new(2, 4, 2, 6)));
     assert_eq!(areas.icon, Some(Rect::new(4, 4, 5, 6)));
-    assert_eq!(areas.text, Rect::new(9, 4, 13, 6));
+    assert_eq!(areas.text, Rect::new(10, 4, 12, 6));
 }
 
 #[test]
@@ -171,7 +179,7 @@ fn hidden_selection_marker_releases_its_gutter() {
 
     assert_eq!(areas.selection, None);
     assert_eq!(areas.icon, Some(Rect::new(2, 4, 5, 6)));
-    assert_eq!(areas.text, Rect::new(7, 4, 15, 6));
+    assert_eq!(areas.text, Rect::new(8, 4, 14, 6));
 }
 
 #[test]

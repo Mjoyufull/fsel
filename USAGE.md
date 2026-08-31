@@ -129,14 +129,18 @@ icon_position = "left"              # Preview: "left", "center", or "right"
 icon_preview_width_percent = 40      # 10-90
 icon_list_width = 4                  # 1-16 terminal columns
 icon_list_height = 2                 # 1-8 terminal rows per app
-icon_list_gap = 0                    # 0-16 columns between icon and label
+icon_list_gap = 1                    # 0-16 columns between icon and label
 icon_list_label_align = "top"        # "top", "center", or "bottom"
+# icon_list_label_row = 2            # Exact 1-based row; overrides label alignment
 icon_arrow_before = false            # Arrow before left-side list icons
 icon_size = 128                      # 1-4096
 icon_horizontal_align_percent = 50  # Fine adjustment inside the chosen icon area
 icon_vertical_align_percent = 50    # Fine adjustment inside the chosen icon area
 # icon_theme = "Papirus-Dark"
 ```
+
+For even list heights, `center` uses the upper of the two middle rows. Set
+`icon_list_label_row` to an exact 1-based row when artwork needs a manual visual adjustment.
 
 ### Launcher Chrome and Backgrounds
 
@@ -704,7 +708,7 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`, `icon_mode`, `icon_position`, `icon_preview_width_percent`, `icon_list_width`, `icon_list_height`, `icon_list_gap`, `icon_list_label_align`, `icon_arrow_before`, `icon_size`, `icon_horizontal_align_percent`, `icon_vertical_align_percent`, `icon_theme`
+- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`, `icon_mode`, `icon_position`, `icon_preview_width_percent`, `icon_list_width`, `icon_list_height`, `icon_list_gap`, `icon_list_label_align`, `icon_list_label_row`, `icon_arrow_before`, `icon_size`, `icon_horizontal_align_percent`, `icon_vertical_align_percent`, `icon_theme`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`
