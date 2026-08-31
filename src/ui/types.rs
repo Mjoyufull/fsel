@@ -58,34 +58,6 @@ impl FromStr for HorizontalPosition {
     }
 }
 
-/// Vertical placement of launcher labels within multi-row icon entries.
-#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum VerticalAlignment {
-    /// Keep the label on the first row.
-    #[default]
-    Top,
-    /// Put the label on the row nearest the visual center.
-    Center,
-    /// Put the label on the last row.
-    Bottom,
-}
-
-impl FromStr for VerticalAlignment {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_lowercase().as_str() {
-            "top" => Ok(Self::Top),
-            "center" => Ok(Self::Center),
-            "bottom" => Ok(Self::Bottom),
-            _ => Err(format!(
-                "Invalid vertical alignment: '{value}'. Valid options: top, center, bottom"
-            )),
-        }
-    }
-}
-
 /// Visual design used by the launcher input panel.
 #[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]

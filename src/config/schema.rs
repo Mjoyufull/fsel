@@ -2,7 +2,7 @@ use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 
 use crate::cli::{DesktopIconMode, MatchMode, PinnedOrderMode, RankingMode};
-use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition, VerticalAlignment};
+use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition};
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct FselConfig {
@@ -45,9 +45,7 @@ pub struct AppLauncherConfig {
     pub icon_list_width: Option<u16>,
     pub icon_list_height: Option<u16>,
     pub icon_list_gap: Option<u16>,
-    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
-    pub icon_list_label_align: Option<VerticalAlignment>,
-    pub icon_list_label_row: Option<u16>,
+    pub icon_list_vertical_align_percent: Option<u16>,
     pub icon_arrow_before: Option<bool>,
     pub icon_size: Option<u16>,
     pub icon_horizontal_align_percent: Option<u16>,

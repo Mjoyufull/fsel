@@ -91,6 +91,7 @@ impl IconRuntime {
             picker.clone(),
             cli.desktop_icon_horizontal_align_percent,
             cli.desktop_icon_vertical_align_percent,
+            cli.desktop_icon_list_vertical_align_percent,
             request_rx,
             result_tx,
         );
@@ -438,7 +439,8 @@ fn spawn_worker(
     mut resolver: IconResolver,
     picker: Picker,
     horizontal_align: u16,
-    vertical_align: u16,
+    preview_vertical_align: u16,
+    list_vertical_align: u16,
     mut request_rx: mpsc::UnboundedReceiver<WorkRequest>,
     result_tx: mpsc::UnboundedSender<IconResult>,
 ) -> JoinHandle<()> {
@@ -456,7 +458,7 @@ fn spawn_worker(
                         &result_tx,
                         preview,
                         horizontal_align,
-                        vertical_align,
+                        preview_vertical_align,
                     ) {
                         return;
                     }
@@ -472,7 +474,7 @@ fn spawn_worker(
                             "desktop-list",
                             request.list_area,
                             horizontal_align,
-                            vertical_align,
+                            list_vertical_align,
                         );
                         if result_tx
                             .send(IconResult::List {
@@ -516,7 +518,7 @@ fn spawn_worker(
                             "desktop-list",
                             request.list_area,
                             horizontal_align,
-                            vertical_align,
+                            list_vertical_align,
                         )
                         .map(Some);
                         (icon, prepared)

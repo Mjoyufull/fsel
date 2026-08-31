@@ -229,20 +229,15 @@ pub(super) fn parse_cli_overrides(
                             CliError::message("Desktop list icon gap must be an integer")
                         })?;
             }
-            Long("icon-list-label-align") => {
-                default.desktop_icon_list_label_align =
-                    value_as_string(parser, "Desktop list label alignment must be valid UTF-8")?
-                        .parse()
-                        .map_err(CliError::message)?;
-            }
-            Long("icon-list-label-row") => {
-                default.desktop_icon_list_label_row = Some(
-                    value_as_string(parser, "Desktop list label row must be valid UTF-8")?
-                        .parse::<u16>()
-                        .map_err(|_| {
-                            CliError::message("Desktop list label row must be an integer")
-                        })?,
-                );
+            Long("icon-list-vertical-align") => {
+                default.desktop_icon_list_vertical_align_percent = value_as_string(
+                    parser,
+                    "Desktop list icon vertical alignment must be valid UTF-8",
+                )?
+                .parse::<u16>()
+                .map_err(|_| {
+                    CliError::message("Desktop list icon vertical alignment must be an integer")
+                })?;
             }
             Long("icon-arrow-before") => {
                 default.desktop_icon_arrow_before = true;

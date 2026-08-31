@@ -1,9 +1,9 @@
 use super::{
-    label_row, launcher_list_icon_area, launcher_visible_rows, list_areas, marker_gutter_width,
+    launcher_list_icon_area, launcher_visible_rows, list_areas, marker_gutter_width,
     render_selection_background, selection_marker_area,
 };
 use crate::cli::{DesktopIconMode, Opts};
-use crate::ui::{HorizontalPosition, PanelPosition, VerticalAlignment};
+use crate::ui::{HorizontalPosition, PanelPosition};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
@@ -23,37 +23,10 @@ fn list_icons_reduce_visible_apps_by_configured_row_height() {
 }
 
 #[test]
-fn list_label_alignment_preserves_top_and_supports_center_and_bottom() {
-    assert_eq!(label_row(3, VerticalAlignment::Top, None), 0);
-    assert_eq!(label_row(3, VerticalAlignment::Center, None), 1);
-    assert_eq!(label_row(3, VerticalAlignment::Bottom, None), 2);
-    assert_eq!(label_row(2, VerticalAlignment::Center, None), 0);
-    assert_eq!(label_row(8, VerticalAlignment::Center, None), 3);
-}
-
-#[test]
-fn exact_label_row_overrides_named_alignment() {
-    assert_eq!(label_row(8, VerticalAlignment::Top, Some(6)), 5);
-    assert_eq!(label_row(3, VerticalAlignment::Bottom, Some(1)), 0);
-    assert_eq!(label_row(3, VerticalAlignment::Top, Some(9)), 2);
-}
-
-#[test]
-fn selection_marker_uses_the_same_aligned_row_as_the_label() {
+fn selection_marker_stays_on_the_first_item_row() {
     let area = Rect::new(2, 4, 2, 12);
 
-    assert_eq!(
-        selection_marker_area(area, 1, 3, VerticalAlignment::Top, None),
-        Rect::new(2, 7, 2, 1)
-    );
-    assert_eq!(
-        selection_marker_area(area, 1, 3, VerticalAlignment::Center, None),
-        Rect::new(2, 8, 2, 1)
-    );
-    assert_eq!(
-        selection_marker_area(area, 1, 3, VerticalAlignment::Bottom, None),
-        Rect::new(2, 9, 2, 1)
-    );
+    assert_eq!(selection_marker_area(area, 1, 3), Rect::new(2, 7, 2, 1));
 }
 
 #[test]

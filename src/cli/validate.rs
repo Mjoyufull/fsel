@@ -50,11 +50,18 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
     }
     if uses_desktop_icons
         && default.desktop_icon_mode != DesktopIconMode::None
-        && (default.desktop_icon_horizontal_align_percent > 100
-            || default.desktop_icon_vertical_align_percent > 100)
+        && default.desktop_icon_horizontal_align_percent > 100
     {
         return Err(CliError::message(
-            "Error: Desktop icon alignment must be between 0 and 100\n",
+            "Error: Desktop icon horizontal alignment must be between 0 and 100\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_preview()
+        && default.desktop_icon_vertical_align_percent > 100
+    {
+        return Err(CliError::message(
+            "Error: Desktop preview icon vertical alignment must be between 0 and 100\n",
         ));
     }
     if uses_desktop_icons
@@ -83,12 +90,10 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
     }
     if uses_desktop_icons
         && default.desktop_icon_mode.shows_list()
-        && default
-            .desktop_icon_list_label_row
-            .is_some_and(|row| row == 0 || row > default.desktop_icon_list_height)
+        && default.desktop_icon_list_vertical_align_percent > 100
     {
         return Err(CliError::message(
-            "Error: Desktop icon list label row must be between 1 and the configured list height\n",
+            "Error: Desktop list icon vertical alignment must be between 0 and 100\n",
         ));
     }
 
@@ -234,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn active_icon_layout_rejects_alignment_over_one_hundred() {
+    fn active_icon_layout_rejects_horizontal_alignment_over_one_hundred() {
         let mut options = Opts {
             desktop_icon_horizontal_align_percent: 101,
             ..Opts::default()
@@ -244,30 +249,58 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("alignment must be between 0 and 100")
+                .contains("horizontal alignment must be between 0 and 100")
         );
     }
 
     #[test]
-    fn active_list_layout_rejects_label_rows_outside_the_item() {
-        for row in [0, 4] {
-            let mut options = Opts {
-                desktop_icon_mode: DesktopIconMode::List,
-                desktop_icon_list_height: 3,
-                desktop_icon_list_label_row: Some(row),
-                ..Opts::default()
-            };
+    fn preview_layout_rejects_vertical_alignment_over_one_hundred() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            desktop_icon_vertical_align_percent: 101,
+            ..Opts::default()
+        };
 
-            let error = validate(&mut options, 0).expect_err("label row should be rejected");
-            assert!(error.to_string().contains("label row must be between 1"));
-        }
+        let error = validate(&mut options, 0).expect_err("alignment should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("preview icon vertical alignment must be between 0 and 100")
+        );
     }
 
     #[test]
-    fn disabled_list_layout_ignores_an_unused_label_row() {
+    fn list_only_layout_ignores_unused_preview_vertical_alignment() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::List,
+            desktop_icon_vertical_align_percent: 101,
+            ..Opts::default()
+        };
+
+        assert!(validate(&mut options, 0).is_ok());
+    }
+
+    #[test]
+    fn active_list_layout_rejects_vertical_alignment_over_one_hundred() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::List,
+            desktop_icon_list_vertical_align_percent: 101,
+            ..Opts::default()
+        };
+
+        let error = validate(&mut options, 0).expect_err("alignment should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("list icon vertical alignment must be between 0 and 100")
+        );
+    }
+
+    #[test]
+    fn disabled_list_layout_ignores_unused_vertical_alignment() {
         let mut options = Opts {
             desktop_icon_mode: DesktopIconMode::Preview,
-            desktop_icon_list_label_row: Some(0),
+            desktop_icon_list_vertical_align_percent: 101,
             ..Opts::default()
         };
 

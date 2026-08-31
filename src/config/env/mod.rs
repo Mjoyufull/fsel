@@ -30,7 +30,7 @@ mod tests {
     use super::{apply_overrides, helpers};
     use crate::cli::{DesktopIconMode, MatchMode};
     use crate::config::{ConfigError, FselConfig};
-    use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition, VerticalAlignment};
+    use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition};
     use std::collections::HashMap;
 
     struct MapSource {
@@ -81,8 +81,7 @@ prefix_depth = 2
             ("FSEL_APP_LAUNCHER_ICON_HORIZONTAL_ALIGN_PERCENT", "25"),
             ("FSEL_APP_LAUNCHER_ICON_VERTICAL_ALIGN_PERCENT", "75"),
             ("FSEL_APP_LAUNCHER_ICON_LIST_GAP", "2"),
-            ("FSEL_APP_LAUNCHER_ICON_LIST_LABEL_ALIGN", "center"),
-            ("FSEL_APP_LAUNCHER_ICON_LIST_LABEL_ROW", "2"),
+            ("FSEL_APP_LAUNCHER_ICON_LIST_VERTICAL_ALIGN_PERCENT", "35"),
             ("FSEL_APPS_BACKGROUND_COLOR", "#101010"),
             ("FSEL_APPS_SELECTION_BACKGROUND_COLOR", "Blue"),
             ("FSEL_MAIN_BACKGROUND_COLOR", "#111111"),
@@ -116,10 +115,9 @@ prefix_depth = 2
         assert_eq!(config.app_launcher.icon_vertical_align_percent, Some(75));
         assert_eq!(config.app_launcher.icon_list_gap, Some(2));
         assert_eq!(
-            config.app_launcher.icon_list_label_align,
-            Some(VerticalAlignment::Center)
+            config.app_launcher.icon_list_vertical_align_percent,
+            Some(35)
         );
-        assert_eq!(config.app_launcher.icon_list_label_row, Some(2));
         assert_eq!(config.ui.apps_background_color, "#101010");
         assert_eq!(config.ui.apps_selection_background_color, "Blue");
         assert_eq!(config.ui.main_background_color, "#111111");

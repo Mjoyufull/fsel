@@ -92,11 +92,8 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(gap) = fsel_config.app_launcher.icon_list_gap {
         default.desktop_icon_list_gap = gap;
     }
-    if let Some(align) = fsel_config.app_launcher.icon_list_label_align {
-        default.desktop_icon_list_label_align = align;
-    }
-    if let Some(row) = fsel_config.app_launcher.icon_list_label_row {
-        default.desktop_icon_list_label_row = Some(row);
+    if let Some(align) = fsel_config.app_launcher.icon_list_vertical_align_percent {
+        default.desktop_icon_list_vertical_align_percent = align;
     }
     if let Some(arrow_before) = fsel_config.app_launcher.icon_arrow_before {
         default.desktop_icon_arrow_before = arrow_before;

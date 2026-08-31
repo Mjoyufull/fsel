@@ -90,12 +90,8 @@ pub(super) fn render(
                 Style::default().fg(cli.apps_text_color),
             ));
 
-            let mut lines = vec![Line::default(); usize::from(row_height)];
-            lines[label_row(
-                row_height,
-                cli.desktop_icon_list_label_align,
-                cli.desktop_icon_list_label_row,
-            )] = Line::from(spans);
+            let mut lines = vec![Line::from(spans)];
+            lines.resize_with(usize::from(row_height), Line::default);
             ListItem::new(lines)
         })
         .collect::<Vec<_>>();
@@ -123,13 +119,7 @@ pub(super) fn render(
     frame.render_stateful_widget(list, areas.text, &mut list_state);
 
     if let (Some(selected), Some(selection_area)) = (list_state.selected(), areas.selection) {
-        let marker_area = selection_marker_area(
-            selection_area,
-            selected,
-            row_height,
-            cli.desktop_icon_list_label_align,
-            cli.desktop_icon_list_label_row,
-        );
+        let marker_area = selection_marker_area(selection_area, selected, row_height);
         frame.render_widget(
             Paragraph::new(format!("{} ", cli.selection_marker)).style(highlight_style),
             marker_area,
@@ -167,21 +157,6 @@ pub(super) fn render(
     Ok(render_failed)
 }
 
-fn label_row(
-    row_height: u16,
-    alignment: super::VerticalAlignment,
-    exact_row: Option<u16>,
-) -> usize {
-    if let Some(row) = exact_row {
-        return usize::from(row.saturating_sub(1).min(row_height.saturating_sub(1)));
-    }
-    usize::from(match alignment {
-        super::VerticalAlignment::Top => 0,
-        super::VerticalAlignment::Center => row_height.saturating_sub(1) / 2,
-        super::VerticalAlignment::Bottom => row_height.saturating_sub(1),
-    })
-}
-
 fn selection_marker_spans(cli: &Opts, selected: bool) -> Vec<Span<'_>> {
     let width = marker_gutter_width(cli);
     if width == 0 {
@@ -203,19 +178,8 @@ fn marker_gutter_width(cli: &Opts) -> u16 {
     width as u16 + 1
 }
 
-fn selection_marker_area(
-    area: Rect,
-    selected: usize,
-    row_height: u16,
-    alignment: super::VerticalAlignment,
-    exact_row: Option<u16>,
-) -> Rect {
-    Rect::new(
-        area.x,
-        area.y + selected as u16 * row_height + label_row(row_height, alignment, exact_row) as u16,
-        area.width,
-        1,
-    )
+fn selection_marker_area(area: Rect, selected: usize, row_height: u16) -> Rect {
+    Rect::new(area.x, area.y + selected as u16 * row_height, area.width, 1)
 }
 
 fn apps_block(cli: &Opts) -> Block<'static> {

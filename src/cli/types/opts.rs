@@ -1,5 +1,5 @@
 use super::{DesktopIconMode, MatchMode, PinnedOrderMode, RankingMode};
-use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition, VerticalAlignment};
+use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition};
 
 /// Command line interface.
 #[derive(Debug)]
@@ -63,8 +63,7 @@ pub struct Opts {
     pub desktop_icon_list_width: u16,
     pub desktop_icon_list_height: u16,
     pub desktop_icon_list_gap: u16,
-    pub desktop_icon_list_label_align: VerticalAlignment,
-    pub desktop_icon_list_label_row: Option<u16>,
+    pub desktop_icon_list_vertical_align_percent: u16,
     pub desktop_icon_arrow_before: bool,
     pub desktop_icon_size: u16,
     pub desktop_icon_horizontal_align_percent: u16,
@@ -205,8 +204,7 @@ impl Default for Opts {
             desktop_icon_list_width: 4,
             desktop_icon_list_height: 2,
             desktop_icon_list_gap: 1,
-            desktop_icon_list_label_align: VerticalAlignment::Top,
-            desktop_icon_list_label_row: None,
+            desktop_icon_list_vertical_align_percent: 0,
             desktop_icon_arrow_before: false,
             desktop_icon_size: 128,
             desktop_icon_horizontal_align_percent: 50,

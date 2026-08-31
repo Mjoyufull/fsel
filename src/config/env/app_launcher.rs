@@ -109,14 +109,8 @@ pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Resul
     )?;
     set_optional_parsed(
         source,
-        "FSEL_APP_LAUNCHER_ICON_LIST_LABEL_ALIGN",
-        &mut cfg.app_launcher.icon_list_label_align,
-        "top, center, or bottom",
-    )?;
-    set_optional_parsed(
-        source,
-        "FSEL_APP_LAUNCHER_ICON_LIST_LABEL_ROW",
-        &mut cfg.app_launcher.icon_list_label_row,
+        "FSEL_APP_LAUNCHER_ICON_LIST_VERTICAL_ALIGN_PERCENT",
+        &mut cfg.app_launcher.icon_list_vertical_align_percent,
         INTEGER_EXPECTED,
     )?;
     set_optional_parsed(
