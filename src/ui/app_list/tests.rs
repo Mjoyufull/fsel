@@ -1,6 +1,6 @@
 use super::{
     launcher_list_icon_area, launcher_visible_rows, list_areas, marker_gutter_width,
-    render_selection_background, selection_marker_area,
+    overflow_icon_area, render_selection_background, selection_marker_area,
 };
 use crate::cli::{DesktopIconMode, Opts};
 use crate::ui::{HorizontalPosition, PanelPosition};
@@ -198,6 +198,22 @@ fn list_worker_area_matches_each_rendered_icon_slot() {
     assert_eq!(
         launcher_list_icon_area(Rect::new(0, 0, 100, 40), &cli),
         Rect::new(0, 0, 5, 2)
+    );
+}
+
+#[test]
+fn negative_icon_overflow_extends_above_the_item() {
+    assert_eq!(
+        overflow_icon_area(Rect::new(4, 12, 5, 8), 2),
+        Rect::new(4, 10, 5, 10)
+    );
+}
+
+#[test]
+fn icon_overflow_saturates_at_the_terminal_top() {
+    assert_eq!(
+        overflow_icon_area(Rect::new(4, 1, 5, 8), 2),
+        Rect::new(4, 0, 5, 10)
     );
 }
 

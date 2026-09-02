@@ -121,8 +121,13 @@ pub struct UI;
 pub struct AppIcons<'a> {
     pub(crate) image_manager: &'a mut crate::ui::ImageManager,
     pub(crate) preview_key: Option<&'a str>,
-    pub(crate) list_keys: &'a HashMap<String, String>,
+    pub(crate) list_icons: &'a HashMap<String, ListIconPlacement>,
     pub(crate) failed_list_icons: &'a mut HashSet<String>,
+}
+
+pub(crate) struct ListIconPlacement {
+    pub(crate) key: String,
+    pub(crate) top_overflow_rows: u16,
 }
 
 impl UI {

@@ -130,7 +130,7 @@ icon_preview_width_percent = 40      # 10-90
 icon_list_width = 4                  # 1-16 terminal columns
 icon_list_height = 2                 # 1-8 terminal rows per app
 icon_list_gap = 1                    # 0-16 columns between icon and label
-icon_list_vertical_align_percent = 0 # Shift list artwork from above (-100) to bottom (100)
+icon_list_vertical_align_percent = 0 # Offset artwork vertically; negatives overflow upward
 icon_arrow_before = false            # Arrow before left-side list icons
 icon_size = 128                      # 1-4096
 icon_horizontal_align_percent = 50  # Fine adjustment inside the chosen icon area
@@ -140,9 +140,10 @@ icon_vertical_align_percent = 50    # Fine adjustment inside the preview icon ar
 
 List labels and selection markers stay on the first row of each item. Use
 `icon_list_vertical_align_percent` for pixel-level artwork adjustment without moving text between
-terminal rows. Values from `-100` to `-1` shift artwork above the normal top-aligned position; it
-remains clipped to its own item. The preview keeps its independent `icon_vertical_align_percent`
-setting.
+terminal rows. Values from `-100` to `-1` shift the complete artwork above the normal top-aligned
+position. This deliberately allows overlap with earlier list rows or panel chrome, and overlapping
+graphics may stack differently between terminal protocols. The preview keeps its independent
+`icon_vertical_align_percent` setting.
 
 ### Launcher Chrome and Backgrounds
 

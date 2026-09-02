@@ -55,6 +55,12 @@ enum CachedProtocol {
     Resizable(StatefulProtocol),
 }
 
+pub(crate) struct PreparedFixedImage {
+    pub(crate) protocol: Protocol,
+    pub(crate) retained_bytes: u64,
+    pub(crate) top_overflow_rows: u16,
+}
+
 impl ImageManager {
     /// Initialize the image manager with the picker chosen by the caller.
     pub fn new(picker: Picker) -> Self {
@@ -132,26 +138,33 @@ impl ImageManager {
         area: Rect,
         horizontal_align: u16,
         vertical_align: i16,
-    ) -> Result<(Protocol, u64)> {
+    ) -> Result<PreparedFixedImage> {
         let (font_width, font_height) = picker.font_size();
         let pixel_width = u32::from(area.width).saturating_mul(u32::from(font_width));
         let pixel_height = u32::from(area.height).saturating_mul(u32::from(font_height));
         let svg_dimension = pixel_width.max(pixel_height).max(1);
         let (image, _) = read_icon_image(path, svg_dimension)?;
-        let image = normalize_desktop_icon(
+        let normalized = normalize_desktop_icon(
             image,
             pixel_width,
             pixel_height,
             horizontal_align,
             vertical_align,
+            font_height,
         );
+        let protocol_height = area.height.saturating_add(normalized.top_overflow_rows);
+        let protocol_area = Rect::new(area.x, area.y, area.width, protocol_height);
         let retained_bytes = u64::from(area.width)
             .saturating_mul(u64::from(font_width))
-            .saturating_mul(u64::from(area.height))
+            .saturating_mul(u64::from(protocol_height))
             .saturating_mul(u64::from(font_height))
             .saturating_mul(4);
-        let protocol = picker.new_protocol(image, area, Resize::Scale(None))?;
-        Ok((protocol, retained_bytes))
+        let protocol = picker.new_protocol(normalized.image, protocol_area, Resize::Scale(None))?;
+        Ok(PreparedFixedImage {
+            protocol,
+            retained_bytes,
+            top_overflow_rows: normalized.top_overflow_rows,
+        })
     }
 
     /// Insert a fixed-size protocol prepared by a desktop-icon worker.
@@ -346,13 +359,19 @@ impl ImageManager {
     }
 }
 
+struct NormalizedDesktopIcon {
+    image: image::DynamicImage,
+    top_overflow_rows: u16,
+}
+
 fn normalize_desktop_icon(
     image: image::DynamicImage,
     target_width: u32,
     target_height: u32,
     horizontal_align: u16,
     vertical_align: i16,
-) -> image::DynamicImage {
+    font_height: u16,
+) -> NormalizedDesktopIcon {
     let source = image.into_rgba8();
     let mut bounds = None::<(u32, u32, u32, u32)>;
     for (x, y, pixel) in source.enumerate_pixels() {
@@ -364,9 +383,11 @@ fn normalize_desktop_icon(
         }));
     }
 
-    let mut canvas = image::RgbaImage::new(target_width.max(1), target_height.max(1));
     let Some((left, top, right, bottom)) = bounds else {
-        return image::DynamicImage::ImageRgba8(canvas);
+        return NormalizedDesktopIcon {
+            image: image::DynamicImage::new_rgba8(target_width.max(1), target_height.max(1)),
+            top_overflow_rows: 0,
+        };
     };
     let source_width = right - left + 1;
     let source_height = bottom - top + 1;
@@ -402,8 +423,24 @@ fn normalize_desktop_icon(
     let y = i64::from(target_height.saturating_sub(height))
         .saturating_mul(i64::from(vertical_align.clamp(-100, 100)))
         / 100;
-    image::imageops::overlay(&mut canvas, &resized, i64::from(x), y);
-    image::DynamicImage::ImageRgba8(canvas)
+    let font_height = u32::from(font_height.max(1));
+    let top_overflow_pixels = y.unsigned_abs().min(u64::from(u32::MAX)) as u32;
+    let top_overflow_rows = if y < 0 {
+        top_overflow_pixels
+            .div_ceil(font_height)
+            .min(u32::from(u16::MAX)) as u16
+    } else {
+        0
+    };
+    let top_padding = u32::from(top_overflow_rows).saturating_mul(font_height);
+    let canvas_height = target_height.saturating_add(top_padding).max(1);
+    let mut canvas = image::RgbaImage::new(target_width.max(1), canvas_height);
+    let canvas_y = i64::from(top_padding).saturating_add(y);
+    image::imageops::overlay(&mut canvas, &resized, i64::from(x), canvas_y);
+    NormalizedDesktopIcon {
+        image: image::DynamicImage::ImageRgba8(canvas),
+        top_overflow_rows,
+    }
 }
 
 fn read_icon_image(path: &Path, svg_dimension: u32) -> Result<(image::DynamicImage, u64)> {
@@ -1044,6 +1081,14 @@ mod tests {
         (left, top, right, bottom)
     }
 
+    fn visible_pixel_count(image: &image::DynamicImage) -> usize {
+        image
+            .to_rgba8()
+            .pixels()
+            .filter(|pixel| pixel[3] > 8)
+            .count()
+    }
+
     #[test]
     fn desktop_icons_with_different_source_padding_share_one_visual_box() {
         let mut padded = image::RgbaImage::new(64, 64);
@@ -1055,12 +1100,19 @@ mod tests {
         }
         let full = image::RgbaImage::from_pixel(128, 128, image::Rgba([255, 255, 255, 255]));
 
-        let padded =
-            normalize_desktop_icon(image::DynamicImage::ImageRgba8(padded), 100, 100, 50, 50);
-        let full = normalize_desktop_icon(image::DynamicImage::ImageRgba8(full), 100, 100, 50, 50);
+        let padded = normalize_desktop_icon(
+            image::DynamicImage::ImageRgba8(padded),
+            100,
+            100,
+            50,
+            50,
+            10,
+        );
+        let full =
+            normalize_desktop_icon(image::DynamicImage::ImageRgba8(full), 100, 100, 50, 50, 10);
 
-        assert_eq!(alpha_bounds(&padded), (6, 6, 93, 93));
-        assert_eq!(alpha_bounds(&full), alpha_bounds(&padded));
+        assert_eq!(alpha_bounds(&padded.image), (6, 6, 93, 93));
+        assert_eq!(alpha_bounds(&full.image), alpha_bounds(&padded.image));
     }
 
     #[test]
@@ -1072,6 +1124,7 @@ mod tests {
             100,
             0,
             -100,
+            10,
         );
         let left = normalize_desktop_icon(
             image::DynamicImage::ImageRgba8(source.clone()),
@@ -1079,6 +1132,7 @@ mod tests {
             100,
             0,
             0,
+            10,
         );
         let centered = normalize_desktop_icon(
             image::DynamicImage::ImageRgba8(source.clone()),
@@ -1086,14 +1140,29 @@ mod tests {
             100,
             50,
             50,
+            10,
         );
-        let right =
-            normalize_desktop_icon(image::DynamicImage::ImageRgba8(source), 100, 100, 100, 100);
+        let right = normalize_desktop_icon(
+            image::DynamicImage::ImageRgba8(source),
+            100,
+            100,
+            100,
+            100,
+            10,
+        );
 
-        assert_eq!(alpha_bounds(&above), (0, 0, 87, 75));
-        assert_eq!(alpha_bounds(&left), (0, 0, 87, 87));
-        assert_eq!(alpha_bounds(&centered), (6, 6, 93, 93));
-        assert_eq!(alpha_bounds(&right), (12, 12, 99, 99));
+        assert_eq!(above.top_overflow_rows, 2);
+        assert_eq!(alpha_bounds(&above.image), (0, 8, 87, 95));
+        assert_eq!(
+            visible_pixel_count(&above.image),
+            visible_pixel_count(&left.image)
+        );
+        assert_eq!(left.top_overflow_rows, 0);
+        assert_eq!(alpha_bounds(&left.image), (0, 0, 87, 87));
+        assert_eq!(centered.top_overflow_rows, 0);
+        assert_eq!(alpha_bounds(&centered.image), (6, 6, 93, 93));
+        assert_eq!(right.top_overflow_rows, 0);
+        assert_eq!(alpha_bounds(&right.image), (12, 12, 99, 99));
     }
 
     #[test]

@@ -135,19 +135,23 @@ pub(super) fn render(
             if icons.failed_list_icons.contains(icon) {
                 continue;
             }
-            let Some(key) = icons.list_keys.get(icon) else {
+            let Some(placement) = icons.list_icons.get(icon) else {
                 continue;
             };
-            if !icons.image_manager.is_cached(key) {
+            if !icons.image_manager.is_cached(&placement.key) {
                 continue;
             }
-            let icon_area = Rect::new(
+            let item_area = Rect::new(
                 icon_strip.x,
                 icon_strip.y + row as u16 * row_height,
                 icon_strip.width,
                 row_height,
             );
-            if !icons.image_manager.render_cached(frame, key, icon_area)? {
+            let icon_area = overflow_icon_area(item_area, placement.top_overflow_rows);
+            if !icons
+                .image_manager
+                .render_cached(frame, &placement.key, icon_area)?
+            {
                 icons.failed_list_icons.insert(icon.clone());
                 render_failed = true;
             }
@@ -155,6 +159,15 @@ pub(super) fn render(
     }
 
     Ok(render_failed)
+}
+
+fn overflow_icon_area(item_area: Rect, top_overflow_rows: u16) -> Rect {
+    Rect::new(
+        item_area.x,
+        item_area.y.saturating_sub(top_overflow_rows),
+        item_area.width,
+        item_area.height.saturating_add(top_overflow_rows),
+    )
 }
 
 fn selection_marker_spans(cli: &Opts, selected: bool) -> Vec<Span<'_>> {
