@@ -1,6 +1,6 @@
 use super::{
     launcher_list_icon_area, launcher_visible_rows, list_areas, marker_gutter_width,
-    overflow_icon_area, render_selection_background, selection_marker_area,
+    overflow_icon_area, selection_marker_area,
 };
 use crate::cli::{DesktopIconMode, Opts};
 use crate::ui::{HorizontalPosition, PanelPosition};
@@ -56,7 +56,7 @@ fn borderless_apps_panel_uses_the_released_rows() {
         desktop_icon_list_height: 2,
         title_panel_height_percent: 25,
         input_panel_height: 3,
-        show_apps_border: false,
+        show_items_border: false,
         ..Opts::default()
     };
 
@@ -223,7 +223,7 @@ fn rounded_selection_uses_half_cell_caps() {
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     terminal
         .draw(|frame| {
-            render_selection_background(
+            super::super::render_selection_background(
                 frame,
                 Rect::new(0, 0, 5, 1),
                 Color::Black,

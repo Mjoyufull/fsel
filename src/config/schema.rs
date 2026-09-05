@@ -1,3 +1,5 @@
+//! Deserializable configuration schema and compatibility aliases.
+
 use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 
@@ -105,7 +107,8 @@ pub struct UiConfig {
     #[serde(default = "super::defaults::default_true")]
     pub show_main_border: bool,
     #[serde(default = "super::defaults::default_true")]
-    pub show_apps_border: bool,
+    #[serde(alias = "show_apps_border")]
+    pub show_items_border: bool,
     #[serde(default = "super::defaults::default_true")]
     pub show_input_border: bool,
     #[serde(default = "super::defaults::default_true")]
@@ -129,13 +132,17 @@ pub struct UiConfig {
     #[serde(default = "super::defaults::default_reset")]
     pub main_background_color: String,
     #[serde(default = "super::defaults::default_white")]
-    pub apps_border_color: String,
+    #[serde(alias = "apps_border_color")]
+    pub items_border_color: String,
     #[serde(default = "super::defaults::default_reset")]
-    pub apps_background_color: String,
+    #[serde(alias = "apps_background_color")]
+    pub items_background_color: String,
     #[serde(default = "super::defaults::default_reset")]
-    pub apps_selection_background_color: String,
+    #[serde(alias = "apps_selection_background_color")]
+    pub items_selection_background_color: String,
     #[serde(default)]
-    pub apps_selection_rounded: bool,
+    #[serde(alias = "apps_selection_rounded")]
+    pub items_selection_rounded: bool,
     #[serde(default = "super::defaults::default_white")]
     pub input_border_color: String,
     #[serde(default = "super::defaults::default_reset")]
@@ -143,7 +150,8 @@ pub struct UiConfig {
     #[serde(default = "super::defaults::default_white")]
     pub main_text_color: String,
     #[serde(default = "super::defaults::default_white")]
-    pub apps_text_color: String,
+    #[serde(alias = "apps_text_color")]
+    pub items_text_color: String,
     #[serde(default = "super::defaults::default_white")]
     pub input_text_color: String,
     #[serde(default)]

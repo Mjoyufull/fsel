@@ -1,9 +1,11 @@
+//! Launcher panel layout and selected-application preview rendering.
+
 use eyre::Result;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::text::Line;
+use ratatui::widgets::Paragraph;
 use std::collections::{HashMap, HashSet};
 
 pub(crate) fn effective_title_height(total_height: u16, title_panel_height_percent: u16) -> u16 {
@@ -57,11 +59,8 @@ fn split_icon_preview(
     icon_width_percent: u16,
 ) -> (Rect, Option<Rect>) {
     if position == crate::ui::HorizontalPosition::Center {
-        let icon_width = area
-            .width
-            .saturating_mul(icon_width_percent)
-            .checked_div(100)
-            .unwrap_or_default();
+        let icon_width = (u32::from(area.width) * u32::from(icon_width_percent) / 100)
+            .min(u32::from(area.width)) as u16;
         let icon_x = area.x + area.width.saturating_sub(icon_width) / 2;
         return (Rect::new(icon_x, area.y, icon_width, area.height), None);
     }
@@ -91,17 +90,7 @@ pub(crate) fn launcher_preview_icon_area(size: Rect, cli: &crate::cli::Opts) -> 
     if effective_title_height(size.height, cli.title_panel_height_percent) == 0 {
         return Rect::default();
     }
-    let horizontal = u16::from(cli.show_main_border);
-    let top = u16::from(cli.show_main_border || cli.show_panel_titles);
-    let bottom = u16::from(cli.show_main_border);
-    let panel_inner = Rect::new(
-        title_area.x.saturating_add(horizontal),
-        title_area.y.saturating_add(top),
-        title_area
-            .width
-            .saturating_sub(horizontal.saturating_mul(2)),
-        title_area.height.saturating_sub(top.saturating_add(bottom)),
-    );
+    let panel_inner = info_block("", cli).inner(title_area);
     let (icon_area, _) = split_icon_preview(
         panel_inner,
         cli.desktop_icon_position,
@@ -112,6 +101,21 @@ pub(crate) fn launcher_preview_icon_area(size: Rect, cli: &crate::cli::Opts) -> 
         vertical: 0,
     });
     Rect::new(0, 0, icon_area.width, icon_area.height)
+}
+
+fn info_block<'a>(title: &'a str, cli: &crate::cli::Opts) -> ratatui::widgets::Block<'a> {
+    super::panel_block(
+        title,
+        super::PanelTheme {
+            show_border: cli.show_main_border,
+            show_title: cli.show_panel_titles,
+            bold_title: false,
+            rounded_border: cli.rounded_borders,
+            border_color: cli.main_border_color,
+            background_color: cli.main_background_color,
+            title_color: cli.header_title_color,
+        },
+    )
 }
 
 /// App filtering and sorting UI (Stateless Renderer)
@@ -168,25 +172,8 @@ impl UI {
                 "Fsel".to_string()
             };
 
-            let mut info_block = Block::default()
-                .borders(if cli.show_main_border {
-                    Borders::ALL
-                } else {
-                    Borders::NONE
-                })
-                .style(Style::default().bg(cli.main_background_color))
-                .border_style(Style::default().fg(cli.main_border_color))
-                .border_type(if cli.rounded_borders {
-                    BorderType::Rounded
-                } else {
-                    BorderType::Plain
-                });
-            if cli.show_panel_titles {
-                info_block = info_block.title(Span::styled(
-                    format!(" {} ", title),
-                    Style::default().fg(cli.header_title_color),
-                ));
-            }
+            let title = format!(" {title} ");
+            let info_block = info_block(&title, cli);
 
             // Text rendering from state.text which should be populated by state.update_info
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
@@ -293,6 +280,14 @@ mod tests {
     }
 
     #[test]
+    fn centered_preview_percentage_does_not_saturate_on_wide_terminals() {
+        let (icon, _) =
+            split_icon_preview(Rect::new(0, 0, 2_000, 10), HorizontalPosition::Center, 40);
+
+        assert_eq!(icon, Rect::new(600, 0, 800, 10));
+    }
+
+    #[test]
     fn preview_worker_area_matches_the_rendered_icon_slot() {
         let cli = Opts {
             desktop_icon_mode: DesktopIconMode::Preview,
@@ -320,6 +315,15 @@ mod tests {
         assert_eq!(
             launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &cli),
             Rect::new(0, 0, 38, 9)
+        );
+
+        let titleless = Opts {
+            show_panel_titles: false,
+            ..cli
+        };
+        assert_eq!(
+            launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &titleless),
+            Rect::new(0, 0, 38, 10)
         );
     }
 }

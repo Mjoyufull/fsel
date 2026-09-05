@@ -1,3 +1,5 @@
+//! Launcher result-list layout, backgrounds, markers, and terminal images.
+
 use super::app_ui::AppIcons;
 use crate::cli::Opts;
 use crate::core::state::State;
@@ -6,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, List, ListItem, ListState, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,9 +19,15 @@ struct ListAreas {
 }
 
 pub(crate) fn launcher_visible_rows(total_height: u16, cli: &Opts) -> usize {
-    let (_, _, apps_area) =
-        super::app_ui::launcher_panel_areas(Rect::new(0, 0, 1, total_height), cli);
-    visible_rows(apps_block(cli).inner(apps_area).height, cli)
+    visible_rows(
+        launcher_list_content_area(Rect::new(0, 0, 1, total_height), cli).height,
+        cli,
+    )
+}
+
+pub(crate) fn launcher_list_content_area(size: Rect, cli: &Opts) -> Rect {
+    let (_, _, items_area) = super::app_ui::launcher_panel_areas(size, cli);
+    apps_block(cli).inner(items_area)
 }
 
 fn visible_rows(content_height: u16, cli: &Opts) -> usize {
@@ -35,8 +43,7 @@ pub(crate) fn app_row_height(cli: &Opts) -> u16 {
 }
 
 pub(crate) fn launcher_list_icon_area(size: Rect, cli: &Opts) -> Rect {
-    let (_, _, apps_area) = super::app_ui::launcher_panel_areas(size, cli);
-    let inner = apps_block(cli).inner(apps_area);
+    let inner = launcher_list_content_area(size, cli);
     let content = list_content_area(inner, cli);
     let Some(icon_strip) = list_areas(content, cli).icon else {
         return Rect::default();
@@ -87,7 +94,7 @@ pub(super) fn render(
             }
             spans.push(Span::styled(
                 &app.name,
-                Style::default().fg(cli.apps_text_color),
+                Style::default().fg(cli.items_text_color),
             ));
 
             let mut lines = vec![Line::from(spans)];
@@ -108,12 +115,12 @@ pub(super) fn render(
     if let Some(selected) = list_state.selected() {
         let y = inner.y + selected as u16 * row_height;
         let height = row_height.min(inner.y + inner.height - y);
-        render_selection_background(
+        super::render_selection_background(
             frame,
             Rect::new(inner.x, y, inner.width, height),
-            cli.apps_background_color,
-            cli.apps_selection_background_color,
-            cli.apps_selection_rounded,
+            cli.items_background_color,
+            cli.items_selection_background_color,
+            cli.items_selection_rounded,
         );
     }
     frame.render_stateful_widget(list, areas.text, &mut list_state);
@@ -196,26 +203,18 @@ fn selection_marker_area(area: Rect, selected: usize, row_height: u16) -> Rect {
 }
 
 fn apps_block(cli: &Opts) -> Block<'static> {
-    let mut block = Block::default()
-        .borders(if cli.show_apps_border {
-            Borders::ALL
-        } else {
-            Borders::NONE
-        })
-        .style(Style::default().bg(cli.apps_background_color))
-        .border_style(Style::default().fg(cli.apps_border_color))
-        .border_type(if cli.rounded_borders {
-            BorderType::Rounded
-        } else {
-            BorderType::Plain
-        });
-    if cli.show_panel_titles {
-        block = block.title(Span::styled(
-            " Apps ",
-            Style::default().fg(cli.header_title_color),
-        ));
-    }
-    block
+    super::panel_block(
+        " Apps ",
+        super::PanelTheme {
+            show_border: cli.show_items_border,
+            show_title: cli.show_panel_titles,
+            bold_title: false,
+            rounded_border: cli.rounded_borders,
+            border_color: cli.items_border_color,
+            background_color: cli.items_background_color,
+            title_color: cli.header_title_color,
+        },
+    )
 }
 
 fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
@@ -293,46 +292,7 @@ fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
 }
 
 fn list_content_area(area: Rect, cli: &Opts) -> Rect {
-    if cli.apps_selection_rounded && area.width > 2 {
-        area.inner(ratatui::layout::Margin {
-            horizontal: 1,
-            vertical: 0,
-        })
-    } else {
-        area
-    }
-}
-
-fn render_selection_background(
-    frame: &mut Frame,
-    area: Rect,
-    panel_color: ratatui::style::Color,
-    selection_color: ratatui::style::Color,
-    rounded: bool,
-) {
-    if !rounded || area.width < 3 {
-        frame.render_widget(
-            Block::default().style(Style::default().bg(selection_color)),
-            area,
-        );
-        return;
-    }
-
-    frame.render_widget(
-        Block::default().style(Style::default().bg(selection_color)),
-        Rect::new(area.x + 1, area.y, area.width - 2, area.height),
-    );
-    let cap_style = Style::default().fg(selection_color).bg(panel_color);
-    for y in area.y..area.y + area.height {
-        frame.render_widget(
-            Paragraph::new("▐").style(cap_style),
-            Rect::new(area.x, y, 1, 1),
-        );
-        frame.render_widget(
-            Paragraph::new("▌").style(cap_style),
-            Rect::new(area.x + area.width - 1, y, 1, 1),
-        );
-    }
+    super::selection_content_area(area, cli.items_selection_rounded)
 }
 
 #[cfg(test)]

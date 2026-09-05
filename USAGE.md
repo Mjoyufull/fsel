@@ -145,21 +145,21 @@ position. This deliberately allows overlap with earlier list rows or panel chrom
 graphics may stack differently between terminal protocols. The preview keeps its independent
 `icon_vertical_align_percent` setting.
 
-### Launcher Chrome and Backgrounds
+### Shared Selector Chrome and Backgrounds
 
-Launcher panels use semantic background colors and independently configurable chrome. `Reset`
-inherits the terminal background. An OpenCode-like flat layout can be built without changing the
-compatibility defaults:
+The launcher, dmenu, and cclip panels use the same semantic backgrounds and independently
+configurable chrome. `Reset` inherits the terminal background. An OpenCode-like flat layout can be
+built without changing the compatibility defaults:
 
 ```toml
 main_background_color = "#101010"
-apps_background_color = "#141414"
-apps_selection_background_color = "#ffb07c"
+items_background_color = "#141414"
+items_selection_background_color = "#ffb07c"
 input_background_color = "#101010"
-apps_selection_rounded = false
+items_selection_rounded = false
 input_panel_style = "command"
 show_main_border = false
-show_apps_border = false
+show_items_border = false
 show_input_border = false
 show_panel_titles = false
 show_input_count = true
@@ -174,11 +174,13 @@ input_panel_height = 5
 # input_panel_height = 0
 ```
 
-Set `apps_selection_rounded = true` for half-cell rounded ends around the selected row. List text
+Set `items_selection_rounded = true` for half-cell rounded ends around the selected row. List text
 and icons are inset automatically so the caps are not overwritten. The `command` input style uses
-a thicker accent rail, highlights the selected application name, and moves the selection count plus
-launch hints into a footer. `selection_marker` accepts arbitrary marker text independently of the
-input `cursor`. `classic` preserves the original inline `(selected/total) >> query` design.
+a thicker accent rail, highlights the selected item name, and moves the selection count plus the
+active select/exit key hints into a footer. `selection_marker` accepts arbitrary marker text
+independently of the input `cursor`. `classic` preserves the original inline
+`(selected/total) >> query` design. The older `apps_*` TOML and `FSEL_APPS_*` environment names
+remain accepted as compatibility aliases for the neutral `items_*` names.
 
 ### Launch Methods
 ```sh
@@ -662,9 +664,9 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 
 `FSEL_TERMINAL_LAUNCHER`, `FSEL_FILTER_DESKTOP`, `FSEL_LIST_EXECUTABLES_IN_PATH`, `FSEL_HIDE_BEFORE_TYPING`, `FSEL_MATCH_MODE`, `FSEL_RANKING_MODE`, `FSEL_PINNED_ORDER`, `FSEL_SYSTEMD_RUN`, `FSEL_UWSM`, `FSEL_DETACH`, `FSEL_NO_EXEC`, `FSEL_CONFIRM_FIRST_LAUNCH`, `FSEL_PREFIX_DEPTH`
 
-**Default UI / layout (applies when a mode does not override):**
+**Default UI / layout (shared by launcher, dmenu, and cclip):**
 
-`FSEL_HIGHLIGHT_COLOR`, `FSEL_CURSOR`, `FSEL_HARD_STOP`, `FSEL_ROUNDED_BORDERS`, `FSEL_DISABLE_MOUSE`, `FSEL_TITLE_PANEL_HEIGHT_PERCENT`, `FSEL_INPUT_PANEL_HEIGHT`, `FSEL_TITLE_PANEL_POSITION`
+`FSEL_HIGHLIGHT_COLOR`, `FSEL_CURSOR`, `FSEL_HARD_STOP`, `FSEL_ROUNDED_BORDERS`, `FSEL_DISABLE_MOUSE`, `FSEL_MAIN_BORDER_COLOR`, `FSEL_MAIN_BACKGROUND_COLOR`, `FSEL_ITEMS_BORDER_COLOR`, `FSEL_ITEMS_BACKGROUND_COLOR`, `FSEL_ITEMS_SELECTION_BACKGROUND_COLOR`, `FSEL_ITEMS_SELECTION_ROUNDED`, `FSEL_INPUT_BORDER_COLOR`, `FSEL_INPUT_BACKGROUND_COLOR`, `FSEL_MAIN_TEXT_COLOR`, `FSEL_ITEMS_TEXT_COLOR`, `FSEL_INPUT_TEXT_COLOR`, `FSEL_HEADER_TITLE_COLOR`, `FSEL_SHOW_MAIN_BORDER`, `FSEL_SHOW_ITEMS_BORDER`, `FSEL_SHOW_INPUT_BORDER`, `FSEL_SHOW_PANEL_TITLES`, `FSEL_SHOW_INPUT_COUNT`, `FSEL_SHOW_INPUT_PROMPT`, `FSEL_SHOW_SELECTION_MARKER`, `FSEL_SELECTION_MARKER`, `FSEL_INPUT_PANEL_STYLE`, `FSEL_TITLE_PANEL_HEIGHT_PERCENT`, `FSEL_INPUT_PANEL_HEIGHT`, `FSEL_TITLE_PANEL_POSITION`
 
 **`[dmenu]` overrides (`FSEL_DMENU_*`):**
 
@@ -676,7 +678,7 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 
 **`[app_launcher]` overrides (`FSEL_APP_LAUNCHER_*`):**
 
-`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `ICON_MODE`, `ICON_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
+`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `ICON_MODE`, `ICON_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_LIST_VERTICAL_ALIGN_PERCENT`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
 
 Keybinds are not configurable via environment variables; use `~/.config/fsel/keybinds.toml` or the `[keybinds]` section in `config.toml`. When both are present, the embedded `[keybinds]` section takes precedence.
 
@@ -705,8 +707,8 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 ### Field Reference
 
 **Root Level Fields:**
-- Colors: `highlight_color`, `main_border_color`, `main_background_color`, `apps_border_color`, `apps_background_color`, `apps_selection_background_color`, `input_border_color`, `input_background_color`, `main_text_color`, `apps_text_color`, `input_text_color`, `header_title_color`, `pin_color`
-- UI: `cursor`, `selection_marker`, `rounded_borders`, `apps_selection_rounded`, `input_panel_style`, `show_main_border`, `show_apps_border`, `show_input_border`, `show_panel_titles`, `show_input_count`, `show_input_prompt`, `show_selection_marker`, `show_pin_icons`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
+- Colors: `highlight_color`, `main_border_color`, `main_background_color`, `items_border_color`, `items_background_color`, `items_selection_background_color`, `input_border_color`, `input_background_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`, `pin_color`
+- UI: `cursor`, `selection_marker`, `rounded_borders`, `items_selection_rounded`, `input_panel_style`, `show_main_border`, `show_items_border`, `show_input_border`, `show_panel_titles`, `show_input_count`, `show_input_prompt`, `show_selection_marker`, `show_pin_icons`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
 - Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 

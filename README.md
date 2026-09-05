@@ -306,16 +306,16 @@ cursor = "█"
 # App launcher
 terminal_launcher = "alacritty -e"
 
-# Pin/favorite settings (root-level UI options)
+# Shared launcher, dmenu, and cclip visual settings
 pin_color = "rgb(255,165,0)"       # Color for pin icon (orange)
 pin_icon = "📌"                     # Icon for pinned apps
-apps_background_color = "Reset"   # Apps panel background
-apps_selection_background_color = "Reset" # Selected row background
-apps_selection_rounded = false     # Optional half-cell rounded row ends
+items_background_color = "Reset"  # Items panel background
+items_selection_background_color = "Reset" # Selected row background
+items_selection_rounded = false    # Optional half-cell rounded row ends
 main_background_color = "Reset"   # Main info panel background
 input_background_color = "Reset"  # Input panel background
 show_main_border = true
-show_apps_border = true
+show_items_border = true
 show_input_border = true
 show_panel_titles = true
 show_input_count = true
@@ -346,6 +346,9 @@ icon_horizontal_align_percent = 50  # Fine adjustment inside the chosen icon are
 icon_vertical_align_percent = 50    # Fine adjustment inside the preview icon area
 # icon_theme = "Papirus-Dark"       # Optional override; desktop settings are detected by default
 ```
+
+The neutral `items_*` settings theme the launcher results, dmenu choices, and cclip history. The
+older `apps_*` names remain accepted as compatibility aliases.
 
 Desktop icons are resolved from the active XDG icon theme (GTK, KDE, and LXQt settings are
 detected), including inherited themes and

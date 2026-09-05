@@ -27,10 +27,10 @@ hard_stop = false
 # Use rounded corners for panels
 rounded_borders = true
 
-# Panel chrome and row decorations. Set input_panel_height = 0 or
+# Shared launcher, dmenu, and cclip chrome. Set input_panel_height = 0 or
 # title_panel_height_percent = 0 below to hide an entire bar.
 show_main_border = true
-show_apps_border = true
+show_items_border = true
 show_input_border = true
 show_panel_titles = true
 show_input_count = true
@@ -49,16 +49,16 @@ input_panel_style = "classic" # "classic" or the accent-rail "command" layout
 # Border colors for each panel
 main_border_color = "White"      # Border color for the main info panel (top)
 main_background_color = "Reset"  # Main info panel background
-apps_border_color = "White"      # Border color for the apps list panel (middle)
-apps_background_color = "Reset"  # Apps panel background; Reset preserves terminal background
-apps_selection_background_color = "Reset" # Selected app row background
-apps_selection_rounded = false     # Draw selected rows as terminal-cell pills
+items_border_color = "White"     # Border color for the items panel (middle)
+items_background_color = "Reset" # Items panel background; Reset preserves terminal background
+items_selection_background_color = "Reset" # Selected item row background
+items_selection_rounded = false   # Draw selected rows as terminal-cell pills
 input_border_color = "White"     # Border color for the input panel (bottom)
 input_background_color = "Reset" # Input panel background
 
 # Text Colors (non-highlighted text in each panel)
 main_text_color = "White"        # Text color for the main info panel
-apps_text_color = "White"        # Text color for the apps list
+items_text_color = "White"       # Text color for the items list
 input_text_color = "White"       # Text color for the input field
 
 # Pin/Favorite Settings

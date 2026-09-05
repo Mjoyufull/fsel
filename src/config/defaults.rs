@@ -1,3 +1,5 @@
+//! Stable configuration defaults shared with runtime option defaults.
+
 use super::schema::{GeneralConfig, LayoutConfig, UiConfig};
 use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
 use crate::ui::PanelPosition;
@@ -94,7 +96,7 @@ impl Default for UiConfig {
             hard_stop: false,
             rounded_borders: true,
             show_main_border: true,
-            show_apps_border: true,
+            show_items_border: true,
             show_input_border: true,
             show_panel_titles: true,
             show_input_count: true,
@@ -106,14 +108,14 @@ impl Default for UiConfig {
             disable_mouse: false,
             main_border_color: default_white(),
             main_background_color: default_reset(),
-            apps_border_color: default_white(),
-            apps_background_color: default_reset(),
-            apps_selection_background_color: default_reset(),
-            apps_selection_rounded: false,
+            items_border_color: default_white(),
+            items_background_color: default_reset(),
+            items_selection_background_color: default_reset(),
+            items_selection_rounded: false,
             input_border_color: default_white(),
             input_background_color: default_reset(),
             main_text_color: default_white(),
-            apps_text_color: default_white(),
+            items_text_color: default_white(),
             input_text_color: default_white(),
             fancy_mode: false,
             header_title_color: default_white(),

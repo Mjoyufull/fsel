@@ -1,3 +1,5 @@
+//! Conversion from layered configuration into runtime CLI options.
+
 use super::color::string_to_color;
 use super::launch::{set_launch_prefix, set_systemd_run, set_uwsm};
 use super::types::Opts;
@@ -118,7 +120,7 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.hard_stop = fsel_config.ui.hard_stop;
     default.rounded_borders = fsel_config.ui.rounded_borders;
     default.show_main_border = fsel_config.ui.show_main_border;
-    default.show_apps_border = fsel_config.ui.show_apps_border;
+    default.show_items_border = fsel_config.ui.show_items_border;
     default.show_input_border = fsel_config.ui.show_input_border;
     default.show_panel_titles = fsel_config.ui.show_panel_titles;
     default.show_input_count = fsel_config.ui.show_input_count;
@@ -134,16 +136,16 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
     if let Ok(color) = string_to_color(&fsel_config.ui.main_background_color) {
         default.main_background_color = color;
     }
-    if let Ok(color) = string_to_color(&fsel_config.ui.apps_border_color) {
-        default.apps_border_color = color;
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_border_color) {
+        default.items_border_color = color;
     }
-    if let Ok(color) = string_to_color(&fsel_config.ui.apps_background_color) {
-        default.apps_background_color = color;
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_background_color) {
+        default.items_background_color = color;
     }
-    if let Ok(color) = string_to_color(&fsel_config.ui.apps_selection_background_color) {
-        default.apps_selection_background_color = color;
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_selection_background_color) {
+        default.items_selection_background_color = color;
     }
-    default.apps_selection_rounded = fsel_config.ui.apps_selection_rounded;
+    default.items_selection_rounded = fsel_config.ui.items_selection_rounded;
     if let Ok(color) = string_to_color(&fsel_config.ui.input_border_color) {
         default.input_border_color = color;
     }
@@ -153,8 +155,8 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
     if let Ok(color) = string_to_color(&fsel_config.ui.main_text_color) {
         default.main_text_color = color;
     }
-    if let Ok(color) = string_to_color(&fsel_config.ui.apps_text_color) {
-        default.apps_text_color = color;
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_text_color) {
+        default.items_text_color = color;
     }
     if let Ok(color) = string_to_color(&fsel_config.ui.input_text_color) {
         default.input_text_color = color;
