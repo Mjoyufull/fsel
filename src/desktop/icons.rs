@@ -1,3 +1,5 @@
+//! XDG icon-theme resolution with in-process and persistent path caches.
+
 use jwalk::WalkDir;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -86,23 +88,33 @@ impl IconResolver {
             .or_else(|| detect_icon_theme(config_home.as_deref(), home.as_deref(), &config_dirs))
             .unwrap_or_else(|| "hicolor".to_string());
 
-        let persistent_cache = db.and_then(|db| {
-            let cache = crate::core::cache::IconPathCache::new(db).ok()?;
-            Some(PersistentResolverCache {
-                theme_fingerprint: icon_theme_fingerprint(&icon_roots, &theme),
-                cache,
-            })
-        });
-
-        Self {
+        let mut resolver = Self {
             theme,
             size,
             icon_roots,
             pixmap_roots,
             cache: HashMap::new(),
             metadata_cache: RefCell::new(HashMap::new()),
-            persistent_cache,
+            persistent_cache: None,
+        };
+        if let Some(db) = db
+            && let Ok(cache) = crate::core::cache::IconPathCache::new(db)
+        {
+            let themes = resolver.theme_chain();
+            let fingerprint = icon_theme_fingerprint(
+                &resolver.icon_roots,
+                &resolver.pixmap_roots,
+                &themes,
+                &resolver,
+            );
+            let prefix = format!("{fingerprint:016x}:");
+            let _ = cache.retain_generation(&prefix);
+            resolver.persistent_cache = Some(PersistentResolverCache {
+                theme_fingerprint: fingerprint,
+                cache,
+            });
         }
+        resolver
     }
 
     /// Resolve an absolute path or themed icon name to an existing image file.
@@ -134,8 +146,8 @@ impl IconResolver {
         if let (Some(persistent), Some(key)) = (&self.persistent_cache, &persistent_key)
             && let Ok(crate::core::cache::IconPathLookup::Hit(path)) = persistent.cache.get(key)
         {
-            self.cache.insert(cache_key, path.clone());
-            return path;
+            self.cache.insert(cache_key, Some(path.clone()));
+            return Some(path);
         }
 
         let icon_name = strip_icon_extension(icon);
@@ -150,8 +162,10 @@ impl IconResolver {
                     .find_map(|theme| self.find_fallback_in_theme(theme, icon_name, size))
             });
         self.cache.insert(cache_key, resolved.clone());
-        if let (Some(persistent), Some(key)) = (&self.persistent_cache, persistent_key) {
-            let _ = persistent.cache.set(&key, resolved.clone());
+        if let (Some(persistent), Some(key), Some(path)) =
+            (&self.persistent_cache, persistent_key, resolved.as_ref())
+        {
+            let _ = persistent.cache.set(&key, path.clone());
         }
         resolved
     }
@@ -272,29 +286,46 @@ impl IconResolver {
     }
 }
 
-fn icon_theme_fingerprint(icon_roots: &[PathBuf], theme: &str) -> u64 {
+fn icon_theme_fingerprint(
+    icon_roots: &[PathBuf],
+    pixmap_roots: &[PathBuf],
+    themes: &[String],
+    resolver: &IconResolver,
+) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for root in icon_roots.iter().chain(pixmap_roots) {
+        hash_path_metadata(root, &mut hasher);
+    }
     for root in icon_roots {
-        for theme_name in [theme, "hicolor"] {
+        for theme_name in themes {
             let theme_root = root.join(theme_name);
             for path in [
                 theme_root.clone(),
                 theme_root.join("index.theme"),
                 theme_root.join("icon-theme.cache"),
             ] {
-                path.hash(&mut hasher);
-                match std::fs::metadata(&path) {
-                    Ok(metadata) => {
-                        true.hash(&mut hasher);
-                        metadata.len().hash(&mut hasher);
-                        metadata.modified().ok().hash(&mut hasher);
-                    }
-                    Err(_) => false.hash(&mut hasher),
+                hash_path_metadata(&path, &mut hasher);
+            }
+            if let Some(metadata) = resolver.theme_metadata(&theme_root) {
+                for directory in &metadata.directories {
+                    hash_path_metadata(&theme_root.join(&directory.path), &mut hasher);
                 }
             }
         }
     }
     hasher.finish()
+}
+
+fn hash_path_metadata(path: &Path, hasher: &mut impl Hasher) {
+    path.hash(hasher);
+    match std::fs::metadata(path) {
+        Ok(metadata) => {
+            true.hash(hasher);
+            metadata.len().hash(hasher);
+            metadata.modified().ok().hash(hasher);
+        }
+        Err(_) => false.hash(hasher),
+    }
 }
 
 fn collect_named_candidates(
@@ -402,9 +433,10 @@ fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
 
 #[cfg(test)]
 mod tests {
-    use super::IconResolver;
+    use super::{IconResolver, PersistentResolverCache, icon_theme_fingerprint};
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> PathBuf {
@@ -415,6 +447,111 @@ mod tests {
         let path = std::env::temp_dir().join(format!("fsel-icons-{unique}"));
         fs::create_dir_all(&path).expect("temporary icon root should be created");
         path
+    }
+
+    fn resolver_with_cache(root: PathBuf, db: Arc<redb::Database>) -> IconResolver {
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root],
+            pixmap_roots: Vec::new(),
+            cache: Default::default(),
+            metadata_cache: Default::default(),
+            persistent_cache: None,
+        };
+        let themes = resolver.theme_chain();
+        let fingerprint = icon_theme_fingerprint(
+            &resolver.icon_roots,
+            &resolver.pixmap_roots,
+            &themes,
+            &resolver,
+        );
+        resolver.persistent_cache = Some(PersistentResolverCache {
+            cache: crate::core::cache::IconPathCache::new(db)
+                .expect("path cache should initialize"),
+            theme_fingerprint: fingerprint,
+        });
+        resolver
+    }
+
+    #[test]
+    fn persistent_misses_are_revalidated_on_the_next_launch() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("undeclared/apps"))
+            .expect("theme directory should be created");
+        fs::write(theme.join("index.theme"), "[Icon Theme]\n")
+            .expect("theme metadata should be written");
+        let db = Arc::new(
+            redb::Database::create(root.join("cache.redb"))
+                .expect("cache database should be created"),
+        );
+        assert_eq!(
+            resolver_with_cache(root.clone(), Arc::clone(&db)).resolve("editor"),
+            None
+        );
+        let icon = theme.join("undeclared/apps/editor.png");
+        fs::write(&icon, b"icon").expect("new icon should be written");
+
+        assert_eq!(
+            resolver_with_cache(root.clone(), db).resolve("editor"),
+            Some(icon)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inherited_theme_metadata_changes_the_cache_generation() {
+        let root = temp_dir();
+        fs::create_dir_all(root.join("Selected")).expect("selected theme should be created");
+        fs::create_dir_all(root.join("Inherited")).expect("inherited theme should be created");
+        fs::write(
+            root.join("Selected/index.theme"),
+            "[Icon Theme]\nInherits=Inherited\n",
+        )
+        .expect("selected metadata should be written");
+        fs::write(root.join("Inherited/index.theme"), "[Icon Theme]\n")
+            .expect("inherited metadata should be written");
+        let first = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: Default::default(),
+            metadata_cache: Default::default(),
+            persistent_cache: None,
+        };
+        let first_themes = first.theme_chain();
+        let first_fingerprint = icon_theme_fingerprint(
+            &first.icon_roots,
+            &first.pixmap_roots,
+            &first_themes,
+            &first,
+        );
+        fs::write(
+            root.join("Inherited/index.theme"),
+            "[Icon Theme]\nDirectories=64x64/apps\n",
+        )
+        .expect("inherited metadata should change");
+        let second = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: Default::default(),
+            metadata_cache: Default::default(),
+            persistent_cache: None,
+        };
+        let second_themes = second.theme_chain();
+        let second_fingerprint = icon_theme_fingerprint(
+            &second.icon_roots,
+            &second.pixmap_roots,
+            &second_themes,
+            &second,
+        );
+
+        assert_ne!(first_fingerprint, second_fingerprint);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
