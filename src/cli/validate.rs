@@ -3,13 +3,11 @@ use super::launch::active_launch_method_count;
 use super::types::{DesktopIconMode, Opts};
 
 pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<(), CliError> {
-    if default.dmenu_mode {
-        default.panels = crate::ui::PanelSettings::default();
-    }
     default
         .panels
         .validate()
         .map_err(|error| CliError::message(format!("Error: {error}\n")))?;
+    crate::modes::dmenu::panels::validate(&default.dmenu_panels).map_err(CliError::message)?;
     let hidden_commands = usize::from(default.list_hidden)
         + usize::from(default.unhide.is_some())
         + usize::from(default.unhide_all);
