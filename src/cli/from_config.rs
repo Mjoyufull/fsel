@@ -82,6 +82,7 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(icon_position) = fsel_config.app_launcher.icon_position {
         default.desktop_icon_position = icon_position;
     }
+    default.icon_description_position = fsel_config.app_launcher.icon_description_position;
     if let Some(width) = fsel_config.app_launcher.icon_preview_width_percent {
         default.desktop_icon_preview_width_percent = width;
     }
@@ -113,6 +114,13 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
 }
 
 fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
+    default.pinned_text_color = parse_optional_color(fsel_config.ui.pinned_text_color.as_deref());
+    default.pinned_background_color =
+        parse_optional_color(fsel_config.ui.pinned_background_color.as_deref());
+    default.pinned_highlight_color =
+        parse_optional_color(fsel_config.ui.pinned_highlight_color.as_deref());
+    default.pinned_selection_background_color =
+        parse_optional_color(fsel_config.ui.pinned_selection_background_color.as_deref());
     if let Ok(color) = string_to_color(&fsel_config.ui.highlight_color) {
         default.highlight_color = color;
     }
@@ -174,6 +182,7 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
 
 fn apply_layout_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.title_panel_height_percent = fsel_config.layout.title_panel_height_percent;
+    default.panels = fsel_config.panels.clone();
     default.input_panel_height = fsel_config.layout.input_panel_height;
     default.title_panel_position = Some(fsel_config.layout.title_panel_position);
 }

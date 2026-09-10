@@ -6,6 +6,11 @@ use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition};
 /// Command line interface.
 #[derive(Debug)]
 pub struct Opts {
+    pub panels: crate::ui::PanelSettings,
+    pub pinned_text_color: Option<ratatui::style::Color>,
+    pub pinned_background_color: Option<ratatui::style::Color>,
+    pub pinned_highlight_color: Option<ratatui::style::Color>,
+    pub pinned_selection_background_color: Option<ratatui::style::Color>,
     pub highlight_color: ratatui::style::Color,
     pub clear_history: bool,
     pub clear_cache: bool,
@@ -61,6 +66,7 @@ pub struct Opts {
     pub confirm_first_launch: bool,
     pub desktop_icon_mode: DesktopIconMode,
     pub desktop_icon_position: HorizontalPosition,
+    pub icon_description_position: Option<crate::ui::panels::PanelSide>,
     pub desktop_icon_preview_width_percent: u16,
     pub desktop_icon_list_width: u16,
     pub desktop_icon_list_height: u16,
@@ -147,6 +153,11 @@ pub struct Opts {
 impl Default for Opts {
     fn default() -> Self {
         Self {
+            panels: crate::ui::PanelSettings::default(),
+            pinned_text_color: None,
+            pinned_background_color: None,
+            pinned_highlight_color: None,
+            pinned_selection_background_color: None,
             highlight_color: ratatui::style::Color::LightBlue,
             clear_history: false,
             clear_cache: false,
@@ -202,6 +213,7 @@ impl Default for Opts {
             confirm_first_launch: false,
             desktop_icon_mode: DesktopIconMode::Preview,
             desktop_icon_position: HorizontalPosition::Left,
+            icon_description_position: None,
             desktop_icon_preview_width_percent: 40,
             desktop_icon_list_width: 4,
             desktop_icon_list_height: 2,
