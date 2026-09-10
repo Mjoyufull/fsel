@@ -47,6 +47,7 @@ Usage:
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --desktop-icons[=MODE]       Use preview, list, both, or none (default: preview)
 │  ├─ --icon-position <POSITION>   Place the preview left, center, or right
+│  ├─ --icon-description-position <SIDE>  Put description top/bottom/left/right of icon
 │  ├─ --icon-arrow-before          Put the selection arrow before a left list icon
 │  ├─ --icon-list-gap <N>          Add 0-16 columns between each icon and label
 │  ├─ --icon-list-vertical-align <N>  Offset artwork; negatives overflow upward (-100 to 100)
@@ -119,6 +120,7 @@ Usage:
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --desktop-icons[=MODE]       Use preview, list, both, or none (default: preview)
 │  ├─ --icon-position <POSITION>   Put the preview left, center, or right
+│  ├─ --icon-description-position <SIDE>  Put description top/bottom/left/right of icon
 │  ├─ --icon-preview-width <N>     Give the icon 10-90 percent of the title panel
 │  ├─ --icon-list-width <N>        Reserve 1-16 terminal columns for each list icon
 │  ├─ --icon-list-height <N>       Give each icon/list row 1-8 terminal rows

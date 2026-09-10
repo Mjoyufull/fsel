@@ -65,7 +65,34 @@ fn split_icon_preview(
     area: Rect,
     position: crate::ui::HorizontalPosition,
     icon_width_percent: u16,
+    description_position: Option<crate::ui::panels::PanelSide>,
 ) -> (Rect, Option<Rect>) {
+    if let Some(side) = description_position {
+        use crate::ui::panels::PanelSide;
+        let text_first = matches!(side, PanelSide::Top | PanelSide::Left);
+        let direction = if matches!(side, PanelSide::Top | PanelSide::Bottom) {
+            Direction::Vertical
+        } else {
+            Direction::Horizontal
+        };
+        let first_percent = if text_first {
+            100u16.saturating_sub(icon_width_percent)
+        } else {
+            icon_width_percent
+        };
+        let parts = Layout::default()
+            .direction(direction)
+            .constraints([
+                Constraint::Percentage(first_percent),
+                Constraint::Percentage(100u16.saturating_sub(first_percent)),
+            ])
+            .split(area);
+        return if text_first {
+            (parts[1], Some(parts[0]))
+        } else {
+            (parts[0], Some(parts[1]))
+        };
+    }
     if position == crate::ui::HorizontalPosition::Center {
         let icon_width = (u32::from(area.width) * u32::from(icon_width_percent) / 100)
             .min(u32::from(area.width)) as u16;
@@ -103,6 +130,7 @@ pub(crate) fn launcher_preview_icon_area(size: Rect, cli: &crate::cli::Opts) -> 
         panel_inner,
         cli.desktop_icon_position,
         cli.desktop_icon_preview_width_percent,
+        cli.icon_description_position,
     );
     let icon_area = icon_area.inner(Margin {
         horizontal: 1,
@@ -193,6 +221,7 @@ impl UI {
                     inner,
                     cli.desktop_icon_position,
                     cli.desktop_icon_preview_width_percent,
+                    cli.icon_description_position,
                 );
                 let icon_area = icon_area.inner(Margin {
                     horizontal: 1,
@@ -260,8 +289,12 @@ mod tests {
 
     #[test]
     fn icon_preview_can_place_icon_on_the_right() {
-        let (icon, text) =
-            split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Right, 40);
+        let (icon, text) = split_icon_preview(
+            Rect::new(0, 0, 100, 10),
+            HorizontalPosition::Right,
+            40,
+            None,
+        );
 
         assert_eq!(text, Some(Rect::new(0, 0, 60, 10)));
         assert_eq!(icon, Rect::new(60, 0, 40, 10));
@@ -270,7 +303,7 @@ mod tests {
     #[test]
     fn icon_preview_can_swap_to_the_left() {
         let (icon, text) =
-            split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Left, 35);
+            split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Left, 35, None);
 
         assert_eq!(icon, Rect::new(0, 0, 35, 10));
         assert_eq!(text, Some(Rect::new(35, 0, 65, 10)));
@@ -278,8 +311,12 @@ mod tests {
 
     #[test]
     fn icon_preview_can_use_the_center_of_the_title_panel() {
-        let (icon, text) =
-            split_icon_preview(Rect::new(10, 3, 100, 10), HorizontalPosition::Center, 40);
+        let (icon, text) = split_icon_preview(
+            Rect::new(10, 3, 100, 10),
+            HorizontalPosition::Center,
+            40,
+            None,
+        );
 
         assert_eq!(icon, Rect::new(40, 3, 40, 10));
         assert_eq!(text, None);
@@ -287,8 +324,12 @@ mod tests {
 
     #[test]
     fn centered_preview_percentage_does_not_saturate_on_wide_terminals() {
-        let (icon, _) =
-            split_icon_preview(Rect::new(0, 0, 2_000, 10), HorizontalPosition::Center, 40);
+        let (icon, _) = split_icon_preview(
+            Rect::new(0, 0, 2_000, 10),
+            HorizontalPosition::Center,
+            40,
+            None,
+        );
 
         assert_eq!(icon, Rect::new(600, 0, 800, 10));
     }
@@ -306,6 +347,29 @@ mod tests {
             launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &cli),
             Rect::new(0, 0, 37, 8)
         );
+    }
+
+    #[test]
+    fn description_can_stack_on_either_side_without_overlap() {
+        use crate::ui::panels::PanelSide;
+        for side in [
+            PanelSide::Top,
+            PanelSide::Bottom,
+            PanelSide::Left,
+            PanelSide::Right,
+        ] {
+            let area = Rect::new(4, 3, 100, 20);
+            let (icon, text) = split_icon_preview(area, HorizontalPosition::Center, 40, Some(side));
+            let text = text.expect("explicit description placement retains text");
+            assert!(icon.intersection(text).is_empty());
+            assert_eq!(icon.area() + text.area(), area.area());
+            match side {
+                PanelSide::Top => assert_eq!(text.bottom(), icon.y),
+                PanelSide::Bottom => assert_eq!(icon.bottom(), text.y),
+                PanelSide::Left => assert_eq!(text.right(), icon.x),
+                PanelSide::Right => assert_eq!(icon.right(), text.x),
+            }
+        }
     }
 
     #[test]

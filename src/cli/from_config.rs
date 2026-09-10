@@ -82,6 +82,7 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(icon_position) = fsel_config.app_launcher.icon_position {
         default.desktop_icon_position = icon_position;
     }
+    default.icon_description_position = fsel_config.app_launcher.icon_description_position;
     if let Some(width) = fsel_config.app_launcher.icon_preview_width_percent {
         default.desktop_icon_preview_width_percent = width;
     }

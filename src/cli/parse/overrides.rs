@@ -235,6 +235,13 @@ pub(super) fn parse_cli_overrides(
                         .parse()
                         .map_err(CliError::message)?;
             }
+            Long("icon-description-position") => {
+                default.icon_description_position = Some(
+                    value_as_string(parser, "Description position must be valid UTF-8")?
+                        .parse()
+                        .map_err(CliError::message)?,
+                );
+            }
             Long("icon-preview-width") => {
                 default.desktop_icon_preview_width_percent =
                     value_as_string(parser, "Desktop icon preview width must be valid UTF-8")?

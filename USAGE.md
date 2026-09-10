@@ -121,6 +121,14 @@ fsel --icon-theme Papirus-Dark
 fsel --desktop-icons=no
 ```
 
+Use `--icon-description-position bottom` to put the selected icon above its description
+(including verbose details), or choose `top`, `left`, or `right`. This preview-only setting
+overrides the text placement implied by `--icon-position`; list icons are unchanged.
+`--icon-preview-width` controls the icon's percentage along the chosen split axis, so it controls
+height for top/bottom descriptions. Without this option the existing preview layout is unchanged.
+Set `[app_launcher] icon_description_position = "bottom"` in TOML, or
+`FSEL_APP_LAUNCHER_ICON_DESCRIPTION_POSITION=bottom` in the environment.
+
 Persistent configuration belongs in `[app_launcher]`:
 
 ```toml
