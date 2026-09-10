@@ -2,8 +2,8 @@
 //! Each panel reuses the existing preview cancellation and password-isolation boundary.
 
 use super::preview::{PreviewResult, PreviewRuntime};
+use crate::ui::DmenuUI;
 use crate::ui::panels::PanelSide;
-use crate::ui::{DmenuUI, GraphicsAdapter};
 use serde::Deserialize;
 
 /// One named dmenu command panel. At most three supplement the primary preview.
@@ -86,15 +86,15 @@ impl PreviewPanels {
     pub(super) fn new(
         command: Option<String>,
         panels: &[DmenuPanel],
-        adapter: GraphicsAdapter,
+        picker: ratatui_image::picker::Picker,
         expose_query: bool,
     ) -> Self {
         Self {
-            primary: PreviewRuntime::new(command, adapter, expose_query),
+            primary: PreviewRuntime::new(command, picker.clone(), expose_query),
             custom: panels
                 .iter()
                 .map(|panel| {
-                    PreviewRuntime::new(Some(panel.command.clone()), adapter, expose_query)
+                    PreviewRuntime::new(Some(panel.command.clone()), picker.clone(), expose_query)
                 })
                 .collect(),
         }

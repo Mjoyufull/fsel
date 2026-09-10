@@ -4,6 +4,7 @@ mod app_list;
 mod app_ui;
 mod dmenu_ui;
 mod graphics;
+pub(crate) mod graphics_probe;
 mod input;
 mod input_panel;
 mod keybinds;

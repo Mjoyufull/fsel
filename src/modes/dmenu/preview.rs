@@ -8,7 +8,7 @@ mod tests;
 use command::{CommandOutput, run_preview_command};
 use expand::expand_preview_command;
 
-use crate::ui::{DmenuUI, GraphicsAdapter, ImageManager};
+use crate::ui::{DmenuUI, ImageManager};
 use eyre::Result;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -71,14 +71,14 @@ pub(super) enum PreviewResult {
 impl PreviewRuntime {
     pub(super) fn new(
         command_template: Option<String>,
-        adapter: GraphicsAdapter,
+        picker: ratatui_image::picker::Picker,
         expose_query: bool,
     ) -> Self {
         let (result_tx, result_rx) = mpsc::channel(4);
         let (decode_tx, mut decode_rx) = mpsc::channel::<()>(1);
         let decode_request = Arc::new(Mutex::new(None::<DecodeRequest>));
         let worker_request = Arc::clone(&decode_request);
-        let picker = adapter.picker();
+        let image_manager = ImageManager::new(picker.clone());
         let decode_result_tx = result_tx.clone();
         let decode_worker = std::thread::spawn(move || {
             while decode_rx.blocking_recv().is_some() {
@@ -110,7 +110,7 @@ impl PreviewRuntime {
             command_template,
             expose_query,
             content: PreviewContent::Empty,
-            image_manager: ImageManager::new(adapter.picker()),
+            image_manager,
             active_request: None,
             decode_tx: Some(decode_tx),
             decode_request,
