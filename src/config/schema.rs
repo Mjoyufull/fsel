@@ -45,6 +45,7 @@ pub struct AppLauncherConfig {
     pub icon_mode: Option<DesktopIconMode>,
     #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub icon_position: Option<HorizontalPosition>,
+    pub icon_description_position: Option<crate::ui::panels::PanelSide>,
     pub icon_preview_width_percent: Option<u16>,
     pub icon_list_width: Option<u16>,
     pub icon_list_height: Option<u16>,
