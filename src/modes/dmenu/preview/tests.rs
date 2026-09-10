@@ -11,7 +11,7 @@ use tokio::io::AsyncWriteExt;
 async fn pending_replacement_keeps_image_until_current_result_arrives() {
     let mut preview = super::PreviewRuntime::new(
         Some("printf replacement".to_string()),
-        crate::ui::GraphicsAdapter::None,
+        ratatui_image::picker::Picker::halfblocks(),
         true,
     );
     preview.content = PreviewContent::Image("previous".to_string());

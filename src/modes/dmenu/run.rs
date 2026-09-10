@@ -65,13 +65,18 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     crate::ui::terminal::clear_fullscreen(&mut terminal).wrap_err("Failed to clear terminal")?;
 
+    let picker = if options.preview_command.is_some() || !options.custom_panels.is_empty() {
+        crate::ui::graphics_probe::query_terminal(options.graphics_adapter.picker())
+    } else {
+        options.graphics_adapter.picker()
+    };
     let mut input = options.input_config().init_async();
     let mut ui = build_ui(cli, items, options.highlight_color);
     let mut list_state = ListState::default();
     let mut preview = PreviewPanels::new(
         options.preview_command.clone(),
         &options.custom_panels,
-        options.graphics_adapter,
+        picker,
         !options.password_mode,
     );
     preview.request(&ui, &options);
