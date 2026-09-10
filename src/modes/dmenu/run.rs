@@ -12,7 +12,7 @@ use std::io;
 
 use super::events::{LoopOutcome, handle_key_event, handle_mouse_event};
 use super::options::DmenuOptions;
-use super::preview::PreviewRuntime;
+use super::panels::PreviewPanels;
 use super::render::draw_frame;
 
 /// Run dmenu mode
@@ -65,15 +65,21 @@ pub async fn run(cli: &Opts) -> Result<()> {
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
     crate::ui::terminal::clear_fullscreen(&mut terminal).wrap_err("Failed to clear terminal")?;
 
+    let picker = if options.preview_command.is_some() || !options.custom_panels.is_empty() {
+        crate::ui::graphics_probe::query_terminal(options.graphics_adapter.picker())
+    } else {
+        options.graphics_adapter.picker()
+    };
     let mut input = options.input_config().init_async();
     let mut ui = build_ui(cli, items, options.highlight_color);
     let mut list_state = ListState::default();
-    let mut preview = PreviewRuntime::new(
+    let mut preview = PreviewPanels::new(
         options.preview_command.clone(),
-        options.graphics_adapter,
+        &options.custom_panels,
+        picker,
         !options.password_mode,
     );
-    preview.request_if_changed(&ui);
+    preview.request(&ui, &options);
     let mut needs_redraw = true;
 
     let outcome = loop {
@@ -93,8 +99,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
         }
 
         tokio::select! {
-            Some(result) = preview.next_result() => {
-                preview.apply_result(result);
+            (index, Some(result)) = preview.next_result() => {
+                preview.apply_result(index, result);
                 needs_redraw = true;
             }
             maybe_event = input.next() => {
@@ -104,7 +110,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 let event_outcome = match event {
                     Event::Input(key) => {
                         needs_redraw = true;
-                        handle_key_event(&mut ui, key, &options, terminal.size()?.height)
+                        handle_key_event(&mut ui, key, &options, terminal.size()?.into())
                     }
                     Event::Mouse(mouse_event) => {
                         needs_redraw = true;
@@ -112,7 +118,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                             &mut ui,
                             mouse_event,
                             &options,
-                            terminal.size()?.height,
+                            terminal.size()?.into(),
                         )
                     }
                     Event::Render => {
@@ -123,7 +129,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 };
 
                 match event_outcome {
-                    LoopOutcome::Continue => preview.request_if_changed(&ui),
+                    LoopOutcome::Continue => preview.request(&ui, &options),
                     LoopOutcome::Exit => break LoopOutcome::Exit,
                     LoopOutcome::Print(output) => break LoopOutcome::Print(output),
                 }
@@ -131,6 +137,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
         }
     };
 
+    preview.shutdown().await;
     prepare_terminal_for_output(&mut terminal)?;
     crate::ui::terminal::shutdown_terminal(options.disable_mouse)
         .wrap_err("Failed to restore dmenu terminal state")?;
