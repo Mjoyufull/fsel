@@ -290,3 +290,39 @@ fn grid_reserves_separate_artwork_and_label_rows() {
     assert!(icon.intersection(areas.text).is_empty());
     assert_eq!(super::app_row_height(&cli), 4);
 }
+
+#[test]
+fn short_grid_labels_are_centered_but_list_labels_stay_left() {
+    let app = crate::desktop::App::parse(
+        "[Desktop Entry]\nType=Application\nName=Zed\nExec=zed\n",
+        false,
+    )
+    .expect("minimal desktop fixture parses");
+    let state = crate::core::state::State::new(
+        vec![app],
+        Default::default(),
+        Default::default(),
+        0,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
+    for columns in [0, 1] {
+        let cli = Opts {
+            app_grid_columns: columns,
+            app_grid_row_height: 4,
+            show_items_border: false,
+            show_panel_titles: false,
+            show_selection_marker: false,
+            ..Opts::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(21, 4)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                super::render(frame, &state, &cli, frame.area(), None).expect("labels render");
+            })
+            .expect("test frame");
+        let expected = if columns == 0 { (0, 0) } else { (9, 3) };
+        assert_eq!(terminal.backend().buffer()[expected].symbol(), "Z");
+    }
+}

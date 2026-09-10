@@ -111,7 +111,17 @@ pub(super) fn render(
             spans.push(Span::raw(" "));
         }
         spans.push(Span::raw(&app.name));
-        frame.render_widget(Paragraph::new(Line::from(spans)).style(style), areas.text);
+        let alignment = if cli.app_grid_columns > 0 {
+            ratatui::layout::Alignment::Center
+        } else {
+            ratatui::layout::Alignment::Left
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(spans))
+                .style(style)
+                .alignment(alignment),
+            areas.text,
+        );
         if selected && let Some(marker) = areas.selection {
             frame.render_widget(
                 Paragraph::new(format!("{} ", cli.selection_marker)).style(style),
