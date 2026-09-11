@@ -23,11 +23,19 @@ pub(crate) fn launcher_visible_rows(size: Rect, cli: &Opts) -> usize {
 }
 
 pub(crate) fn launcher_result_layout(size: Rect, cli: &Opts) -> super::result_layout::ResultLayout {
-    super::result_layout::ResultLayout::new(
-        launcher_list_content_area(size, cli),
-        app_row_height(cli),
-        &cli.panels,
-    )
+    result_layout(launcher_list_content_area(size, cli), cli)
+}
+
+fn result_layout(area: Rect, cli: &Opts) -> super::result_layout::ResultLayout {
+    if cli.app_grid_columns > 0 {
+        return super::result_layout::ResultLayout::grid(
+            area,
+            app_row_height(cli),
+            cli.app_grid_columns,
+            &cli.panels,
+        );
+    }
+    super::result_layout::ResultLayout::new(area, app_row_height(cli), &cli.panels)
 }
 
 pub(crate) fn launcher_list_content_area(size: Rect, cli: &Opts) -> Rect {
@@ -36,7 +44,9 @@ pub(crate) fn launcher_list_content_area(size: Rect, cli: &Opts) -> Rect {
 }
 
 pub(crate) fn app_row_height(cli: &Opts) -> u16 {
-    if cli.desktop_icon_mode.shows_list() {
+    if cli.app_grid_columns > 0 {
+        cli.app_grid_row_height.max(2)
+    } else if cli.desktop_icon_mode.shows_list() {
         cli.desktop_icon_list_height.max(1)
     } else {
         1
@@ -45,13 +55,12 @@ pub(crate) fn app_row_height(cli: &Opts) -> u16 {
 
 pub(crate) fn launcher_list_icon_area(size: Rect, cli: &Opts) -> Rect {
     let inner = launcher_list_content_area(size, cli);
-    let slot =
-        super::result_layout::ResultLayout::new(inner, app_row_height(cli), &cli.panels).slot(0);
+    let slot = result_layout(inner, cli).slot(0);
     let content = list_content_area(slot, cli);
     let Some(icon_strip) = list_areas(content, cli).icon else {
         return Rect::default();
     };
-    Rect::new(0, 0, icon_strip.width, app_row_height(cli))
+    Rect::new(0, 0, icon_strip.width, icon_strip.height)
 }
 
 pub(super) fn render(
@@ -64,7 +73,7 @@ pub(super) fn render(
     let block = apps_block(cli);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let layout = super::result_layout::ResultLayout::new(inner, app_row_height(cli), &cli.panels);
+    let layout = result_layout(inner, cli);
     let mut render_failed = false;
     for (index, app) in state
         .shown
@@ -101,8 +110,12 @@ pub(super) fn render(
             ));
             spans.push(Span::raw(" "));
         }
-        spans.push(Span::raw(&app.name));
-        frame.render_widget(Paragraph::new(Line::from(spans)).style(style), areas.text);
+        if cli.app_grid_columns > 0 {
+            render_grid_label(frame, areas.text, cli, &app.name, spans, style);
+        } else {
+            spans.push(Span::raw(&app.name));
+            frame.render_widget(Paragraph::new(Line::from(spans)).style(style), areas.text);
+        }
         if selected && let Some(marker) = areas.selection {
             frame.render_widget(
                 Paragraph::new(format!("{} ", cli.selection_marker)).style(style),
@@ -174,6 +187,44 @@ fn row_style(
     )
 }
 
+fn render_grid_label(
+    frame: &mut Frame,
+    area: Rect,
+    cli: &Opts,
+    name: &str,
+    decorations: Vec<Span<'_>>,
+    style: Style,
+) {
+    // Reserve identical side gutters for every cell, regardless of pin/selection state.
+    let pin_width = if cli.show_pin_icons {
+        UnicodeWidthStr::width(cli.pin_icon.as_str()) + 1
+    } else {
+        0
+    };
+    let gutter = (usize::from(marker_gutter_width(cli)) + pin_width)
+        .min(usize::from(area.width.saturating_sub(1) / 2)) as u16;
+    let text = Rect::new(
+        area.x + gutter,
+        area.y,
+        area.width.saturating_sub(gutter * 2),
+        area.height,
+    );
+    frame.render_widget(
+        Paragraph::new(name)
+            .style(style)
+            .alignment(ratatui::layout::Alignment::Center),
+        text,
+    );
+    let name_width = UnicodeWidthStr::width(name).min(usize::from(text.width)) as u16;
+    let name_x = text.x + (text.width - name_width) / 2;
+    frame.render_widget(
+        Paragraph::new(Line::from(decorations))
+            .style(style)
+            .alignment(ratatui::layout::Alignment::Right),
+        Rect::new(area.x, area.y, name_x.saturating_sub(area.x), area.height),
+    );
+}
+
 fn overflow_icon_area(item_area: Rect, top_overflow_rows: u16) -> Rect {
     Rect::new(
         item_area.x,
@@ -225,6 +276,19 @@ fn apps_block(cli: &Opts) -> Block<'static> {
 }
 
 fn list_areas(area: Rect, cli: &Opts) -> ListAreas {
+    if cli.app_grid_columns > 0 && !area.is_empty() {
+        let icon_width = cli.desktop_icon_list_width.min(area.width);
+        return ListAreas {
+            text: Rect::new(area.x, area.bottom() - 1, area.width, 1),
+            icon: cli.desktop_icon_mode.shows_list().then_some(Rect::new(
+                area.x + (area.width - icon_width) / 2,
+                area.y,
+                icon_width,
+                area.height - 1,
+            )),
+            selection: None,
+        };
+    }
     if !cli.desktop_icon_mode.shows_list() || area.width < 4 {
         return ListAreas {
             text: area,

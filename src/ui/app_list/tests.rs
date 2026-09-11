@@ -275,3 +275,90 @@ fn pinned_colors_are_opt_in_and_do_not_change_unpinned_rows() {
         Some(Color::Black)
     );
 }
+#[test]
+fn grid_reserves_separate_artwork_and_label_rows() {
+    let cli = crate::cli::Opts {
+        app_grid_columns: 4,
+        app_grid_row_height: 4,
+        desktop_icon_mode: crate::cli::DesktopIconMode::List,
+        ..crate::cli::Opts::default()
+    };
+    let areas = super::list_areas(Rect::new(2, 5, 20, 4), &cli);
+    assert_eq!(areas.text, Rect::new(2, 8, 20, 1));
+    let icon = areas.icon.expect("list mode should show grid artwork");
+    assert_eq!(icon.height, 3);
+    assert!(icon.intersection(areas.text).is_empty());
+    assert_eq!(super::app_row_height(&cli), 4);
+}
+
+#[test]
+fn short_grid_labels_are_centered_but_list_labels_stay_left() {
+    let app = crate::desktop::App::parse(
+        "[Desktop Entry]\nType=Application\nName=Zed\nExec=zed\n",
+        false,
+    )
+    .expect("minimal desktop fixture parses");
+    let state = crate::core::state::State::new(
+        vec![app],
+        Default::default(),
+        Default::default(),
+        0,
+        Default::default(),
+        Default::default(),
+        Default::default(),
+    );
+    for columns in [0, 1] {
+        let cli = Opts {
+            app_grid_columns: columns,
+            app_grid_row_height: 4,
+            show_items_border: false,
+            show_panel_titles: false,
+            show_selection_marker: false,
+            ..Opts::default()
+        };
+        let mut terminal = Terminal::new(TestBackend::new(21, 4)).expect("test terminal");
+        terminal
+            .draw(|frame| {
+                super::render(frame, &state, &cli, frame.area(), None).expect("labels render");
+            })
+            .expect("test frame");
+        let expected = if columns == 0 { (0, 0) } else { (9, 3) };
+        assert_eq!(terminal.backend().buffer()[expected].symbol(), "Z");
+    }
+}
+
+#[test]
+fn grid_decorations_do_not_shift_or_shorten_names() {
+    use ratatui::{style::Style, text::Span};
+    let cli = Opts {
+        pin_icon: "📌".into(),
+        ..Opts::default()
+    };
+    for name in ["Zed", "A longer application name"] {
+        let mut rendered_names = Vec::new();
+        for prefix in ["", "> ", "📌 ", "> 📌 "] {
+            let mut terminal = Terminal::new(TestBackend::new(21, 1)).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    super::render_grid_label(
+                        frame,
+                        frame.area(),
+                        &cli,
+                        name,
+                        vec![Span::raw(prefix)],
+                        Style::default(),
+                    );
+                })
+                .expect("frame renders");
+            let buffer = terminal.backend().buffer();
+            let start = if name == "Zed" { 9 } else { 5 };
+            assert_eq!(buffer[(start, 0)].symbol(), &name[..1]);
+            rendered_names.push(
+                (start..16)
+                    .map(|x| buffer[(x, 0)].symbol())
+                    .collect::<String>(),
+            );
+        }
+        assert!(rendered_names.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+}
