@@ -66,7 +66,12 @@ pub(super) async fn handle_key_event(
 ) -> Result<EventOutcome> {
     let needs_redraw = true;
 
-    match key_action(&ctx.cli.keybinds, key) {
+    let action = oriented_action(
+        key_action(&ctx.cli.keybinds, key),
+        ctx.options.panels.rotation,
+        matches!(ctx.ui.tag_mode, TagMode::Normal),
+    );
+    match action {
         KeyAction::ImagePreview => {
             ctx.image_runtime
                 .show_fullscreen_preview(ctx.terminal, input)
@@ -134,18 +139,10 @@ pub(super) async fn handle_key_event(
             }
         }
         KeyAction::Down => {
-            if ctx.options.panels.rotation >= 180 {
-                handle_up(ctx)?;
-            } else {
-                handle_down(ctx)?;
-            }
+            handle_down(ctx)?;
         }
         KeyAction::Up => {
-            if ctx.options.panels.rotation >= 180 {
-                handle_down(ctx)?;
-            } else {
-                handle_up(ctx)?;
-            }
+            handle_up(ctx)?;
         }
         KeyAction::Ignore => {}
     }
@@ -154,6 +151,22 @@ pub(super) async fn handle_key_event(
         control: LoopControl::Continue,
         needs_redraw,
     })
+}
+
+fn oriented_action(action: KeyAction, rotation: u16, normal: bool) -> KeyAction {
+    if !normal {
+        return action;
+    }
+    let axis_action = match (rotation, action) {
+        (90 | 270, KeyAction::First) => KeyAction::Up,
+        (90 | 270, KeyAction::Last) => KeyAction::Down,
+        (_, other) => other,
+    };
+    match (rotation >= 180, axis_action) {
+        (true, KeyAction::Down) => KeyAction::Up,
+        (true, KeyAction::Up) => KeyAction::Down,
+        (_, other) => other,
+    }
 }
 
 fn push_char(ui: &mut crate::ui::DmenuUI<'_>, character: char) {
@@ -254,6 +267,22 @@ fn handle_up(ctx: &mut EventContext<'_, '_>) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rotation_only_changes_normal_result_navigation() {
+        use super::{KeyAction, oriented_action};
+        for rotation in [0, 90, 180, 270] {
+            assert_eq!(
+                oriented_action(KeyAction::Down, rotation, false),
+                KeyAction::Down
+            );
+            assert_eq!(
+                oriented_action(KeyAction::Up, rotation, false),
+                KeyAction::Up
+            );
+        }
+        assert_eq!(oriented_action(KeyAction::First, 90, true), KeyAction::Up);
+        assert_eq!(oriented_action(KeyAction::Last, 270, true), KeyAction::Up);
+    }
     use super::{KeyAction, key_action};
     use crate::ui::Keybinds;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

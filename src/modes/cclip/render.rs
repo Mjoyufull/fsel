@@ -19,7 +19,6 @@ pub(super) fn draw(
     ui: &mut DmenuUI<'_>,
     options: &CclipOptions,
     tag_metadata_formatter: &TagMetadataFormatter,
-    list_state: &mut ListState,
     image_runtime: &mut ImageRuntime,
 ) -> Result<usize> {
     set_synchronized_output(options.term_is_foot, true);
@@ -109,7 +108,6 @@ pub(super) fn draw(
                 None
             }
         });
-        list_state.select(visible_selection);
 
         let is_kitty = matches!(options.graphics_adapter, crate::ui::GraphicsAdapter::Kitty);
         if is_kitty || needs_sixel_clear || force_buffer_sync {

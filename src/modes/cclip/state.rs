@@ -159,9 +159,26 @@ impl CclipOptions {
 
     pub(super) fn split_layout(&self, area: Rect) -> crate::ui::PanelLayout {
         if self.panels.enabled() {
+            let side = self
+                .panels
+                .info_position
+                .unwrap_or(crate::ui::panels::PanelSide::Top)
+                .rotated(self.panels.rotation);
+            let axis = if side.horizontal() {
+                area.width
+            } else {
+                area.height
+            };
+            let minimum_percent = 300u32.div_ceil(u32::from(axis.max(1))).min(100) as u16;
+            let fallback_percent = if self.content_panel_height_percent == 0 {
+                0
+            } else {
+                self.content_panel_height_percent
+                    .clamp(minimum_percent, 100)
+            };
             let (info, input, items) = self.panels.split(
                 area,
-                self.content_panel_height_percent,
+                fallback_percent,
                 self.input_panel_height,
                 self.content_panel_position,
             );
