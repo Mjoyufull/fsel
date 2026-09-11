@@ -10,6 +10,16 @@ pub(super) fn expand_preview_command(template: &str) -> Result<String, String> {
     let mut substitutions = Vec::<CommandSubstitution>::new();
 
     while !remaining.is_empty() {
+        if !escaped
+            && quote == ShellQuote::Unquoted
+            && remaining.starts_with('#')
+            && comment_boundary(&command)
+        {
+            let end = remaining.find('\n').unwrap_or(remaining.len());
+            command.push_str(&remaining[..end]);
+            remaining = &remaining[end..];
+            continue;
+        }
         let arithmetic_context = substitutions
             .last()
             .is_some_and(|substitution| substitution.arithmetic);
@@ -184,6 +194,18 @@ pub(super) fn expand_preview_command(template: &str) -> Result<String, String> {
     }
 
     Ok(command)
+}
+
+fn comment_boundary(command: &str) -> bool {
+    let mut previous = command.chars().rev();
+    let Some(character) = previous.next() else {
+        return true;
+    };
+    (character.is_whitespace() || ";|&()".contains(character))
+        && previous
+            .take_while(|c| *c == '\\')
+            .count()
+            .is_multiple_of(2)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

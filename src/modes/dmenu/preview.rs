@@ -318,9 +318,12 @@ impl PreviewRuntime {
         self.decode_tx.take();
         self.result_rx.close();
         if let Some(worker) = self.decode_worker.take() {
-            // Decoding is not interruptible; at most one bounded image remains per panel.
-            let join = tokio::task::spawn_blocking(move || worker.join());
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), join).await;
+            // Native decoding cannot be interrupted. Never join it on Tokio's blocking pool:
+            // dropping the runtime would wait for that task even after an async timeout.
+            // The closed channels stop the worker after its one bounded in-flight decode.
+            if worker.is_finished() {
+                let _ = worker.join();
+            }
         }
     }
 }

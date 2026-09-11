@@ -51,12 +51,13 @@ pub async fn run(cli: &Opts) -> Result<()> {
         cli.dmenu_with_nth.as_ref(),
     );
 
-    let options = DmenuOptions::from_cli(cli);
+    let mut options = DmenuOptions::from_cli(cli);
     crate::ui::terminal::setup_terminal(options.disable_mouse)?;
     let terminal_active = Cell::new(true);
+    let disable_mouse = options.disable_mouse;
     defer! {
         if terminal_active.get() {
-            let _ = crate::ui::terminal::shutdown_terminal(options.disable_mouse);
+            let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
         }
     }
 
@@ -70,6 +71,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     } else {
         options.graphics_adapter.picker()
     };
+    options.graphics_adapter = crate::ui::GraphicsAdapter::detect(Some(&picker));
     let mut input = options.input_config().init_async();
     let mut ui = build_ui(cli, items, options.highlight_color);
     let mut list_state = ListState::default();
@@ -137,7 +139,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
         }
     };
 
-    preview.shutdown().await;
     prepare_terminal_for_output(&mut terminal)?;
     crate::ui::terminal::shutdown_terminal(options.disable_mouse)
         .wrap_err("Failed to restore dmenu terminal state")?;
@@ -146,6 +147,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     if let LoopOutcome::Print(output) = outcome {
         println!("{output}");
     }
+    preview.shutdown().await;
     Ok(())
 }
 
