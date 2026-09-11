@@ -326,3 +326,39 @@ fn short_grid_labels_are_centered_but_list_labels_stay_left() {
         assert_eq!(terminal.backend().buffer()[expected].symbol(), "Z");
     }
 }
+
+#[test]
+fn grid_decorations_do_not_shift_or_shorten_names() {
+    use ratatui::{style::Style, text::Span};
+    let cli = Opts {
+        pin_icon: "📌".into(),
+        ..Opts::default()
+    };
+    for name in ["Zed", "A longer application name"] {
+        let mut rendered_names = Vec::new();
+        for prefix in ["", "> ", "📌 ", "> 📌 "] {
+            let mut terminal = Terminal::new(TestBackend::new(21, 1)).expect("test terminal");
+            terminal
+                .draw(|frame| {
+                    super::render_grid_label(
+                        frame,
+                        frame.area(),
+                        &cli,
+                        name,
+                        vec![Span::raw(prefix)],
+                        Style::default(),
+                    );
+                })
+                .expect("frame renders");
+            let buffer = terminal.backend().buffer();
+            let start = if name == "Zed" { 9 } else { 5 };
+            assert_eq!(buffer[(start, 0)].symbol(), &name[..1]);
+            rendered_names.push(
+                (start..16)
+                    .map(|x| buffer[(x, 0)].symbol())
+                    .collect::<String>(),
+            );
+        }
+        assert!(rendered_names.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+}
