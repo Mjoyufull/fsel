@@ -29,10 +29,22 @@ pub(crate) fn launcher_result_layout(size: Rect, cli: &Opts) -> ResultLayout {
 
 fn result_layout(area: Rect, cli: &Opts) -> super::result_layout::ResultLayout {
     if cli.app_grid_columns > 0 {
+        let pin_width = if cli.show_pin_icons {
+            UnicodeWidthStr::width(cli.pin_icon.as_str()).saturating_add(1)
+        } else {
+            0
+        };
+        let minimum_width = (usize::from(marker_gutter_width(cli)) + pin_width)
+            .saturating_mul(2)
+            .saturating_add(8)
+            .min(usize::from(u16::MAX)) as u16;
+        let columns = cli
+            .app_grid_columns
+            .min((area.width / minimum_width).max(1));
         return super::result_layout::ResultLayout::grid(
             area,
             app_row_height(cli),
-            cli.app_grid_columns,
+            columns,
             &cli.panels,
         );
     }
