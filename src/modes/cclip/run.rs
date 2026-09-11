@@ -5,7 +5,6 @@ use crate::ui::DmenuUI;
 use eyre::{Result, WrapErr};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::widgets::ListState;
 use scopeguard::defer;
 use std::io;
 
@@ -63,7 +62,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     let mut image_runtime = super::image::ImageRuntime::new(&options, &mut ui).await;
     options.set_graphics_adapter(image_runtime.detected_adapter());
-    let mut list_state = ListState::default();
     let mut max_visible = 0usize;
     let mut needs_redraw = true;
 
@@ -75,7 +73,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
             &mut ui,
             &options,
             &tag_metadata_formatter,
-            &mut list_state,
             &mut image_runtime,
         )?;
         needs_redraw = false;
@@ -96,7 +93,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 &mut ui,
                 &options,
                 &tag_metadata_formatter,
-                &mut list_state,
                 &mut image_runtime,
             )?;
         }

@@ -129,9 +129,9 @@ impl PanelSettings {
         } else {
             area.height
         };
-        let info_cells = ((u32::from(total) * u32::from(self.info_size.unwrap_or(info_percent))
-            + 50)
-            / 100) as u16;
+        let info_cells =
+            ((u32::from(total) * u32::from(self.info_size.unwrap_or(info_percent).min(100)) + 50)
+                / 100) as u16;
         let (info, remaining) = dock(area, info_side, info_cells);
         let (input, items) = dock(
             remaining,
@@ -142,14 +142,14 @@ impl PanelSettings {
     }
 }
 
-/// Reserve an edge while retaining at least one cell for results when possible.
+/// Reserve an edge while retaining space for a bordered result cell when possible.
 pub(crate) fn dock(area: Rect, side: PanelSide, cells: u16) -> (Rect, Rect) {
     let total = if side.horizontal() {
         area.width
     } else {
         area.height
     };
-    let length = cells.min(total.saturating_sub(1));
+    let length = cells.min(total.saturating_sub(3));
     let before = matches!(side, PanelSide::Top | PanelSide::Left);
     let constraints = if before {
         [Constraint::Length(length), Constraint::Min(0)]
@@ -172,6 +172,22 @@ pub(crate) fn dock(area: Rect, side: PanelSide, cells: u16) -> (Rect, Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oversized_panels_leave_a_bordered_result_cell() {
+        let settings = PanelSettings {
+            input_size: Some(u16::MAX),
+            ..Default::default()
+        };
+        let (_, _, items) = settings.split(
+            Rect::new(0, 0, 80, 40),
+            u16::MAX,
+            3,
+            super::super::PanelPosition::Top,
+        );
+        assert!(items.height >= 3);
+        assert!(items.width >= 3);
+    }
 
     #[test]
     fn docked_panels_do_not_overlap_results_at_any_rotation() {
