@@ -362,3 +362,17 @@ fn grid_decorations_do_not_shift_or_shorten_names() {
         assert!(rendered_names.windows(2).all(|pair| pair[0] == pair[1]));
     }
 }
+
+#[test]
+fn dense_grids_keep_room_for_names_and_decorations() {
+    let cli = Opts {
+        app_grid_columns: 10,
+        ..Opts::default()
+    };
+    let layout = super::result_layout(Rect::new(0, 0, 80, 20), &cli);
+    let slot = layout.slot(0);
+    let decoration_width = super::marker_gutter_width(&cli)
+        + unicode_width::UnicodeWidthStr::width(cli.pin_icon.as_str()) as u16
+        + 1;
+    assert!(slot.width >= decoration_width * 2 + 8);
+}

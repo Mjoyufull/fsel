@@ -234,17 +234,12 @@ fn grid_neighbor(
     if hard_stop {
         return selected;
     }
-    let step = step % len;
+    let step = step.max(1);
+    let axis_start = selected % step;
     if backwards {
-        if step > selected {
-            len - (step - selected)
-        } else {
-            selected - step
-        }
-    } else if step >= len - selected {
-        step - (len - selected)
+        axis_start + ((len - 1 - axis_start) / step) * step
     } else {
-        selected + step
+        axis_start
     }
 }
 
@@ -349,8 +344,8 @@ mod grid_tests {
     fn grid_navigation_steps_by_row_and_respects_hard_stop() {
         assert_eq!(super::grid_neighbor(2, 11, 4, false, false), 6);
         assert_eq!(super::grid_neighbor(2, 11, 4, true, true), 2);
-        assert_eq!(super::grid_neighbor(2, 11, 4, true, false), 9);
-        assert_eq!(super::grid_neighbor(9, 11, 4, false, false), 2);
+        assert_eq!(super::grid_neighbor(2, 11, 4, true, false), 10);
+        assert_eq!(super::grid_neighbor(9, 11, 4, false, false), 1);
         assert_eq!(super::grid_neighbor(9, 11, 4, false, true), 9);
     }
 }
