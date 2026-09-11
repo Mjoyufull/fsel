@@ -110,18 +110,12 @@ pub(super) fn render(
             ));
             spans.push(Span::raw(" "));
         }
-        spans.push(Span::raw(&app.name));
-        let alignment = if cli.app_grid_columns > 0 {
-            ratatui::layout::Alignment::Center
+        if cli.app_grid_columns > 0 {
+            render_grid_label(frame, areas.text, cli, &app.name, spans, style);
         } else {
-            ratatui::layout::Alignment::Left
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(spans))
-                .style(style)
-                .alignment(alignment),
-            areas.text,
-        );
+            spans.push(Span::raw(&app.name));
+            frame.render_widget(Paragraph::new(Line::from(spans)).style(style), areas.text);
+        }
         if selected && let Some(marker) = areas.selection {
             frame.render_widget(
                 Paragraph::new(format!("{} ", cli.selection_marker)).style(style),
@@ -191,6 +185,44 @@ fn row_style(
         background,
         selection,
     )
+}
+
+fn render_grid_label(
+    frame: &mut Frame,
+    area: Rect,
+    cli: &Opts,
+    name: &str,
+    decorations: Vec<Span<'_>>,
+    style: Style,
+) {
+    // Reserve identical side gutters for every cell, regardless of pin/selection state.
+    let pin_width = if cli.show_pin_icons {
+        UnicodeWidthStr::width(cli.pin_icon.as_str()) + 1
+    } else {
+        0
+    };
+    let gutter = (usize::from(marker_gutter_width(cli)) + pin_width)
+        .min(usize::from(area.width.saturating_sub(1) / 2)) as u16;
+    let text = Rect::new(
+        area.x + gutter,
+        area.y,
+        area.width.saturating_sub(gutter * 2),
+        area.height,
+    );
+    frame.render_widget(
+        Paragraph::new(name)
+            .style(style)
+            .alignment(ratatui::layout::Alignment::Center),
+        text,
+    );
+    let name_width = UnicodeWidthStr::width(name).min(usize::from(text.width)) as u16;
+    let name_x = text.x + (text.width - name_width) / 2;
+    frame.render_widget(
+        Paragraph::new(Line::from(decorations))
+            .style(style)
+            .alignment(ratatui::layout::Alignment::Right),
+        Rect::new(area.x, area.y, name_x.saturating_sub(area.x), area.height),
+    );
 }
 
 fn overflow_icon_area(item_area: Rect, top_overflow_rows: u16) -> Rect {
