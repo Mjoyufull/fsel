@@ -80,6 +80,42 @@ fn heredoc_preview_commands_are_rejected() {
 }
 
 #[test]
+fn shell_comments_do_not_change_placeholder_quote_state() {
+    let command = expand_preview_command("# << ' ignored\nprintf '%s' {} # {q}\n")
+        .expect("comments are not heredocs or quotes");
+    assert!(command.contains("# << ' ignored"));
+    assert!(command.contains("FSEL_PREVIEW_ITEM"));
+    assert!(command.ends_with("# {q}\n"));
+    assert!(expand_preview_command("printf '%s' '# <<'").is_ok());
+    assert!(
+        expand_preview_command(r"printf '%s' escaped\ #{}")
+            .expect("escaped space does not start a comment")
+            .contains("FSEL_PREVIEW_ITEM")
+    );
+}
+
+#[tokio::test]
+async fn decoder_shutdown_does_not_wait_for_uninterruptible_work() {
+    let mut runtime =
+        super::PreviewRuntime::new(None, ratatui_image::picker::Picker::halfblocks(), true);
+    let (release, wait) = std::sync::mpsc::channel();
+    let original = runtime.decode_worker.take();
+    runtime.decode_worker = Some(std::thread::spawn(move || {
+        let _ = wait.recv();
+    }));
+    let result =
+        tokio::time::timeout(std::time::Duration::from_millis(100), runtime.shutdown()).await;
+    let _ = release.send(());
+    assert!(
+        result.is_ok(),
+        "shutdown must not join an active native decoder"
+    );
+    if let Some(worker) = original {
+        let _ = worker.join();
+    }
+}
+
+#[test]
 fn quoted_shift_operators_are_not_treated_as_heredocs() {
     let command = expand_preview_command("python -c 'print(1 << 8)' {}")
         .expect("quoted shift operators are ordinary command data");

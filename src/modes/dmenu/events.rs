@@ -178,8 +178,13 @@ pub(super) fn handle_mouse_event(
         }
         _ => {}
     }
-    if !ui.shown.is_empty() {
-        ui.selected = Some((ui.scroll_offset + relative).min(ui.shown.len() - 1));
+    if matches!(
+        mouse_event.kind,
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+    ) && ui.scroll_offset + relative < ui.shown.len()
+    {
+        ui.selected = Some(ui.scroll_offset + relative);
+        ui.info(options.highlight_color);
     }
     LoopOutcome::Continue
 }
@@ -269,6 +274,36 @@ fn move_selection(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_slots_and_right_clicks_do_not_change_selection() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut ui = crate::ui::DmenuUI::new(
+            vec![
+                crate::common::Item::new_simple("a".into(), "a".into(), 0),
+                crate::common::Item::new_simple("b".into(), "b".into(), 1),
+            ],
+            false,
+            false,
+        );
+        ui.selected = Some(0);
+        let options = super::DmenuOptions::from_cli(&crate::cli::Opts::default());
+        let area = ratatui::layout::Rect::new(0, 0, 80, 40);
+        let geometry = options.result_layout(area);
+        for (kind, slot) in [
+            (MouseEventKind::Moved, 3),
+            (MouseEventKind::Down(MouseButton::Right), 1),
+        ] {
+            let rect = geometry.slot(slot);
+            let event = MouseEvent {
+                kind,
+                column: rect.x,
+                row: rect.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            };
+            super::handle_mouse_event(&mut ui, event, &options, area);
+            assert_eq!(ui.selected, Some(0));
+        }
+    }
     use crate::cli::Opts;
     use crate::common::Item;
     use crate::ui::{DmenuUI, Keybinds};
