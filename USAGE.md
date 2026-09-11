@@ -686,7 +686,7 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 
 **`[app_launcher]` overrides (`FSEL_APP_LAUNCHER_*`):**
 
-`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `ICON_MODE`, `ICON_POSITION`, `ICON_DESCRIPTION_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_LIST_VERTICAL_ALIGN_PERCENT`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
+`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `GRID_COLUMNS`, `GRID_ROW_HEIGHT`, `ICON_MODE`, `ICON_POSITION`, `ICON_DESCRIPTION_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_LIST_VERTICAL_ALIGN_PERCENT`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
 
 Keybinds are not configurable via environment variables; use `~/.config/fsel/keybinds.toml` or the `[keybinds]` section in `config.toml`. When both are present, the embedded `[keybinds]` section takes precedence.
 
@@ -721,7 +721,7 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`, `icon_mode`, `icon_position`, `icon_description_position`, `icon_preview_width_percent`, `icon_list_width`, `icon_list_height`, `icon_list_gap`, `icon_list_vertical_align_percent`, `icon_arrow_before`, `icon_size`, `icon_horizontal_align_percent`, `icon_vertical_align_percent`, `icon_theme`
+- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`, `grid_columns`, `grid_row_height`, `icon_mode`, `icon_position`, `icon_description_position`, `icon_preview_width_percent`, `icon_list_width`, `icon_list_height`, `icon_list_gap`, `icon_list_vertical_align_percent`, `icon_arrow_before`, `icon_size`, `icon_horizontal_align_percent`, `icon_vertical_align_percent`, `icon_theme`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`

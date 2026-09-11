@@ -10,9 +10,9 @@ Usage:
 │  ├─ --info-size <PERCENT>        Information panel share, 0-90
 │  ├─ --input-size <CELLS>         Input thickness in rows or columns
 │  ├─ --layout-rotation <DEGREES>  Rotate layout: 0, 90, 180, 270
-│  └─ --item-width <COLUMNS>       Horizontal result width (default 24)
-│     --app-grid <COLUMNS>        Opt-in app grid, 0 disables (maximum 64)
-│     --grid-row-height <ROWS>    Grid cell height, 2-16 (default 4)
+│  ├─ --item-width <COLUMNS>       Horizontal result width (default 24)
+│  ├─ --app-grid <COLUMNS>         Opt-in app grid, 0 disables (maximum 64)
+│  └─ --grid-row-height <ROWS>     Grid cell height, 2-16 (default 4)
 │
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately; exact mode refuses near matches
@@ -85,7 +85,9 @@ Usage:
 │  ├─ --info-size <PERCENT>        Information panel share, 0-90
 │  ├─ --input-size <CELLS>         Input thickness in rows or columns
 │  ├─ --layout-rotation <DEGREES>  Rotate layout: 0, 90, 180, 270
-│  └─ --item-width <COLUMNS>       Horizontal result width (default 24)
+│  ├─ --item-width <COLUMNS>       Horizontal result width (default 24)
+│  ├─ --app-grid <COLUMNS>         Opt-in app grid, 0 disables (maximum 64)
+│  └─ --grid-row-height <ROWS>     Grid cell height, 2-16 (default 4)
 │
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately; exact mode requires an exact hit
