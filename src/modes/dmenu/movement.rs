@@ -64,8 +64,8 @@ impl PanelEditor {
                     KeyCode::Right => self.dock(options, PanelSide::Right),
                     KeyCode::Up => self.dock(options, PanelSide::Top),
                     KeyCode::Down => self.dock(options, PanelSide::Bottom),
-                    KeyCode::Char('+') | KeyCode::Char('=') => self.resize(options, true),
-                    KeyCode::Char('-') => self.resize(options, false),
+                    KeyCode::Char('+') | KeyCode::Char('=') => self.resize(options, true, area),
+                    KeyCode::Char('-') => self.resize(options, false, area),
                     _ => {}
                 }
                 true
@@ -97,8 +97,8 @@ impl PanelEditor {
                             ),
                         );
                     }
-                    MouseEventKind::ScrollUp => self.resize(options, true),
-                    MouseEventKind::ScrollDown => self.resize(options, false),
+                    MouseEventKind::ScrollUp => self.resize(options, true, area),
+                    MouseEventKind::ScrollDown => self.resize(options, false, area),
                     _ => {}
                 }
                 true
@@ -120,7 +120,36 @@ impl PanelEditor {
         }
     }
 
-    fn resize(&self, options: &mut DmenuOptions, grow: bool) {
+    fn resize(&self, options: &mut DmenuOptions, grow: bool, area: Rect) {
+        let layout = options.split_layout(area);
+        let input = layout.chunks[layout.input_panel_index];
+        let items = layout.chunks[layout.items_panel_index];
+        let horizontal = options
+            .panels
+            .input_position
+            .unwrap_or(PanelSide::Bottom)
+            .rotated(options.panels.rotation)
+            .horizontal();
+        let input_maximum = if horizontal {
+            input.width.saturating_add(items.width).saturating_sub(3)
+        } else {
+            input.height.saturating_add(items.height).saturating_sub(3)
+        };
+        if !options.panels.enabled() {
+            match self.focused {
+                0 => {
+                    options.content_panel_height_percent =
+                        resized(options.content_panel_height_percent, grow, 5, 90);
+                    return;
+                }
+                1 => {
+                    options.input_panel_height =
+                        resized(options.input_panel_height, grow, 1, input_maximum);
+                    return;
+                }
+                _ => {}
+            }
+        }
         let (value, step, maximum) = match self.focused {
             0 => (
                 options
@@ -136,7 +165,7 @@ impl PanelEditor {
                     .input_size
                     .get_or_insert(options.input_panel_height),
                 1,
-                u16::MAX,
+                input_maximum,
             ),
             index => {
                 let Some(panel) = options.custom_panels.get_mut(index - 2) else {
@@ -145,11 +174,7 @@ impl PanelEditor {
                 (&mut panel.size, 5, 90)
             }
         };
-        *value = if grow {
-            value.saturating_add(step).min(maximum)
-        } else {
-            value.saturating_sub(step)
-        };
+        *value = resized(*value, grow, step, maximum);
     }
 
     pub(super) fn render(&self, frame: &mut Frame, options: &DmenuOptions) {
@@ -177,6 +202,15 @@ impl PanelEditor {
             ),
             area,
         );
+    }
+}
+
+fn resized(value: u16, grow: bool, step: u16, maximum: u16) -> u16 {
+    let bounded = value.min(maximum);
+    if grow {
+        bounded.saturating_add(step).min(maximum)
+    } else {
+        bounded.saturating_sub(step)
     }
 }
 
@@ -215,11 +249,11 @@ mod tests {
             PanelSide::Left
         );
         for _ in 0..30 {
-            editor.resize(&mut options, true);
+            editor.resize(&mut options, true, area);
         }
         assert_eq!(options.panels.info_size, Some(90));
         for _ in 0..30 {
-            editor.resize(&mut options, false);
+            editor.resize(&mut options, false, area);
         }
         assert_eq!(options.panels.info_size, Some(0));
         assert!(editor.handle(
@@ -228,5 +262,30 @@ mod tests {
             area
         ));
         assert!(!editor.active);
+    }
+
+    #[test]
+    fn size_only_edits_preserve_middle_order_and_shrink_immediately() {
+        let area = Rect::new(0, 0, 80, 40);
+        let mut options = DmenuOptions::from_cli(&crate::cli::Opts::default());
+        options.content_panel_position = crate::ui::PanelPosition::Middle;
+        let editor = PanelEditor {
+            enabled: true,
+            active: true,
+            focused: 1,
+            dragging: false,
+        };
+        for _ in 0..100 {
+            editor.resize(&mut options, true, area);
+        }
+        assert!(!options.panels.enabled());
+        let before = options.input_panel_height;
+        editor.resize(&mut options, false, area);
+        assert_eq!(options.input_panel_height, before - 1);
+        assert_eq!(
+            options.content_panel_position,
+            crate::ui::PanelPosition::Middle
+        );
+        assert_eq!(resized(100, false, 1, 37), 36);
     }
 }
