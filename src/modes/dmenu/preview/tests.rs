@@ -95,6 +95,25 @@ fn shell_comments_do_not_change_placeholder_quote_state() {
 }
 
 #[tokio::test]
+async fn decoder_starts_only_once_when_image_work_is_needed() {
+    let mut runtime = super::PreviewRuntime::new(
+        Some("cat {}".to_string()),
+        ratatui_image::picker::Picker::halfblocks(),
+        true,
+    );
+    assert!(runtime.decode_worker.is_none());
+    assert!(runtime.decode_tx.is_none());
+    runtime.start_decoder();
+    let worker = runtime.decode_worker.as_ref().unwrap().thread().id();
+    runtime.start_decoder();
+    assert_eq!(
+        runtime.decode_worker.as_ref().unwrap().thread().id(),
+        worker
+    );
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn decoder_shutdown_does_not_wait_for_uninterruptible_work() {
     let mut runtime =
         super::PreviewRuntime::new(None, ratatui_image::picker::Picker::halfblocks(), true);

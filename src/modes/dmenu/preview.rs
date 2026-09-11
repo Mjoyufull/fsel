@@ -29,6 +29,7 @@ pub(super) struct PreviewRuntime {
     decode_tx: Option<mpsc::Sender<()>>,
     decode_request: Arc<Mutex<Option<DecodeRequest>>>,
     decode_worker: Option<std::thread::JoinHandle<()>>,
+    decode_picker: Option<ratatui_image::picker::Picker>,
     current_signature: Option<PreviewSignature>,
     generation: u64,
     result_tx: mpsc::Sender<PreviewResult>,
@@ -75,11 +76,32 @@ impl PreviewRuntime {
         expose_query: bool,
     ) -> Self {
         let (result_tx, result_rx) = mpsc::channel(4);
-        let (decode_tx, mut decode_rx) = mpsc::channel::<()>(1);
-        let decode_request = Arc::new(Mutex::new(None::<DecodeRequest>));
-        let worker_request = Arc::clone(&decode_request);
+        let decode_request = Arc::new(Mutex::new(None));
         let image_manager = ImageManager::new(picker.clone());
-        let decode_result_tx = result_tx.clone();
+        Self {
+            command_template,
+            expose_query,
+            content: PreviewContent::Empty,
+            image_manager,
+            active_request: None,
+            decode_tx: None,
+            decode_request,
+            decode_worker: None,
+            decode_picker: Some(picker),
+            current_signature: None,
+            generation: 0,
+            result_tx,
+            result_rx,
+        }
+    }
+
+    fn start_decoder(&mut self) {
+        let Some(picker) = self.decode_picker.take() else {
+            return;
+        };
+        let (decode_tx, mut decode_rx) = mpsc::channel::<()>(1);
+        let worker_request = Arc::clone(&self.decode_request);
+        let decode_result_tx = self.result_tx.clone();
         let decode_worker = std::thread::spawn(move || {
             while decode_rx.blocking_recv().is_some() {
                 while decode_rx.try_recv().is_ok() {}
@@ -106,20 +128,8 @@ impl PreviewRuntime {
                 }
             }
         });
-        Self {
-            command_template,
-            expose_query,
-            content: PreviewContent::Empty,
-            image_manager,
-            active_request: None,
-            decode_tx: Some(decode_tx),
-            decode_request,
-            decode_worker: Some(decode_worker),
-            current_signature: None,
-            generation: 0,
-            result_tx,
-            result_rx,
-        }
+        self.decode_tx = Some(decode_tx);
+        self.decode_worker = Some(decode_worker);
     }
 
     pub(super) fn is_enabled(&self) -> bool {
@@ -240,6 +250,7 @@ impl PreviewRuntime {
             return;
         }
         if ImageManager::recognizes_image_bytes(&output.stdout) {
+            self.start_decoder();
             let request = DecodeRequest {
                 generation,
                 key: image_key,
