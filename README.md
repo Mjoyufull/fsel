@@ -186,6 +186,9 @@ fsel -p firefox
 - **Optional Deduplication**: Enable deterministic XDG-aware duplicate suppression when wanted
 - **Match Modes**: Fuzzy (default) or exact matching
 
+Use `fsel --detach --persistent` to launch several applications from the same session without
+losing your query or selection.
+
 See [USAGE.md - App Launcher](./USAGE.md#app-launcher) for TTY mode, launch prefixes, `--detach`, cache management, `--replace`, and more.
 
 Hidden entries are stored in fsel's database; their `.desktop` files and executables are not changed.
