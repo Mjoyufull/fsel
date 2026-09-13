@@ -23,6 +23,7 @@ Usage:
 │  ├─ -c, --config <FILE>          Read config from FILE instead of ~/.config/fsel/config.toml
 │  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
 │  ├─ -d, --detach                 Start launched apps without keeping this terminal attached
+│  ├─ --persistent                 Keep the detached launcher open after selection
 │  ├─ -t, --tty                    Run terminal apps in this TTY instead of a terminal launcher
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging and imply maximum verbosity
@@ -98,6 +99,7 @@ Usage:
 │  ├─ -c, --config <FILE>          Read config from FILE before applying CLI overrides
 │  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
 │  ├─ -d, --detach                 Start launched GUI apps without keeping this terminal attached
+│  ├─ --persistent                 Keep the detached launcher open after selection
 │  ├─ -t, --tty                    Run terminal apps in this TTY and replace the fsel process
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging, write logs under ~/.config/fsel/logs/, and imply -vvv
@@ -195,6 +197,7 @@ Quick help:
   --no-exec              Print the selected item instead of launching it
   -r, --replace          Replace an existing fsel/cclip instance
   -d, --detach           Start launched apps without keeping the terminal attached
+      --persistent       Keep the detached launcher open after selection
   -v, --verbose          Print more diagnostics; repeat as -vv or -vvv
   -h                     Show the short summary
   -H, --help             Show the full option tree

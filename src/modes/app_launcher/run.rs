@@ -151,8 +151,10 @@ pub async fn run(cli: Opts) -> Result<()> {
     }
     .init_async();
     let mut needs_redraw = true;
+    let mut persistent = super::persistent::PersistentSession::default();
 
     loop {
+        persistent.reap();
         if needs_redraw {
             let mut render_result = Ok((false, false));
             terminal.draw(|frame| {
@@ -205,6 +207,11 @@ pub async fn run(cli: Opts) -> Result<()> {
         }
 
         if state.should_launch {
+            if cli.persistent {
+                persistent.launch(&mut state, &cli, &db);
+                needs_redraw = true;
+                continue;
+            }
             if let Some(selected_idx) = state.selected
                 && let Some(app) = state.shown.get(selected_idx)
             {
