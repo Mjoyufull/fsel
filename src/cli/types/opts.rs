@@ -35,6 +35,7 @@ pub struct Opts {
     pub systemd_run: bool,
     pub uwsm: bool,
     pub detach: bool,
+    /// Keep the detached interactive launcher open after each selection.
     pub persistent: bool,
     pub rounded_borders: bool,
     pub show_main_border: bool,

@@ -22,12 +22,25 @@ impl PersistentSession {
         let Some(app) = state.selected.and_then(|index| state.shown.get(index)) else {
             return;
         };
+        let name = app.name.clone();
         let message = match super::launch::spawn_app(app, cli) {
             Ok(child) => {
                 self.children.push(child);
-                match record_launch(db, &app.name) {
-                    Ok(()) => format!("Launched {}", app.name),
-                    Err(error) => format!("Launched {}; could not save history: {error}", app.name),
+                match record_launch(db, &name) {
+                    Ok(count) => {
+                        let message = match crate::core::database::record_access(db, &name) {
+                            Ok(()) => {
+                                state.frecency_data = crate::core::database::load_frecency(db);
+                                format!("Launched {name}")
+                            }
+                            Err(error) => format!(
+                                "Launched {name}; history saved, but could not update frecency: {error}"
+                            ),
+                        };
+                        state.update_launch_metadata(&name, count);
+                        message
+                    }
+                    Err(error) => format!("Launched {name}; could not save history: {error}"),
                 }
             }
             Err(error) => format!("Could not launch {}: {error}", app.name),
@@ -41,15 +54,17 @@ impl PersistentSession {
     }
 }
 
-fn record_launch(db: &Arc<redb::Database>, name: &str) -> eyre::Result<()> {
+fn record_launch(db: &Arc<redb::Database>, name: &str) -> eyre::Result<u64> {
     let transaction = db.begin_write()?;
-    {
+    let count = {
         let mut table = transaction.open_table(crate::core::cache::HISTORY_TABLE)?;
         let count = table.get(name)?.map_or(0, |value| value.value());
-        table.insert(name, count.saturating_add(1))?;
-    }
+        let count = count.saturating_add(1);
+        table.insert(name, count)?;
+        count
+    };
     transaction.commit()?;
-    crate::core::database::record_access(db, name)
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -106,11 +121,48 @@ mod tests {
         let read = db.begin_read().unwrap();
         let table = read.open_table(crate::core::cache::HISTORY_TABLE).unwrap();
         assert_eq!(table.get("Fixture").unwrap().unwrap().value(), 2);
+        assert_eq!(state.apps[0].history, 2);
+        assert_eq!(state.shown[0].history, 2);
+        assert!(state.shown[0].last_access.is_some());
+        assert!(state.frecency_data.contains_key("Fixture"));
+        state.filter();
+        assert_eq!(state.shown[0].history, 2);
         for child in &mut session.children {
             child.wait().unwrap();
         }
         session.reap();
         assert!(session.children.is_empty());
+    }
+
+    #[test]
+    fn frecency_failure_reports_that_history_was_saved() {
+        let db = database();
+        let transaction = db.begin_write().unwrap();
+        transaction
+            .open_table(redb::TableDefinition::<&str, u64>::new("frecency"))
+            .unwrap();
+        transaction.commit().unwrap();
+        let (mut state, cli) = state("/bin/true");
+        let mut session = PersistentSession::default();
+        session.launch(&mut state, &cli, &db);
+        assert!(
+            state
+                .text
+                .contains("history saved, but could not update frecency")
+        );
+        assert_eq!(state.shown[0].history, 1);
+        assert_eq!(
+            db.begin_read()
+                .unwrap()
+                .open_table(crate::core::cache::HISTORY_TABLE)
+                .unwrap()
+                .get("Fixture")
+                .unwrap()
+                .unwrap()
+                .value(),
+            1
+        );
+        session.children[0].wait().unwrap();
     }
 
     #[test]
