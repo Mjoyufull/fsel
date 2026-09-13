@@ -142,12 +142,7 @@ fn move_to_last(
     };
 
     ui.selected = Some(last_index);
-    let max_visible = options.max_visible_items(terminal_area);
-    if max_visible > 0 && ui.shown.len() > max_visible {
-        ui.scroll_offset = ui.shown.len().saturating_sub(max_visible);
-    } else {
-        ui.scroll_offset = 0;
-    }
+    options.result_layout(terminal_area, ui);
 }
 
 pub(super) fn handle_mouse_event(
@@ -156,7 +151,7 @@ pub(super) fn handle_mouse_event(
     options: &DmenuOptions,
     terminal_area: ratatui::layout::Rect,
 ) -> LoopOutcome {
-    let geometry = options.result_layout(terminal_area);
+    let geometry = options.result_layout(terminal_area, ui);
     let hit = geometry.hit(mouse_event.column, mouse_event.row);
     let Some(relative) = hit else {
         return LoopOutcome::Continue;
@@ -258,18 +253,7 @@ fn move_selection(
         Some(selected)
     };
 
-    let Some(new_selected) = ui.selected else {
-        return;
-    };
-
-    let max_visible = options.max_visible_items(terminal_area);
-    if max_visible == 0 {
-        ui.scroll_offset = 0;
-    } else if new_selected < ui.scroll_offset {
-        ui.scroll_offset = new_selected;
-    } else if new_selected >= ui.scroll_offset + max_visible {
-        ui.scroll_offset = new_selected.saturating_sub(max_visible - 1);
-    }
+    options.result_layout(terminal_area, ui);
 }
 
 #[cfg(test)]
@@ -288,7 +272,7 @@ mod tests {
         ui.selected = Some(0);
         let options = super::DmenuOptions::from_cli(&crate::cli::Opts::default());
         let area = ratatui::layout::Rect::new(0, 0, 80, 40);
-        let geometry = options.result_layout(area);
+        let geometry = options.result_layout(area, &mut ui);
         for (kind, slot) in [
             (MouseEventKind::Moved, 3),
             (MouseEventKind::Down(MouseButton::Right), 1),

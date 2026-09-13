@@ -61,8 +61,7 @@ pub(super) fn draw_frame(
         Some(ui.text.clone())
     };
 
-    let result_layout = options.result_layout(frame.area());
-    result_layout.keep_visible(ui.selected, &mut ui.scroll_offset);
+    let result_layout = options.result_layout(frame.area(), ui);
     let max_visible = result_layout.capacity();
     let visible_items = ui
         .shown
