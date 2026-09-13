@@ -45,6 +45,10 @@ fn persistent_rejects_incompatible_modes_before_terminal_setup() {
         vec!["--detach", "--persistent", "--tty"],
         vec!["--detach", "--persistent", "--no-exec"],
         vec!["--detach", "--persistent", "--dmenu"],
+        vec!["--detach", "--persistent", "--stdout"],
+        vec!["--detach", "--persistent", "-p", "Fixture"],
+        vec!["--detach", "--persistent", "--cclip"],
+        vec!["--detach", "--persistent", "--refresh-cache"],
     ] {
         let output = isolated_command(&directory).args(args).output().unwrap();
         assert!(!output.status.success());
