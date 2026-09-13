@@ -1,6 +1,7 @@
 // Dmenu mode - verb-based organization
 
 mod events;
+mod item_layout;
 mod options;
 pub(crate) mod panels;
 pub mod parse;

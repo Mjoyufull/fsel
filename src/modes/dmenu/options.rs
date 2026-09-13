@@ -150,11 +150,11 @@ impl DmenuOptions {
         effective_content_height(total_height, self.content_panel_height_percent)
     }
 
-    pub(super) fn max_visible_items(&self, area: Rect) -> usize {
-        self.result_layout(area).capacity()
-    }
-
-    pub(super) fn result_layout(&self, area: Rect) -> crate::ui::result_layout::ResultLayout {
+    pub(super) fn result_layout(
+        &self,
+        area: Rect,
+        ui: &mut crate::ui::DmenuUI<'_>,
+    ) -> super::item_layout::ItemLayout {
         let layout = self.split_layout(area);
         let block = crate::ui::panel_block(
             " Items ",
@@ -168,10 +168,15 @@ impl DmenuOptions {
                 title_color: self.header_title_color,
             },
         );
-        crate::ui::result_layout::ResultLayout::new(
+        super::item_layout::ItemLayout::new(
             block.inner(layout.chunks[layout.items_panel_index]),
-            1,
-            &self.panels,
+            ui,
+            self.panels.horizontal(),
+            self.panels.rotation >= 180,
+            self.panels
+                .item_width
+                .min(block.inner(layout.chunks[layout.items_panel_index]).width)
+                .max(1),
         )
     }
 
@@ -298,6 +303,11 @@ mod tests {
 
     #[test]
     fn borderless_dmenu_mouse_area_uses_released_rows() {
+        let mut ui = crate::ui::DmenuUI::new(
+            vec![crate::common::Item::new_simple("a".into(), "a".into(), 1)],
+            false,
+            false,
+        );
         let bordered = DmenuOptions::from_cli(&Opts::default());
         let borderless = DmenuOptions::from_cli(&Opts {
             show_items_border: false,
@@ -306,11 +316,17 @@ mod tests {
         });
 
         assert_eq!(
-            bordered.result_layout(Rect::new(0, 0, 80, 40)).slot(0).y,
+            bordered
+                .result_layout(Rect::new(0, 0, 80, 40), &mut ui)
+                .slot(0)
+                .y,
             13
         );
         assert_eq!(
-            borderless.result_layout(Rect::new(0, 0, 80, 40)).slot(0).y,
+            borderless
+                .result_layout(Rect::new(0, 0, 80, 40), &mut ui)
+                .slot(0)
+                .y,
             12
         );
     }
