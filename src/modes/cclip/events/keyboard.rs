@@ -282,6 +282,11 @@ mod tests {
         }
         assert_eq!(oriented_action(KeyAction::First, 90, true), KeyAction::Up);
         assert_eq!(oriented_action(KeyAction::Last, 270, true), KeyAction::Up);
+        assert_eq!(
+            oriented_action(KeyAction::First, 270, true),
+            KeyAction::Down
+        );
+        assert_eq!(oriented_action(KeyAction::Last, 90, true), KeyAction::Down);
     }
     use super::{KeyAction, key_action};
     use crate::ui::Keybinds;

@@ -1,6 +1,7 @@
 //! Launcher result-list layout, backgrounds, markers, and terminal images.
 
 use super::app_ui::AppIcons;
+use super::result_layout::ResultLayout;
 use crate::cli::Opts;
 use crate::core::state::State;
 use eyre::Result;
@@ -22,8 +23,8 @@ pub(crate) fn launcher_visible_rows(size: Rect, cli: &Opts) -> usize {
     launcher_result_layout(size, cli).capacity()
 }
 
-pub(crate) fn launcher_result_layout(size: Rect, cli: &Opts) -> super::result_layout::ResultLayout {
-    super::result_layout::ResultLayout::new(
+pub(crate) fn launcher_result_layout(size: Rect, cli: &Opts) -> ResultLayout {
+    ResultLayout::new(
         launcher_list_content_area(size, cli),
         app_row_height(cli),
         &cli.panels,
