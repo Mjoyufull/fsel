@@ -752,7 +752,7 @@ pinned_selection_background_color = "#e4c779"
 
 Unselected pins use the first two colors; selected pins use the latter two. Omitted values inherit
 `items_text_color`, `items_background_color`, `highlight_color`, and
-`items_selection_background_color`, respectively. Ordinary rows are unaffected. `pin_color`, `pinned_text_color`, `pinned_background_color`, `pinned_highlight_color`, `pinned_selection_background_color`
+`items_selection_background_color`, respectively. Ordinary rows are unaffected. `pin_color`
 continues to style the glyph, and pinned-row colors still work with `show_pin_icons = false`.
 The same names prefixed with `FSEL_` and uppercased are environment overrides—for example,
 `FSEL_PINNED_SELECTION_BACKGROUND_COLOR=Blue`. Rounded selection caps and icon placement are unchanged.
