@@ -30,11 +30,10 @@ pub fn launch_app(
         ));
     }
 
-    if let Some(path) = &app.path {
-        env::set_current_dir(std::path::PathBuf::from(path))?;
-    }
-
     if cli.tty && app.is_terminal {
+        if let Some(path) = &app.path {
+            env::set_current_dir(path)?;
+        }
         use std::os::unix::process::CommandExt;
 
         if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -135,6 +134,34 @@ pub fn launch_app(
         return Err(err.into());
     }
 
+    spawn_app(app, cli)?;
+
+    // log it for history
+    let value = app.history + 1;
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(crate::core::cache::HISTORY_TABLE)?;
+        table.insert(app.name.as_str(), value)?;
+    }
+    write_txn.commit()?;
+
+    // Update frecency (modern usage tracking)
+    if let Err(e) = crate::core::database::record_access(db, &app.name) {
+        eprintln!("Warning: Failed to update frecency: {}", e);
+    }
+
+    Ok(())
+}
+
+/// Spawn without changing the launcher's working directory or recording history.
+pub(super) fn spawn_app(
+    app: &crate::desktop::App,
+    cli: &crate::cli::Opts,
+) -> Result<process::Child> {
+    let commands = shell_words::split(&app.command)?;
+    if commands.is_empty() {
+        return Err(eyre::eyre!("Empty command for app '{}'", app.name));
+    }
     let mut runner = cli.launch_prefix.clone();
     if app.is_terminal {
         runner.extend(split_command(&cli.terminal_launcher, "terminal_launcher")?);
@@ -143,6 +170,9 @@ pub fn launch_app(
 
     let mut exec = process::Command::new(&runner[0]);
     exec.args(&runner[1..]);
+    if let Some(path) = &app.path {
+        exec.current_dir(path);
+    }
 
     // Ensure detached launches always get their own session and null stdio
     if cli.detach {
@@ -201,23 +231,7 @@ pub fn launch_app(
         crate::core::debug_logger::log_launch(app, &cmd_str);
     }
 
-    exec.spawn()?;
-
-    // log it for history
-    let value = app.history + 1;
-    let write_txn = db.begin_write()?;
-    {
-        let mut table = write_txn.open_table(crate::core::cache::HISTORY_TABLE)?;
-        table.insert(app.name.as_str(), value)?;
-    }
-    write_txn.commit()?;
-
-    // Update frecency (modern usage tracking)
-    if let Err(e) = crate::core::database::record_access(db, &app.name) {
-        eprintln!("Warning: Failed to update frecency: {}", e);
-    }
-
-    Ok(())
+    exec.spawn().map_err(Into::into)
 }
 
 #[cfg(test)]

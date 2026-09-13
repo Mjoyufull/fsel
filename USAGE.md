@@ -223,6 +223,24 @@ fsel --detach
 fsel --no-exec
 ```
 
+### Persistent detached launcher
+
+`fsel --detach --persistent` keeps the current launcher session open after each launch.
+The query, selection, scroll position, panel layout, and prepared icons are retained; press Escape
+to close fsel when finished. Each selection starts a new detached process. Closing fsel does not
+terminate applications it already launched.
+
+Spawn failures are reported in the information panel and leave the launcher usable. Successful
+spawns increment history once; a history-write failure is reported separately without retrying the
+application launch. Exited children are reaped while the session remains open. Desktop `Path=`
+applies to the child, not to later launches or fsel itself.
+
+This opt-in CLI flag requires detached interactive app launching. It rejects `--tty`, `--no-exec`,
+`--stdout`, direct-name launches (`-p`), dmenu, cclip, and maintenance commands. Use `-ss` to start
+with a query. Terminal applications use the configured external terminal launcher; they cannot
+replace fsel through TTY mode. Launch prefixes, systemd-run, and uwsm retain their existing behavior.
+The first-launch confirmation setting still applies only to direct-name launches, as before.
+
 ## Dmenu Mode
 
 ### Basic Dmenu

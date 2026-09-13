@@ -136,6 +136,7 @@ pub(super) fn parse_cli_overrides(
             Short('d') | Long("detach") => {
                 default.detach = true;
             }
+            Long("persistent") => default.persistent = true,
             Long("dmenu") => {
                 default.dmenu_mode = true;
             }
