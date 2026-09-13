@@ -4,6 +4,14 @@ pub(crate) fn short_usage(program_name: &str) -> String {
 Usage:
   {program_name} [OPTIONS]
 
+├─ Panel Layout
+│  ├─ --info-position <SIDE>       Dock information: top, right, bottom, left
+│  ├─ --input-position <SIDE>      Dock input relative to results
+│  ├─ --info-size <PERCENT>        Information panel share, 0-90
+│  ├─ --input-size <CELLS>         Input thickness in rows or columns
+│  ├─ --layout-rotation <DEGREES>  Rotate layout: 0, 90, 180, 270
+│  └─ --item-width <COLUMNS>       Horizontal result width (default 24)
+│
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately; exact mode refuses near matches
 │  ├─ --dmenu                      Read choices from stdin and print the selection
@@ -39,6 +47,7 @@ Usage:
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --desktop-icons[=MODE]       Use preview, list, both, or none (default: preview)
 │  ├─ --icon-position <POSITION>   Place the preview left, center, or right
+│  ├─ --icon-description-position <SIDE>  Put description top/bottom/left/right of icon
 │  ├─ --icon-arrow-before          Put the selection arrow before a left list icon
 │  ├─ --icon-list-gap <N>          Add 0-16 columns between each icon and label
 │  ├─ --icon-list-vertical-align <N>  Offset artwork; negatives overflow upward (-100 to 100)
@@ -68,6 +77,14 @@ pub(crate) fn detailed_usage(program_name: &str) -> String {
 Usage:
   {program_name} [OPTIONS]
 
+├─ Panel Layout
+│  ├─ --info-position <SIDE>       Dock information: top, right, bottom, left
+│  ├─ --input-position <SIDE>      Dock input relative to results
+│  ├─ --info-size <PERCENT>        Information panel share, 0-90
+│  ├─ --input-size <CELLS>         Input thickness in rows or columns
+│  ├─ --layout-rotation <DEGREES>  Rotate layout: 0, 90, 180, 270
+│  └─ --item-width <COLUMNS>       Horizontal result width (default 24)
+│
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately; exact mode requires an exact hit
 │  ├─ --cclip                      Browse clipboard history and copy the selected item
@@ -103,6 +120,7 @@ Usage:
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
 │  ├─ --desktop-icons[=MODE]       Use preview, list, both, or none (default: preview)
 │  ├─ --icon-position <POSITION>   Put the preview left, center, or right
+│  ├─ --icon-description-position <SIDE>  Put description top/bottom/left/right of icon
 │  ├─ --icon-preview-width <N>     Give the icon 10-90 percent of the title panel
 │  ├─ --icon-list-width <N>        Reserve 1-16 terminal columns for each list icon
 │  ├─ --icon-list-height <N>       Give each icon/list row 1-8 terminal rows
