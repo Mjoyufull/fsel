@@ -39,6 +39,14 @@ fn image_payloads_do_not_skip_labels_or_later_rows() {
             erased.contains(&(1, 1)),
             "{protocol_type:?} left its image anchor behind"
         );
+        for y in 1..3 {
+            for x in 1..3 {
+                assert!(
+                    erased.contains(&(x, y)),
+                    "{protocol_type:?} did not erase image cell ({x}, {y})"
+                );
+            }
+        }
         assert!(
             erased.contains(&(5, 6)),
             "{protocol_type:?} left its label behind"

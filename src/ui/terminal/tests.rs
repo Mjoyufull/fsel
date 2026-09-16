@@ -54,6 +54,7 @@ fn fullscreen_clear_redraws_unchanged_text_without_cursor_query() {
         .expect("test terminal should initialize");
     for _ in 0..2 {
         super::clear_fullscreen(&mut terminal).expect("fullscreen invalidation should succeed");
+        assert_eq!(terminal.backend().0.buffer()[(0, 0)].symbol(), " ");
         terminal
             .draw(|frame| frame.render_widget(Paragraph::new("unchanged"), frame.area()))
             .expect("text should redraw after clearing");
