@@ -2,17 +2,40 @@
 
 use ratatui_image::picker::Picker;
 
-pub(crate) fn query_terminal(fallback: Picker) -> Picker {
+#[cfg(unix)]
+mod filter;
+#[cfg(unix)]
+mod replay;
+
+pub(crate) struct Probe {
+    pub(crate) picker: Picker,
+    #[cfg(unix)]
+    _replay: replay::InputReplay,
+}
+
+pub(crate) fn query_terminal(fallback: Picker) -> std::io::Result<Probe> {
     #[cfg(unix)]
     {
-        query_tty(&fallback).unwrap_or(fallback)
+        let mut filter = filter::ReplyFilter::default();
+        let mut input = Vec::new();
+        let picker = query_tty(&fallback, &mut filter, &mut input).unwrap_or(fallback);
+        filter.release_ambiguous_escape(&mut input);
+        let replay = replay::InputReplay::start(input, filter)?;
+        Ok(Probe {
+            picker,
+            _replay: replay,
+        })
     }
     #[cfg(not(unix))]
-    fallback
+    Ok(Probe { picker: fallback })
 }
 
 #[cfg(unix)]
-fn query_tty(fallback: &Picker) -> std::io::Result<Picker> {
+fn query_tty(
+    fallback: &Picker,
+    filter: &mut filter::ReplyFilter,
+    input: &mut Vec<u8>,
+) -> std::io::Result<Picker> {
     use ratatui_image::picker::ProtocolType;
     use ratatui_image::picker::cap_parser::{Parser, QueryStdioOptions, Response};
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
@@ -32,7 +55,6 @@ fn query_tty(fallback: &Picker) -> std::io::Result<Picker> {
     tty.write_all(Parser::query(tmux, options).as_bytes())?;
     tty.flush()?;
     let deadline = Instant::now() + Duration::from_millis(500);
-    let mut parser = Parser::new();
     let mut protocol = None;
     let mut font = fallback.font_size();
     if let Ok(size) = crossterm::terminal::window_size()
@@ -43,7 +65,7 @@ fn query_tty(fallback: &Picker) -> std::io::Result<Picker> {
     {
         font = ratatui_image::FontSize::new(size.width / size.columns, size.height / size.rows);
     }
-    'query: while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
+    while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
         let timeout = Timespec {
             tv_sec: 0,
             tv_nsec: remaining.as_nanos().min(500_000_000) as _,
@@ -57,8 +79,9 @@ fn query_tty(fallback: &Picker) -> std::io::Result<Picker> {
         if count == 0 {
             break;
         }
+        let mut complete = false;
         for byte in &bytes[..count] {
-            for response in parser.push(char::from(*byte)) {
+            for response in filter.push(*byte, input) {
                 match response {
                     Response::Kitty if !blacklist => protocol = Some(ProtocolType::Kitty),
                     Response::Sixel if !blacklist && protocol.is_none() => {
@@ -67,10 +90,13 @@ fn query_tty(fallback: &Picker) -> std::io::Result<Picker> {
                     Response::CellSize(Some((width, height))) if width > 0 && height > 0 => {
                         font = ratatui_image::FontSize::new(width, height);
                     }
-                    Response::Status => break 'query,
+                    Response::Status => complete = true,
                     _ => {}
                 }
             }
+        }
+        if complete || input.len() >= 64 * 1024 {
+            break;
         }
     }
     Ok(picker_with_font(

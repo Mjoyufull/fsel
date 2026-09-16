@@ -68,6 +68,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     let mut ui = build_ui(cli, items, options.highlight_color);
     let mut list_state = ListState::default();
+    let mut probe = None;
     let picker = if options.preview_command.is_some() || !options.custom_panels.is_empty() {
         let mut initial_preview = PreviewPanels::new(
             options.preview_command.clone(),
@@ -86,7 +87,11 @@ pub async fn run(cli: &Opts) -> Result<()> {
             );
         })?;
         render_result?;
-        crate::ui::graphics_probe::query_terminal(options.graphics_adapter.picker())
+        let result = crate::ui::graphics_probe::query_terminal(options.graphics_adapter.picker())
+            .wrap_err("Failed to preserve terminal input during graphics detection")?;
+        let picker = result.picker.clone();
+        probe = Some(result);
+        picker
     } else {
         options.graphics_adapter.picker()
     };
@@ -156,6 +161,8 @@ pub async fn run(cli: &Opts) -> Result<()> {
         }
     };
 
+    input.shutdown().await;
+    drop(probe);
     prepare_terminal_for_output(&mut terminal)?;
     crate::ui::terminal::shutdown_terminal(options.disable_mouse)
         .wrap_err("Failed to restore dmenu terminal state")?;
