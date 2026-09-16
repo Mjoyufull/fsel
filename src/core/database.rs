@@ -284,8 +284,11 @@ pub fn save_frecency(
     Ok(())
 }
 
-/// Record an app access (updates frecency)
-pub fn record_access(db: &std::sync::Arc<redb::Database>, app_name: &str) -> Result<()> {
+/// Record an app access and return the saved frecency snapshot, including global aging.
+pub fn record_access(
+    db: &std::sync::Arc<redb::Database>,
+    app_name: &str,
+) -> Result<HashMap<String, FrecencyEntry>> {
     let mut frecency = load_frecency(db);
 
     // Update or create entry
@@ -298,7 +301,7 @@ pub fn record_access(db: &std::sync::Arc<redb::Database>, app_name: &str) -> Res
     crate::core::ranking::age_entries(&mut frecency, 10000);
 
     save_frecency(db, &frecency)?;
-    Ok(())
+    Ok(frecency)
 }
 
 /// Get frecency score for an app

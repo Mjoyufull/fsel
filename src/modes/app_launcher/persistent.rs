@@ -29,8 +29,8 @@ impl PersistentSession {
                 match record_launch(db, &name) {
                     Ok(count) => {
                         let message = match crate::core::database::record_access(db, &name) {
-                            Ok(()) => {
-                                state.frecency_data = crate::core::database::load_frecency(db);
+                            Ok(frecency) => {
+                                state.frecency_data = frecency;
                                 format!("Launched {name}")
                             }
                             Err(error) => format!(
