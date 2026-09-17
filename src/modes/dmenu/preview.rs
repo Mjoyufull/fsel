@@ -2,6 +2,7 @@
 
 mod command;
 mod expand;
+mod sixel;
 #[cfg(test)]
 mod tests;
 
@@ -21,6 +22,7 @@ use tokio::task::JoinHandle;
 const MAX_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
 
 pub(super) struct PreviewRuntime {
+    pub(super) sixel: Option<sixel::SixelDamage>,
     command_template: Option<String>,
     expose_query: bool,
     content: PreviewContent,
@@ -79,6 +81,8 @@ impl PreviewRuntime {
         let decode_request = Arc::new(Mutex::new(None));
         let image_manager = ImageManager::new(picker.clone());
         Self {
+            sixel: (picker.protocol_type() == ratatui_image::picker::ProtocolType::Sixel)
+                .then(sixel::SixelDamage::default),
             command_template,
             expose_query,
             content: PreviewContent::Empty,
@@ -300,6 +304,9 @@ impl PreviewRuntime {
         };
         let key = key.clone();
         if self.image_manager.render_cached(frame, &key, area)? {
+            if let Some(sixel) = &mut self.sixel {
+                sixel.record(frame.buffer_mut(), area);
+            }
             Ok(true)
         } else {
             self.content = PreviewContent::Text("Failed to render preview image".to_string());

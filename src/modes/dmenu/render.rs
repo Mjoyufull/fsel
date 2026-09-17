@@ -19,6 +19,11 @@ pub(super) fn draw_frame(
     options: &DmenuOptions,
     previews: &mut PreviewPanels,
 ) -> Result<()> {
+    for runtime in std::iter::once(&mut previews.primary).chain(&mut previews.custom) {
+        if let Some(sixel) = &mut runtime.sixel {
+            sixel.begin_frame();
+        }
+    }
     let preview = &mut previews.primary;
     let (layout, custom_areas) = options.split_all(frame.area());
     let chunks = layout.chunks;
@@ -205,6 +210,14 @@ pub(super) fn draw_frame(
                         .wrap(Wrap { trim: false }),
                     inner,
                 );
+            }
+        }
+    }
+    if matches!(options.graphics_adapter, crate::ui::GraphicsAdapter::Sixel) {
+        let mut output = std::io::stderr().lock();
+        for runtime in std::iter::once(&mut previews.primary).chain(&mut previews.custom) {
+            if let Some(sixel) = &mut runtime.sixel {
+                sixel.erase_changed(frame.buffer_mut(), &mut output)?;
             }
         }
     }
