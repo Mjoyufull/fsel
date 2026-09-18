@@ -78,7 +78,12 @@ fn direct_lookup_preserves_root_alias_precedence_and_cached_winner() {
     for _ in 0..2 {
         let output = isolated_command(&runtime)
             .env("XDG_DATA_DIRS", runtime.join("second"))
-            .args(["--no-exec", "-p", "FselTraversalFixture"])
+            .args([
+                "--no-exec",
+                "--auto-hide-duplicates",
+                "-p",
+                "FselTraversalFixture",
+            ])
             .output()
             .unwrap();
         assert!(
