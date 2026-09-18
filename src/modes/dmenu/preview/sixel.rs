@@ -21,10 +21,11 @@ impl SixelDamage {
         self.current = None;
     }
 
-    pub(super) fn record(&mut self, buffer: &Buffer, area: Rect) {
+    pub(super) fn record(&mut self, buffer: &mut Buffer, area: Rect) {
         if area.is_empty() {
             return;
         }
+        anchor_payload(buffer, area);
         // The anchor contains the encoded payload, including its dimensions. Comparing it
         // avoids clearing a retained image while the next command/decoder is still pending.
         let mut hash = std::collections::hash_map::DefaultHasher::new();
@@ -85,9 +86,89 @@ impl SixelDamage {
     }
 }
 
+fn anchor_payload(buffer: &mut Buffer, area: Rect) {
+    let cell = &mut buffer[(area.x, area.y)];
+    let payload = cell.symbol();
+    let tmux = payload.starts_with("\x1bPtmux;");
+    let delimiter = if tmux { "\x1b\x1bP" } else { "\x1bP" };
+    let Some(start) = payload.find(delimiter) else {
+        return;
+    };
+    let escape = if tmux { "\x1b\x1b" } else { "\x1b" };
+    // Upstream clears rows using CUD/CUU. CUD clamps at the bottom edge, so
+    // its final CUU can overshoot. Re-anchor after that clear, before the DCS.
+    let anchored = format!(
+        "{}{escape}[{};{}H{}\x1b[{};{}H",
+        &payload[..start],
+        u32::from(area.y) + 1,
+        u32::from(area.x) + 1,
+        &payload[start..],
+        u32::from(area.y) + 1,
+        u32::from(area.x) + 2,
+    );
+    // Ratatui treats this escape payload as one cell. Sixel cursor advancement
+    // varies by emulator; restore the position expected by the next text write.
+    cell.set_symbol(&anchored);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn encoded_sixel_keeps_its_anchor_at_the_bottom_edge_across_frames() {
+        use image::{DynamicImage, Rgba, RgbaImage};
+        use ratatui::layout::Size;
+        use ratatui::widgets::Widget;
+        use ratatui_image::Image;
+        use ratatui_image::protocol::{Protocol, sixel::Sixel};
+
+        let image =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(16, 32, Rgba([20, 80, 220, 255])));
+        let protocol = Protocol::Sixel(Sixel::new(image, Size::new(2, 2), false).unwrap());
+        let area = Rect::new(2, 8, 2, 2);
+        let mut damage = SixelDamage::default();
+        let mut output = Vec::new();
+        for _ in 0..2 {
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 10));
+            Image::new(&protocol).render(area, &mut buffer);
+            damage.begin_frame();
+            damage.record(&mut buffer, area);
+            let payload = buffer[(2, 8)].symbol();
+            assert!(payload.contains("\x1b[2A\x1b[9;3H\x1bP"));
+            assert!(payload.ends_with("\x1b[9;4H"));
+            assert_eq!(
+                buffer[(2, 8)].diff_option,
+                CellDiffOption::ForcedWidth(std::num::NonZeroU16::new(1).unwrap())
+            );
+            damage.erase_changed(&mut buffer, &mut output).unwrap();
+        }
+        assert!(
+            output.is_empty(),
+            "unchanged frames must not erase the image"
+        );
+    }
+
+    #[test]
+    fn payload_is_anchored_after_clear_and_leaves_a_one_cell_cursor_advance() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 10));
+        let area = Rect::new(2, 8, 5, 2);
+        buffer[(2, 8)].set_symbol("\x1b[5X\x1b[1B\x1b[5X\x1b[1B\x1b[2A\x1bPqDATA\x1b\\");
+        anchor_payload(&mut buffer, area);
+        let payload = buffer[(2, 8)].symbol();
+        assert!(payload.contains("\x1b[2A\x1b[9;3H\x1bPqDATA"));
+        assert!(payload.ends_with("\x1b\\\x1b[9;4H"));
+    }
+
+    #[test]
+    fn tmux_anchor_is_inside_passthrough_and_cursor_restore_is_outside() {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 10));
+        buffer[(2, 3)].set_symbol("\x1bPtmux;\x1b\x1b[2A\x1b\x1bPqDATA\x1b\x1b\\\x1b\\");
+        anchor_payload(&mut buffer, Rect::new(2, 3, 5, 2));
+        let payload = buffer[(2, 3)].symbol();
+        assert!(payload.contains("\x1b\x1b[4;3H\x1b\x1bPqDATA"));
+        assert!(payload.ends_with("\x1b\\\x1b[4;4H"));
+    }
 
     #[test]
     fn replacement_erases_old_rectangle_before_drawing_smaller_transparent_image() {
@@ -95,12 +176,12 @@ mod tests {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 10));
         let old = Rect::new(2, 3, 5, 4);
         buffer[(2, 3)].set_symbol("old sixel payload");
-        damage.record(&buffer, old);
+        damage.record(&mut buffer, old);
         let mut output = Vec::new();
         damage.erase_changed(&mut buffer, &mut output).unwrap();
         assert!(output.is_empty());
         damage.begin_frame();
-        damage.record(&buffer, old);
+        damage.record(&mut buffer, old);
         damage.erase_changed(&mut buffer, &mut output).unwrap();
         assert!(
             output.is_empty(),
@@ -108,7 +189,7 @@ mod tests {
         );
         damage.begin_frame();
         buffer[(2, 3)].set_symbol("new transparent payload");
-        damage.record(&buffer, Rect::new(2, 3, 2, 2));
+        damage.record(&mut buffer, Rect::new(2, 3, 2, 2));
         damage.erase_changed(&mut buffer, &mut output).unwrap();
         let output = String::from_utf8(output).unwrap();
         for row in 4..8 {
@@ -141,10 +222,10 @@ mod tests {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 10));
         buffer[(2, 3)].set_symbol("same small image");
         let mut output = Vec::new();
-        damage.record(&buffer, Rect::new(2, 3, 10, 6));
+        damage.record(&mut buffer, Rect::new(2, 3, 10, 6));
         damage.erase_changed(&mut buffer, &mut output).unwrap();
         damage.begin_frame();
-        damage.record(&buffer, Rect::new(2, 3, 6, 4));
+        damage.record(&mut buffer, Rect::new(2, 3, 6, 4));
         damage.erase_changed(&mut buffer, &mut output).unwrap();
         assert!(output.is_empty());
     }
