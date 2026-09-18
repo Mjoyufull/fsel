@@ -2,8 +2,8 @@ use crate::cli;
 use crate::core::cache;
 use crate::core::hidden_entries::EntryKey;
 use crate::desktop;
+use crate::desktop::traversal::{self, Hidden};
 use eyre::Result;
-use jwalk::WalkDir;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -28,20 +28,14 @@ pub fn find_app_by_name_fast(
 
     let application_dirs = crate::desktop::application_dirs();
     for dir in &application_dirs {
-        for entry in WalkDir::new(dir)
-            .min_depth(1)
-            .max_depth(5)
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                !entry.file_type().is_dir()
-                    && entry.path().extension().and_then(|ext| ext.to_str()) == Some("desktop")
-            })
-        {
+        for entry in traversal::entries(dir, Hidden::Exclude).filter(|entry| {
+            !entry.file_type().is_some_and(|kind| kind.is_dir())
+                && entry.path().extension().and_then(|ext| ext.to_str()) == Some("desktop")
+        }) {
             let file_path = entry.path();
 
             if let Some(app) =
-                load_app_from_path(&desktop_cache, &application_dirs, &file_path, cli)?
+                load_app_from_path(&desktop_cache, &application_dirs, file_path, cli)?
                 && app.name == app_name
                 && matches_current_desktop(&app, cli)
                 && !is_hidden(&app, hidden_entry_keys)

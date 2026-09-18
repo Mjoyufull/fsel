@@ -7,6 +7,7 @@ mod dirs;
 mod discover;
 mod icons;
 mod parse;
+pub(crate) mod traversal;
 
 pub(crate) use dirs::application_dirs;
 pub(crate) use discover::desktop_file_id;

@@ -1,6 +1,5 @@
 //! XDG icon-theme resolution with in-process and persistent path caches.
 
-use jwalk::WalkDir;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -8,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod fallback;
 mod index;
 mod theme;
 
@@ -235,19 +235,11 @@ impl IconResolver {
             if !theme_root.is_dir() {
                 continue;
             }
-            for entry in WalkDir::new(&theme_root)
-                .min_depth(1)
-                .max_depth(5)
-                .into_iter()
-                .filter_map(Result::ok)
-            {
-                let path = entry.path();
-                if path.is_file() && has_icon_name(&path, icon) {
-                    candidates.push(IconCandidate::from_fallback(path, size, root_rank));
-                }
+            for path in fallback::matching_paths(&theme_root, icon) {
+                candidates.push(IconCandidate::from_fallback(path, size, root_rank));
             }
         }
-        best_candidate(candidates)
+        fallback::best_in_traversal_order(candidates, &self.icon_roots, theme)
     }
 
     fn find_unthemed(&self, icon: &str) -> Option<PathBuf> {
@@ -441,7 +433,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_dir() -> PathBuf {
+    pub(super) fn temp_dir() -> PathBuf {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time should follow the Unix epoch")
