@@ -1,19 +1,25 @@
 //! Directory-driven name lookup with serial resolution of equally ranked candidates.
 
+use super::listing::DirectoryListing;
 use super::{ICON_EXTENSIONS, IconCandidate};
 use crate::desktop::traversal::{self, Hidden};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-pub(super) fn matching_paths(directories: &[PathBuf], icon: &str) -> Vec<PathBuf> {
+pub(super) fn matching_paths(
+    directories: &[PathBuf],
+    icon: &str,
+    listing: &DirectoryListing,
+) -> Vec<PathBuf> {
     directories
         .iter()
         .flat_map(|directory| {
             ICON_EXTENSIONS
                 .iter()
-                .map(move |extension| directory.join(format!("{icon}.{extension}")))
+                .map(move |extension| (directory, format!("{icon}.{extension}")))
         })
-        .filter(|path| path.is_file())
+        .filter(|(directory, file_name)| listing.holds(directory, file_name))
+        .map(|(directory, file_name)| directory.join(file_name))
         .collect()
 }
 
@@ -31,7 +37,8 @@ pub(super) fn best_in_traversal_order(
         .map(|candidate| candidate.path.as_path())
         .collect();
     if tied.len() > 1 {
-        // Preserve depth-first filesystem order, not worker completion order.
+        // Rank by depth-first filesystem order, which is not the order directories
+        // are listed in.
         let root = roots[first.root_rank].join(theme);
         if let Some(entry) =
             traversal::entries(&root, Hidden::Exclude).find(|entry| tied.contains(entry.path()))
@@ -65,7 +72,7 @@ mod tests {
                 .iter()
                 .any(|path| path.starts_with(theme.join(".hidden")))
         );
-        let paths = matching_paths(&directories, "editor");
+        let paths = matching_paths(&directories, "editor", &DirectoryListing::default());
         assert_eq!(
             paths.iter().collect::<HashSet<_>>(),
             HashSet::from([
@@ -88,7 +95,7 @@ mod tests {
                 Some(first_in_traversal.clone())
             );
         }
-        assert!(matching_paths(&directories, "missing").is_empty());
+        assert!(matching_paths(&directories, "missing", &DirectoryListing::default()).is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -104,7 +111,7 @@ mod tests {
         assert!(directories.contains(&deepest));
         assert!(!directories.contains(&deepest.join("e")));
         assert_eq!(
-            matching_paths(&directories, "editor"),
+            matching_paths(&directories, "editor", &DirectoryListing::default()),
             vec![deepest.join("editor.png")]
         );
         fs::remove_dir_all(root).unwrap();
