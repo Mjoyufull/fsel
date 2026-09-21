@@ -26,6 +26,7 @@ pub(crate) struct IconResolver {
     pixmap_roots: Vec<PathBuf>,
     cache: HashMap<(String, u16), Option<PathBuf>>,
     metadata_cache: RefCell<HashMap<PathBuf, Option<Arc<index::ThemeMetadata>>>>,
+    directory_cache: RefCell<HashMap<PathBuf, Arc<Vec<PathBuf>>>>,
     persistent_cache: Option<PersistentResolverCache>,
 }
 
@@ -96,6 +97,7 @@ impl IconResolver {
             pixmap_roots,
             cache: HashMap::new(),
             metadata_cache: RefCell::new(HashMap::new()),
+            directory_cache: RefCell::new(HashMap::new()),
             persistent_cache: None,
         };
         if let Some(db) = db
@@ -211,7 +213,6 @@ impl IconResolver {
             if !theme_root.is_dir() {
                 continue;
             }
-
             if let Some(metadata) = self.theme_metadata(&theme_root) {
                 for directory in &metadata.directories {
                     collect_named_candidates(
@@ -235,7 +236,7 @@ impl IconResolver {
             if !theme_root.is_dir() {
                 continue;
             }
-            for path in fallback::matching_paths(&theme_root, icon) {
+            for path in fallback::matching_paths(&self.icon_directories(&theme_root), icon) {
                 candidates.push(IconCandidate::from_fallback(path, size, root_rank));
             }
         }
@@ -252,6 +253,27 @@ impl IconResolver {
             }
         }
         None
+    }
+
+    /// List a theme's searchable directories once, the way its metadata is parsed once.
+    ///
+    /// A theme declares its directories in `index.theme`, but locally installed icons
+    /// often land in undeclared ones, which still have to be searched. Listing those
+    /// directories and probing the wanted name in each replaces enumerating every icon
+    /// file in the theme, which large themes make expensive for every lookup.
+    fn icon_directories(&self, theme_root: &Path) -> Arc<Vec<PathBuf>> {
+        if let Some(directories) = self.directory_cache.borrow().get(theme_root) {
+            return Arc::clone(directories);
+        }
+
+        let directories = Arc::new(crate::desktop::traversal::directories(
+            theme_root,
+            crate::desktop::traversal::Hidden::Exclude,
+        ));
+        self.directory_cache
+            .borrow_mut()
+            .insert(theme_root.to_path_buf(), Arc::clone(&directories));
+        directories
     }
 
     fn theme_metadata(&self, theme_root: &Path) -> Option<Arc<index::ThemeMetadata>> {
@@ -322,28 +344,6 @@ fn hash_path_metadata(path: &Path, hasher: &mut impl Hasher) {
     }
 }
 
-fn collect_named_candidates(
-    theme_root: &Path,
-    directory: &ThemeDirectory,
-    icon: &str,
-    requested_size: u16,
-    root_rank: usize,
-    candidates: &mut Vec<IconCandidate>,
-) {
-    for extension in ICON_EXTENSIONS {
-        let path = theme_root
-            .join(&directory.path)
-            .join(format!("{icon}.{extension}"));
-        if path.is_file() {
-            candidates.push(IconCandidate {
-                path,
-                directory_score: directory.score(requested_size),
-                root_rank,
-            });
-        }
-    }
-}
-
 #[derive(Clone)]
 struct IconCandidate {
     path: PathBuf,
@@ -394,17 +394,31 @@ fn extension_rank(path: &Path) -> u8 {
     }
 }
 
+fn collect_named_candidates(
+    theme_root: &Path,
+    directory: &ThemeDirectory,
+    icon: &str,
+    requested_size: u16,
+    root_rank: usize,
+    candidates: &mut Vec<IconCandidate>,
+) {
+    for extension in ICON_EXTENSIONS {
+        let path = theme_root
+            .join(&directory.path)
+            .join(format!("{icon}.{extension}"));
+        if path.is_file() {
+            candidates.push(IconCandidate {
+                path,
+                directory_score: directory.score(requested_size),
+                root_rank,
+            });
+        }
+    }
+}
+
 fn parse_directory_size(component: &str) -> Option<u16> {
     let leading = component.split('x').next()?;
     leading.parse().ok()
-}
-
-fn has_icon_name(path: &Path, icon: &str) -> bool {
-    path.file_stem().and_then(|stem| stem.to_str()) == Some(icon)
-        && path
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| ICON_EXTENSIONS.contains(&extension))
 }
 
 fn strip_icon_extension(icon: &str) -> &str {
@@ -451,6 +465,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: Default::default(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
         let themes = resolver.theme_chain();
@@ -546,6 +561,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: Default::default(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
         let first_themes = first.theme_chain();
@@ -567,6 +583,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: Default::default(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
         let second_themes = second.theme_chain();
@@ -615,6 +632,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -656,6 +674,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -689,6 +708,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -716,6 +736,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -752,6 +773,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -779,6 +801,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -822,6 +845,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -859,6 +883,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -892,6 +917,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -923,6 +949,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -944,6 +971,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -963,6 +991,7 @@ mod tests {
             pixmap_roots: vec![root.clone()],
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -979,6 +1008,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -999,6 +1029,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -1033,6 +1064,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
@@ -1061,6 +1093,7 @@ mod tests {
             pixmap_roots: Vec::new(),
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
+            directory_cache: Default::default(),
             persistent_cache: None,
         };
 
