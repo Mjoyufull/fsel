@@ -24,6 +24,7 @@ Usage:
 │  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
 │  ├─ -d, --detach                 Start launched apps without keeping this terminal attached
 │  ├─ --persistent                 Keep the detached launcher open after selection
+│  ├─ --on-launch <CMD>            Run CMD after each persistent launch
 │  ├─ -t, --tty                    Run terminal apps in this TTY instead of a terminal launcher
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging and imply maximum verbosity
@@ -100,6 +101,7 @@ Usage:
 │  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
 │  ├─ -d, --detach                 Start launched GUI apps without keeping this terminal attached
 │  ├─ --persistent                 Keep the detached launcher open after selection
+│  ├─ --on-launch <CMD>            Run CMD after each persistent launch, with FSEL_LAUNCHED_* set
 │  ├─ -t, --tty                    Run terminal apps in this TTY and replace the fsel process
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging, write logs under ~/.config/fsel/logs/, and imply -vvv
@@ -198,6 +200,7 @@ Quick help:
   -r, --replace          Replace an existing fsel/cclip instance
   -d, --detach           Start launched apps without keeping the terminal attached
       --persistent       Keep the detached launcher open after selection
+      --on-launch <CMD>  Run CMD after each persistent launch
   -v, --verbose          Print more diagnostics; repeat as -vv or -vvv
   -h                     Show the short summary
   -H, --help             Show the full option tree

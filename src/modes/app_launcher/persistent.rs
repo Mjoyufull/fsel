@@ -3,7 +3,9 @@
 use crate::cli::Opts;
 use crate::core::state::State;
 use redb::ReadableTable;
-use std::process::Child;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+use std::process::{Child, Stdio};
 use std::sync::Arc;
 
 #[derive(Default)]
@@ -25,8 +27,13 @@ impl PersistentSession {
         let name = app.name.clone();
         let message = match super::launch::spawn_app(app, cli) {
             Ok(child) => {
+                let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+                let hook = cli
+                    .on_launch
+                    .as_deref()
+                    .map(|command| notify_launch(&shell, command, app, child.id()));
                 self.children.push(child);
-                match record_launch(db, &name) {
+                let launched = match record_launch(db, &name) {
                     Ok(count) => {
                         let message = match crate::core::database::record_access(db, &name) {
                             Ok(frecency) => {
@@ -34,13 +41,24 @@ impl PersistentSession {
                                 format!("Launched {name}")
                             }
                             Err(error) => format!(
-                                "Launched {name}; history saved, but could not update frecency: {error}"
+                                "Launched {name}; history saved, \
+                                 but could not update frecency: {error}"
                             ),
                         };
                         state.update_launch_metadata(&name, count);
                         message
                     }
                     Err(error) => format!("Launched {name}; could not save history: {error}"),
+                };
+                match hook {
+                    Some(Ok(hook)) => {
+                        self.children.push(hook);
+                        launched
+                    }
+                    Some(Err(error)) => {
+                        format!("{launched}; launch command did not start: {error}")
+                    }
+                    None => launched,
                 }
             }
             Err(error) => format!("Could not launch {}: {error}", app.name),
@@ -52,6 +70,30 @@ impl PersistentSession {
             cli.verbose.unwrap_or(0),
         );
     }
+}
+
+/// Announce a launch to the session's hook command.
+///
+/// The launcher stays open, so nothing downstream of fsel can react to a launch on its
+/// own. The hook runs in its own process group with no terminal of its own: fsel owns
+/// the screen, and a hook that closes the window fsel runs in outlives that window.
+fn notify_launch(
+    shell: &str,
+    command: &str,
+    app: &crate::desktop::App,
+    pid: u32,
+) -> std::io::Result<Child> {
+    let mut hook = std::process::Command::new(shell);
+    hook.args(["-c", command])
+        .env("FSEL_LAUNCHED_APP", &app.name)
+        .env("FSEL_LAUNCHED_COMMAND", &app.command)
+        .env("FSEL_LAUNCHED_PID", pid.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    hook.process_group(0);
+    hook.spawn()
 }
 
 fn record_launch(db: &Arc<redb::Database>, name: &str) -> eyre::Result<u64> {
@@ -71,6 +113,7 @@ fn record_launch(db: &Arc<redb::Database>, name: &str) -> eyre::Result<u64> {
 mod tests {
     use super::*;
     use redb::ReadableDatabase;
+    use std::fs;
 
     fn database() -> Arc<redb::Database> {
         Arc::new(
@@ -204,6 +247,61 @@ mod tests {
         session.children[0].wait().unwrap();
         session.reap();
         assert!(session.children.is_empty());
+    }
+
+    fn report_path(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("fsel-on-launch-{label}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn a_launch_reports_the_application_to_the_hook_command() {
+        let db = database();
+        let report = report_path("reported");
+        let _ = fs::remove_file(&report);
+        let (mut state, mut cli) = state("/bin/true");
+        cli.on_launch = Some(format!(
+            "printf '%s|%s|%s' \"$FSEL_LAUNCHED_APP\" \"$FSEL_LAUNCHED_COMMAND\" \
+             \"$FSEL_LAUNCHED_PID\" > {}",
+            report.display()
+        ));
+        let mut session = PersistentSession::default();
+
+        session.launch(&mut state, &cli, &db);
+
+        assert_eq!(session.children.len(), 2);
+        let launched = session.children[0].id();
+        for child in &mut session.children {
+            child.wait().unwrap();
+        }
+        assert_eq!(
+            fs::read_to_string(&report).unwrap(),
+            format!("Fixture|/bin/true|{launched}")
+        );
+        let _ = fs::remove_file(&report);
+    }
+
+    #[test]
+    fn an_unusable_shell_reports_instead_of_running_the_hook() {
+        let (state, _) = state("/bin/true");
+
+        let failure = notify_launch("/nonexistent/fsel-shell", "true", &state.shown[0], 1);
+
+        assert!(failure.is_err());
+    }
+
+    #[test]
+    fn a_failed_launch_leaves_the_hook_command_unrun() {
+        let db = database();
+        let report = report_path("unrun");
+        let _ = fs::remove_file(&report);
+        let (mut state, mut cli) = state("/nonexistent/fsel-persistent-test");
+        cli.on_launch = Some(format!("printf 'ran' > {}", report.display()));
+        let mut session = PersistentSession::default();
+
+        session.launch(&mut state, &cli, &db);
+
+        assert!(session.children.is_empty());
+        assert!(!report.exists());
     }
 
     #[test]
