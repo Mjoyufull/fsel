@@ -235,6 +235,45 @@ spawns increment history once; a history-write failure is reported separately wi
 application launch. Exited children are reaped while the session remains open. Desktop `Path=`
 applies to the child, not to later launches or fsel itself.
 
+#### Reacting to a launch
+
+While the session stays open, nothing downstream of fsel can tell that something was launched.
+`--on-launch` runs a command through `$SHELL` after each successful launch, with the application
+in its environment:
+
+| Variable | Value |
+|---|---|
+| `FSEL_LAUNCHED_APP` | Name shown in the launcher |
+| `FSEL_LAUNCHED_COMMAND` | Command taken from the desktop entry |
+| `FSEL_LAUNCHED_PID` | Process id of the launched application |
+
+```sh
+fsel --detach --persistent --on-launch 'notify-send "Launched $FSEL_LAUNCHED_APP"'
+```
+
+The command runs in its own process group with no terminal of its own, so it outlives the window
+fsel runs in. That is what a script closing that window relies on. The hook's parent is fsel, so
+`$PPID` is fsel's process id, and the terminal running fsel is that process's parent:
+
+```sh
+#!/bin/sh
+# close-on-launch.sh: close the terminal fsel runs in, leaving any multiplexer alone
+[ -n "$TMUX" ] && exit 0
+terminal=$(ps -o ppid= -p "$PPID" | tr -d ' ')
+kill "$terminal"
+```
+
+```sh
+fsel --detach --persistent --on-launch ~/.local/bin/close-on-launch.sh
+```
+
+A launch that fails to spawn does not run the command, and a command that cannot start is reported
+next to the launch. The command's output is discarded, because fsel owns the terminal while the
+session is open; report from the command itself if it needs to say something.
+
+`--on-launch` requires `--persistent`: without it fsel exits after launching, which a wrapper
+script can already act on.
+
 This opt-in CLI flag requires detached interactive app launching. It rejects `--tty`, `--no-exec`,
 `--stdout`, direct-name launches (`-p`), dmenu, cclip, and maintenance commands. Use `-ss` to start
 with a query. Terminal applications use the configured external terminal launcher; they cannot
