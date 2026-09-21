@@ -6,6 +6,7 @@ use ratatui::{
     layout::Rect,
 };
 use std::{
+    borrow::Cow,
     hash::{Hash, Hasher},
     io::{self, Write},
 };
@@ -95,20 +96,44 @@ fn anchor_payload(buffer: &mut Buffer, area: Rect) {
         return;
     };
     let escape = if tmux { "\x1b\x1b" } else { "\x1b" };
+    let sixel = without_trailing_band_advance(&payload[start..]);
     // Upstream clears rows using CUD/CUU. CUD clamps at the bottom edge, so
     // its final CUU can overshoot. Re-anchor after that clear, before the DCS.
     let anchored = format!(
-        "{}{escape}[{};{}H{}\x1b[{};{}H",
+        "{}{escape}[{};{}H{sixel}\x1b[{};{}H",
         &payload[..start],
         u32::from(area.y) + 1,
         u32::from(area.x) + 1,
-        &payload[start..],
         u32::from(area.y) + 1,
         u32::from(area.x) + 2,
     );
     // Ratatui treats this escape payload as one cell. Sixel cursor advancement
     // varies by emulator; restore the position expected by the next text write.
     cell.set_symbol(&anchored);
+}
+
+/// Drop the graphics newlines that trail the final band of an encoded image.
+///
+/// The encoder ends every band with one, including the last, so the graphic advances a
+/// six-pixel band past the height its raster attributes declare. Terminals charge that
+/// band to the next text row: the image overruns the row below it, and against the
+/// bottom margin every frame scrolls the screen and carries the text panels up with it.
+fn without_trailing_band_advance(sixel: &str) -> Cow<'_, str> {
+    // ESC [ESC] P <params> q <data> ESC \ — the parameters hold no `q`, the data no escape.
+    let Some(data) = sixel
+        .find('P')
+        .and_then(|intro| sixel[intro..].find('q').map(|end| intro + end + 1))
+    else {
+        return Cow::Borrowed(sixel);
+    };
+    let Some(terminator) = sixel[data..].find('\x1b').map(|end| data + end) else {
+        return Cow::Borrowed(sixel);
+    };
+    let bands = sixel[data..terminator].trim_end_matches('-');
+    if bands.len() == terminator - data {
+        return Cow::Borrowed(sixel);
+    }
+    Cow::Owned(format!("{}{bands}{}", &sixel[..data], &sixel[terminator..]))
 }
 
 #[cfg(test)]
@@ -147,6 +172,49 @@ mod tests {
             output.is_empty(),
             "unchanged frames must not erase the image"
         );
+    }
+
+    #[test]
+    fn encoded_sixel_ends_on_its_last_band_instead_of_advancing_past_it() {
+        use image::{DynamicImage, Rgba, RgbaImage};
+        use ratatui::layout::Size;
+        use ratatui::widgets::Widget;
+        use ratatui_image::Image;
+        use ratatui_image::protocol::{Protocol, sixel::Sixel};
+
+        // 26 pixel rows over two cells: the height is not a multiple of the six-pixel band.
+        let image = DynamicImage::ImageRgba8(RgbaImage::from_pixel(16, 26, Rgba([0, 0, 0, 255])));
+        let protocol = Protocol::Sixel(Sixel::new(image, Size::new(2, 2), false).unwrap());
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 10));
+        let area = Rect::new(2, 8, 2, 2);
+        Image::new(&protocol).render(area, &mut buffer);
+        anchor_payload(&mut buffer, area);
+        let payload = buffer[(2, 8)].symbol();
+        let (bands, _) = payload.split_once("\x1b\\").unwrap();
+        assert!(!bands.ends_with('-'), "payload claims an extra band");
+    }
+
+    #[test]
+    fn every_trailing_band_newline_is_dropped_including_transparent_ones() {
+        let sixel = "\x1bP9;1;0q\"1;1;8;26#0!8~$---\x1b\\";
+        assert_eq!(
+            without_trailing_band_advance(sixel),
+            "\x1bP9;1;0q\"1;1;8;26#0!8~$\x1b\\"
+        );
+        let tmux = "\x1b\x1bP9;1;0q\"1;1;8;26#0!8~$-\x1b\\\x1b\\";
+        assert_eq!(
+            without_trailing_band_advance(tmux),
+            "\x1b\x1bP9;1;0q\"1;1;8;26#0!8~$\x1b\\\x1b\\"
+        );
+    }
+
+    #[test]
+    fn a_band_aligned_payload_is_left_untouched() {
+        let sixel = "\x1bP9;1;0q\"1;1;8;24#0!8~$\x1b\\";
+        assert!(matches!(
+            without_trailing_band_advance(sixel),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]
