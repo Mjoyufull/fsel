@@ -77,6 +77,9 @@ impl PersistentSession {
 /// The launcher stays open, so nothing downstream of fsel can react to a launch on its
 /// own. The hook runs in its own process group with no terminal of its own: fsel owns
 /// the screen, and a hook that closes the window fsel runs in outlives that window.
+///
+/// `FSEL_PID` is passed because the hook cannot find fsel by walking up from itself:
+/// a shell that forks rather than execs the command sits between the two.
 fn notify_launch(
     shell: &str,
     command: &str,
@@ -85,6 +88,7 @@ fn notify_launch(
 ) -> std::io::Result<Child> {
     let mut hook = std::process::Command::new(shell);
     hook.args(["-c", command])
+        .env("FSEL_PID", std::process::id().to_string())
         .env("FSEL_LAUNCHED_APP", &app.name)
         .env("FSEL_LAUNCHED_COMMAND", &app.command)
         .env("FSEL_LAUNCHED_PID", pid.to_string())
@@ -260,8 +264,8 @@ mod tests {
         let _ = fs::remove_file(&report);
         let (mut state, mut cli) = state("/bin/true");
         cli.on_launch = Some(format!(
-            "printf '%s|%s|%s' \"$FSEL_LAUNCHED_APP\" \"$FSEL_LAUNCHED_COMMAND\" \
-             \"$FSEL_LAUNCHED_PID\" > {}",
+            "printf '%s|%s|%s|%s' \"$FSEL_PID\" \"$FSEL_LAUNCHED_APP\" \
+             \"$FSEL_LAUNCHED_COMMAND\" \"$FSEL_LAUNCHED_PID\" > {}",
             report.display()
         ));
         let mut session = PersistentSession::default();
@@ -275,7 +279,7 @@ mod tests {
         }
         assert_eq!(
             fs::read_to_string(&report).unwrap(),
-            format!("Fixture|/bin/true|{launched}")
+            format!("{}|Fixture|/bin/true|{launched}", std::process::id())
         );
         let _ = fs::remove_file(&report);
     }
