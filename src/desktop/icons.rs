@@ -12,7 +12,7 @@ mod index;
 mod listing;
 mod theme;
 
-use index::{ThemeDirectory, read_theme_metadata};
+use index::read_theme_metadata;
 use listing::DirectoryListing;
 use theme::detect_icon_theme;
 
@@ -29,6 +29,7 @@ pub(crate) struct IconResolver {
     cache: HashMap<(String, u16), Option<PathBuf>>,
     metadata_cache: RefCell<HashMap<PathBuf, Option<Arc<index::ThemeMetadata>>>>,
     directory_cache: RefCell<HashMap<PathBuf, Arc<Vec<PathBuf>>>>,
+    ranking_cache: RefCell<HashMap<(String, u16), ThemeRanking>>,
     listing: DirectoryListing,
     persistent_cache: Option<PersistentResolverCache>,
 }
@@ -101,6 +102,7 @@ impl IconResolver {
             cache: HashMap::new(),
             metadata_cache: RefCell::new(HashMap::new()),
             directory_cache: RefCell::new(HashMap::new()),
+            ranking_cache: RefCell::new(HashMap::new()),
             listing: DirectoryListing::default(),
             persistent_cache: None,
         };
@@ -211,30 +213,87 @@ impl IconResolver {
     }
 
     fn find_declared_in_theme(&self, theme: &str, icon: &str, size: u16) -> Option<PathBuf> {
-        let mut candidates = Vec::new();
+        let ranked = self.ranked_directories(theme, size);
+        let mut best_fitting = ranked.first().map(|directory| directory.rank);
+        let mut best = None::<(u8, PathBuf)>;
+        let mut best_rank = None;
+        let mut file_name = String::new();
+        for (index, directory) in ranked.iter().enumerate() {
+            // Directories are ranked, so a worse-ranked one cannot hold a better icon.
+            if best_rank.is_some_and(|rank| rank != directory.rank) {
+                break;
+            }
+            // The best-fitting directories hold most icons. Once they do not hold this
+            // one, read the rest of the theme at once instead of one directory per probe.
+            if best_fitting.is_some_and(|rank| rank != directory.rank) {
+                self.listing
+                    .prefill(ranked[index..].iter().map(|entry| entry.path.as_path()));
+                best_fitting = None;
+            }
+            let Some((rank, path)) = self.named_icon(&directory.path, icon, &mut file_name) else {
+                continue;
+            };
+            if best.as_ref().is_none_or(|(current, _)| rank < *current) {
+                best = Some((rank, path));
+            }
+            best_rank = Some(directory.rank);
+        }
+        best.map(|(_, path)| path)
+    }
+
+    /// Declared directories of one theme, ordered by how well each fits a wanted size.
+    ///
+    /// The directory a themed icon belongs in is decided by size alone, so ranking the
+    /// directories before looking at any name lets a lookup stop at its first hit. A
+    /// theme declaring hundreds of directories otherwise charges every icon for all of
+    /// them, and the themes it inherits from repeat that.
+    fn ranked_directories(&self, theme: &str, size: u16) -> ThemeRanking {
+        let key = (theme.to_string(), size);
+        if let Some(ranked) = self.ranking_cache.borrow().get(&key) {
+            return Arc::clone(ranked);
+        }
+
+        let mut ranked = Vec::new();
         for (root_rank, root) in self.icon_roots.iter().enumerate() {
             let theme_root = root.join(theme);
             if !theme_root.is_dir() {
                 continue;
             }
-            // Declared directories are part of the theme, so reading the theme once
-            // also answers the undeclared lookup that a missing icon falls back to.
-            self.listing.prefill(&self.icon_directories(&theme_root));
-
-            if let Some(metadata) = self.theme_metadata(&theme_root) {
-                for directory in &metadata.directories {
-                    self.collect_named_candidates(
-                        &theme_root,
-                        directory,
-                        icon,
-                        size,
-                        root_rank,
-                        &mut candidates,
-                    );
+            let Some(metadata) = self.theme_metadata(&theme_root) else {
+                continue;
+            };
+            ranked.extend(metadata.directories.iter().map(|directory| {
+                let (distance, kind_rank) = directory.score(size);
+                RankedDirectory {
+                    path: theme_root.join(&directory.path),
+                    rank: (distance, kind_rank, root_rank),
                 }
-            }
+            }));
         }
-        best_candidate(candidates)
+        ranked.sort_by_key(|directory| directory.rank);
+        let ranking = Arc::new(ranked);
+        self.ranking_cache
+            .borrow_mut()
+            .insert(key, Arc::clone(&ranking));
+        ranking
+    }
+
+    /// The icon file `directory` holds for `icon`, with the rank of its extension.
+    fn named_icon(
+        &self,
+        directory: &Path,
+        icon: &str,
+        file_name: &mut String,
+    ) -> Option<(u8, PathBuf)> {
+        ICON_EXTENSIONS.iter().find_map(|extension| {
+            file_name.clear();
+            file_name.push_str(icon);
+            file_name.push('.');
+            file_name.push_str(extension);
+            self.listing
+                .holds(directory, file_name)
+                .then(|| (named_extension_rank(extension), directory.join(&file_name)))
+        })
     }
 
     fn find_fallback_in_theme(&self, theme: &str, icon: &str, size: u16) -> Option<PathBuf> {
@@ -244,35 +303,16 @@ impl IconResolver {
             if !theme_root.is_dir() {
                 continue;
             }
-            for path in
-                fallback::matching_paths(&self.icon_directories(&theme_root), icon, &self.listing)
-            {
+            // An undeclared directory is found by reading the theme, so read all of
+            // them at once rather than one at a time as the names are probed.
+            let directories = self.icon_directories(&theme_root);
+            self.listing
+                .prefill(directories.iter().map(PathBuf::as_path));
+            for path in fallback::matching_paths(&directories, icon, &self.listing) {
                 candidates.push(IconCandidate::from_fallback(path, size, root_rank));
             }
         }
         fallback::best_in_traversal_order(candidates, &self.icon_roots, theme)
-    }
-
-    fn collect_named_candidates(
-        &self,
-        theme_root: &Path,
-        directory: &ThemeDirectory,
-        icon: &str,
-        requested_size: u16,
-        root_rank: usize,
-        candidates: &mut Vec<IconCandidate>,
-    ) {
-        let directory_path = theme_root.join(&directory.path);
-        for extension in ICON_EXTENSIONS {
-            let file_name = format!("{icon}.{extension}");
-            if self.listing.holds(&directory_path, &file_name) {
-                candidates.push(IconCandidate {
-                    path: directory_path.join(file_name),
-                    directory_score: directory.score(requested_size),
-                    root_rank,
-                });
-            }
-        }
     }
 
     fn find_unthemed(&self, icon: &str) -> Option<PathBuf> {
@@ -376,6 +416,15 @@ fn hash_path_metadata(path: &Path, hasher: &mut impl Hasher) {
     }
 }
 
+/// Declared directories of one theme, ordered for one wanted size.
+type ThemeRanking = Arc<Vec<RankedDirectory>>;
+
+/// A declared theme directory with the rank it holds for one wanted size.
+struct RankedDirectory {
+    path: PathBuf,
+    rank: (u32, u8, usize),
+}
+
 #[derive(Clone)]
 struct IconCandidate {
     path: PathBuf,
@@ -410,18 +459,16 @@ impl IconCandidate {
     }
 }
 
-fn best_candidate(mut candidates: Vec<IconCandidate>) -> Option<PathBuf> {
-    candidates.sort_by_key(IconCandidate::score);
-    candidates
-        .into_iter()
-        .next()
-        .map(|candidate| candidate.path)
+fn extension_rank(path: &Path) -> u8 {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map_or(2, named_extension_rank)
 }
 
-fn extension_rank(path: &Path) -> u8 {
-    match path.extension().and_then(|value| value.to_str()) {
-        Some("png") => 0,
-        Some("svg" | "svgz") => 1,
+fn named_extension_rank(extension: &str) -> u8 {
+    match extension {
+        "png" => 0,
+        "svg" | "svgz" => 1,
         _ => 2,
     }
 }
@@ -476,6 +523,7 @@ mod tests {
             cache: Default::default(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -573,6 +621,7 @@ mod tests {
             cache: Default::default(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -596,6 +645,7 @@ mod tests {
             cache: Default::default(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -646,6 +696,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -689,6 +740,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -724,6 +776,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -753,6 +806,40 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn png_outranks_svg_across_equally_ranked_directories() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        for directory in ["64x64/apps", "64x64/places"] {
+            fs::create_dir_all(theme.join(directory)).expect("fixed directory should be created");
+        }
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=64x64/apps,64x64/places\n\
+             [64x64/apps]\nSize=64\nType=Fixed\n[64x64/places]\nSize=64\nType=Fixed\n",
+        )
+        .expect("theme metadata should be written");
+        fs::write(theme.join("64x64/apps/editor.svg"), b"svg").expect("SVG icon should be written");
+        let expected = theme.join("64x64/places/editor.png");
+        fs::write(&expected, b"png").expect("PNG icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -791,6 +878,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -820,6 +908,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -865,6 +954,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -904,6 +994,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -939,6 +1030,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -972,6 +1064,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -995,6 +1088,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -1016,6 +1110,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -1034,6 +1129,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -1056,6 +1152,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -1092,6 +1189,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };
@@ -1122,6 +1220,7 @@ mod tests {
             cache: std::collections::HashMap::new(),
             metadata_cache: Default::default(),
             directory_cache: Default::default(),
+            ranking_cache: Default::default(),
             listing: Default::default(),
             persistent_cache: None,
         };

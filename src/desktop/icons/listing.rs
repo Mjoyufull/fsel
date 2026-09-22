@@ -29,13 +29,13 @@ impl DirectoryListing {
     /// The first icon of a session waits on a cold directory cache rather than on the
     /// reading itself, so the whole theme is read at once instead of one directory at
     /// a time. Later icons then answer from memory.
-    pub(super) fn prefill(&self, directories: &[PathBuf]) {
+    pub(super) fn prefill<'a>(&self, directories: impl IntoIterator<Item = &'a Path>) {
         let missing = {
             let names = self.names.borrow();
             directories
-                .iter()
+                .into_iter()
                 .filter(|directory| !names.contains_key(*directory))
-                .cloned()
+                .map(Path::to_path_buf)
                 .collect::<Vec<_>>()
         };
         let read = missing
