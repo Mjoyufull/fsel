@@ -35,7 +35,7 @@ impl PersistentSession {
                 self.children.push(child);
                 let launched = match record_launch(db, &name) {
                     Ok(count) => {
-                        let message = match crate::core::database::record_access(db, &name) {
+                        let saved = match crate::core::database::record_access(db, &name) {
                             Ok(frecency) => {
                                 state.frecency_data = frecency;
                                 format!("Launched {name}")
@@ -46,7 +46,7 @@ impl PersistentSession {
                             ),
                         };
                         state.update_launch_metadata(&name, count);
-                        message
+                        saved
                     }
                     Err(error) => format!("Launched {name}; could not save history: {error}"),
                 };
@@ -104,8 +104,8 @@ fn record_launch(db: &Arc<redb::Database>, name: &str) -> eyre::Result<u64> {
     let transaction = db.begin_write()?;
     let count = {
         let mut table = transaction.open_table(crate::core::cache::HISTORY_TABLE)?;
-        let count = table.get(name)?.map_or(0, |value| value.value());
-        let count = count.saturating_add(1);
+        let previous: u64 = table.get(name)?.map_or(0, |value| value.value());
+        let count = previous.saturating_add(1);
         table.insert(name, count)?;
         count
     };
