@@ -255,12 +255,13 @@ fsel --detach --persistent --on-launch 'notify-send "Launched $FSEL_LAUNCHED_APP
 The command runs in its own process group with no terminal of its own, so it outlives the window
 fsel runs in. That is what a script closing that window relies on. Find fsel through `FSEL_PID`
 rather than `$PPID`: a shell that forks the command instead of replacing itself with it (fish,
-among others) sits between the script and fsel, so `$PPID` is the shell. Whatever started fsel —
-a terminal directly, or a shell inside one — closing its parent closes the window:
+among others) sits between the script and fsel, so `$PPID` is the shell. The script ends whatever
+started fsel. That closes the window when the terminal is what runs that process; started from a
+shell nested inside another one, it returns you to the outer shell instead:
 
 ```sh
 #!/bin/sh
-# close-on-launch.sh: close the terminal fsel runs in, leaving any multiplexer alone
+# close-on-launch.sh: end whatever started fsel, leaving any multiplexer alone
 [ -n "$TMUX" ] && exit 0
 kill "$(ps -o ppid= -p "$FSEL_PID" | tr -d ' ')"
 ```
