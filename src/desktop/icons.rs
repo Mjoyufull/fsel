@@ -425,10 +425,12 @@ struct RankedDirectory {
     rank: (u32, u8, usize),
 }
 
+/// An icon file found in a directory the theme does not declare a size for.
 #[derive(Clone)]
 struct IconCandidate {
     path: PathBuf,
-    directory_score: (u32, u8),
+    /// How far the size named by the path is from the wanted one.
+    distance: u32,
     root_rank: usize,
 }
 
@@ -443,19 +445,13 @@ impl IconCandidate {
             });
         Self {
             path,
-            directory_score: (distance, 3),
+            distance,
             root_rank,
         }
     }
 
-    fn score(&self) -> (u32, u8, usize, u8) {
-        let (distance, kind_rank) = self.directory_score;
-        (
-            distance,
-            kind_rank,
-            self.root_rank,
-            extension_rank(&self.path),
-        )
+    fn score(&self) -> (u32, usize, u8) {
+        (self.distance, self.root_rank, extension_rank(&self.path))
     }
 }
 
