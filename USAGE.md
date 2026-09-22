@@ -265,13 +265,15 @@ it and fsel:
 ```sh
 #!/bin/sh
 # close-on-launch.sh: close the terminal fsel runs in, leaving any multiplexer alone
-[ -n "$TMUX" ] && exit 0
+[ -n "$TMUX$ZELLIJ$STY" ] && exit 0
 session=$(ps -o sid= -p "$FSEL_PID" | tr -d ' ')
 kill "$(ps -o ppid= -p "$session" | tr -d ' ')"
 ```
 
-Under a terminal that serves several windows from one process, that parent is the server, and
-ending it closes every window it owns.
+The guard covers tmux, zellij and screen, because inside one of those the session leader's parent
+is the multiplexer's server and ending it takes every session with it. The same is true of a
+terminal that serves several windows from one process: there that parent is the server, and ending
+it closes every window it owns.
 
 ```sh
 fsel --detach --persistent --on-launch ~/.local/bin/close-on-launch.sh
