@@ -87,6 +87,21 @@ impl SixelDamage {
     }
 }
 
+/// Shrink `area` so a graphic drawn in it cannot reach the last row of `screen`.
+///
+/// Terminals leave the text cursor below a drawn graphic, and against the bottom margin
+/// that is a line feed: the screen scrolls, and every panel travels up with it on each
+/// frame. One row of slack gives that cursor a row that already exists. The Alacritty
+/// image fork advances past the graphic whatever its payload says, so the slack is what
+/// keeps an image panel at the bottom of the terminal from walking the interface away.
+pub(in crate::modes::dmenu) fn off_bottom_margin(mut area: Rect, screen: Rect) -> Rect {
+    let last_row = screen.bottom().saturating_sub(1);
+    if area.bottom() > last_row {
+        area.height = last_row.saturating_sub(area.y);
+    }
+    area
+}
+
 fn anchor_payload(buffer: &mut Buffer, area: Rect) {
     let cell = &mut buffer[(area.x, area.y)];
     let payload = cell.symbol();
@@ -192,6 +207,26 @@ mod tests {
         let payload = buffer[(2, 8)].symbol();
         let (bands, _) = payload.split_once("\x1b\\").unwrap();
         assert!(!bands.ends_with('-'), "payload claims an extra band");
+    }
+
+    #[test]
+    fn an_image_is_kept_off_the_last_row_of_the_terminal() {
+        let screen = Rect::new(0, 0, 40, 20);
+
+        assert_eq!(
+            off_bottom_margin(Rect::new(2, 4, 10, 5), screen),
+            Rect::new(2, 4, 10, 5),
+            "an area clear of the bottom margin is left alone"
+        );
+        assert_eq!(
+            off_bottom_margin(Rect::new(2, 14, 10, 6), screen),
+            Rect::new(2, 14, 10, 5)
+        );
+        assert_eq!(
+            off_bottom_margin(Rect::new(2, 19, 10, 1), screen),
+            Rect::new(2, 19, 10, 0),
+            "a slot with only the last row left draws nothing"
+        );
     }
 
     #[test]

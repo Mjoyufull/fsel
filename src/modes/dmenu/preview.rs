@@ -303,6 +303,11 @@ impl PreviewRuntime {
             return Ok(false);
         };
         let key = key.clone();
+        let area = if self.sixel.is_some() {
+            sixel::off_bottom_margin(area, frame.area())
+        } else {
+            area
+        };
         if self.image_manager.render_cached(frame, &key, area)? {
             if let Some(sixel) = &mut self.sixel {
                 sixel.record(frame.buffer_mut(), area);
