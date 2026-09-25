@@ -35,6 +35,10 @@ pub struct Opts {
     pub systemd_run: bool,
     pub uwsm: bool,
     pub detach: bool,
+    /// Keep the detached interactive launcher open after each selection.
+    pub persistent: bool,
+    /// Shell command run once per successful persistent launch.
+    pub on_launch: Option<String>,
     pub rounded_borders: bool,
     pub show_main_border: bool,
     pub show_items_border: bool,
@@ -186,6 +190,8 @@ impl Default for Opts {
             systemd_run: false,
             uwsm: false,
             detach: false,
+            persistent: false,
+            on_launch: None,
             rounded_borders: true,
             show_main_border: true,
             show_items_border: true,

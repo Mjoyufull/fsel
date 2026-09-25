@@ -37,6 +37,19 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
         && !default.clear_history
         && !default.clear_cache
         && !default.refresh_cache;
+    if default.persistent
+        && (!default.detach || default.tty || default.no_exec || !uses_desktop_icons)
+    {
+        return Err(CliError::message(
+            "Error: --persistent requires --detach in the interactive app launcher \
+             and cannot use --tty or --no-exec\n",
+        ));
+    }
+    if default.on_launch.is_some() && !default.persistent {
+        return Err(CliError::message(
+            "Error: --on-launch requires --persistent; without it fsel exits after launching\n",
+        ));
+    }
     if uses_desktop_icons
         && default.app_grid_columns > 0
         && (default.app_grid_columns > 64 || !(2..=16).contains(&default.app_grid_row_height))
@@ -209,6 +222,70 @@ Available methods: --launch-prefix, --systemd-run, --uwsm\n",
 mod tests {
     use super::validate;
     use crate::cli::{DesktopIconMode, Opts};
+
+    #[test]
+    fn persistent_requires_detached_interactive_launching() {
+        let valid = || Opts {
+            persistent: true,
+            detach: true,
+            ..Default::default()
+        };
+        assert!(validate(&mut valid(), 0).is_ok());
+        for mut invalid in [
+            Opts {
+                detach: false,
+                ..valid()
+            },
+            Opts {
+                tty: true,
+                ..valid()
+            },
+            Opts {
+                no_exec: true,
+                ..valid()
+            },
+            Opts {
+                stdout: true,
+                ..valid()
+            },
+            Opts {
+                program: Some("fixture".into()),
+                ..valid()
+            },
+            Opts {
+                dmenu_mode: true,
+                ..valid()
+            },
+            Opts {
+                cclip_mode: true,
+                ..valid()
+            },
+            Opts {
+                refresh_cache: true,
+                ..valid()
+            },
+        ] {
+            assert!(validate(&mut invalid, 0).is_err());
+        }
+    }
+
+    #[test]
+    fn a_launch_hook_requires_the_session_that_outlives_a_launch() {
+        let mut without_persistence = Opts {
+            detach: true,
+            on_launch: Some("true".into()),
+            ..Default::default()
+        };
+        assert!(validate(&mut without_persistence, 0).is_err());
+
+        let mut persistent = Opts {
+            persistent: true,
+            detach: true,
+            on_launch: Some("true".into()),
+            ..Default::default()
+        };
+        assert!(validate(&mut persistent, 0).is_ok());
+    }
 
     #[test]
     fn grid_dimensions_are_validated_only_when_active() {
