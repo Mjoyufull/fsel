@@ -260,20 +260,29 @@ among others) sits between the script and fsel, so `$PPID` is the shell.
 Signal the terminal rather than fsel's parent. That parent is usually an interactive shell, and
 an interactive shell ignores what would end it: bash ignores `TERM`, and fish ignores `TERM` and
 `HUP` alike. The terminal is the parent of the session leader, however many shells sit between
-it and fsel:
+it and fsel. Under tmux there is no terminal to end — fsel outlives every window that attaches to
+its session — so the client is detached instead:
 
 ```sh
 #!/bin/sh
-# close-on-launch.sh: close the terminal fsel runs in, leaving any multiplexer alone
-[ -n "$TMUX$ZELLIJ$STY" ] && exit 0
+# close-on-launch.sh: leave the window fsel was launched from
+if [ -n "$TMUX" ]; then
+    # fsel stays in the session; detaching closes whatever window is attached to it
+    tmux detach-client -s "$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}')"
+    exit 0
+fi
+[ -n "$ZELLIJ$STY" ] && exit 0
 session=$(ps -o sid= -p "$FSEL_PID" | tr -d ' ')
 kill "$(ps -o ppid= -p "$session" | tr -d ' ')"
 ```
 
-The guard covers tmux, zellij and screen, because inside one of those the session leader's parent
-is the multiplexer's server and ending it takes every session with it. The same is true of a
-terminal that serves several windows from one process: there that parent is the server, and ending
-it closes every window it owns.
+The tmux branch is what makes a persistent session usable as a launcher you attach to: fsel holds
+its query, selection and prepared icons in the session, and each launch hands the screen back
+without ending anything. Zellij and screen are still left alone, because the detach each of them
+needs is not this command and their servers own more than the one window.
+
+Under a terminal that serves several windows from one process, the session leader's parent is the
+server, and ending it closes every window it owns.
 
 ```sh
 fsel --detach --persistent --on-launch ~/.local/bin/close-on-launch.sh
