@@ -24,18 +24,26 @@ impl PersistentSession {
         self.children
             .retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_))));
 
-        let mut failure = None;
+        let mut failed = Vec::new();
         self.hooks.retain_mut(|hook| match hook.try_wait() {
             Ok(None) => true,
             Ok(Some(status)) => {
                 if !status.success() {
-                    failure.get_or_insert_with(|| format!("Launch command {status}"));
+                    failed.push(status);
                 }
                 false
             }
             Err(_) => false,
         });
-        failure
+        match failed.as_slice() {
+            [] => None,
+            [status] => Some(format!("Launch command {status}")),
+            // Several launches can finish between two frames, and one line reports them.
+            [.., last] => Some(format!(
+                "{} launch commands failed, last {last}",
+                failed.len()
+            )),
+        }
     }
 
     pub(super) fn launch(&mut self, state: &mut State, cli: &Opts, db: &Arc<redb::Database>) {
@@ -319,6 +327,25 @@ mod tests {
         let failure = session.reap().expect("a failed command should be reported");
         assert!(failure.contains("126"), "{failure}");
         assert!(session.hooks.is_empty());
+    }
+
+    #[test]
+    fn launch_commands_failing_together_are_counted() {
+        let db = database();
+        let (mut state, mut cli) = state("/bin/true");
+        cli.on_launch = Some("exit 7".to_string());
+        let mut session = PersistentSession::default();
+
+        session.launch(&mut state, &cli, &db);
+        session.launch(&mut state, &cli, &db);
+
+        assert_eq!(session.hooks.len(), 2);
+        for hook in &mut session.hooks {
+            hook.wait().unwrap();
+        }
+        let failure = session.reap().expect("failed commands should be reported");
+        assert!(failure.starts_with("2 launch commands failed"), "{failure}");
+        assert!(failure.contains('7'), "{failure}");
     }
 
     #[test]
