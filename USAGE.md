@@ -280,8 +280,10 @@ fsel --detach --persistent --on-launch ~/.local/bin/close-on-launch.sh
 ```
 
 A launch that fails to spawn does not run the command, and a command that cannot start is reported
-next to the launch. The command's output is discarded, because fsel owns the terminal while the
-session is open; report from the command itself if it needs to say something.
+next to the launch. So is one that runs and exits non-zero, once it finishes — a script the shell
+cannot execute is reported that way, since the shell starts and the script does not. The command's
+output is discarded, because fsel owns the terminal while the session is open; report from the
+command itself if it needs to say something.
 
 `--on-launch` requires `--persistent`: without it fsel exits after launching, which a wrapper
 script can already act on.

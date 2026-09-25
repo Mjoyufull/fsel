@@ -11,12 +11,31 @@ use std::sync::Arc;
 #[derive(Default)]
 pub(super) struct PersistentSession {
     children: Vec<Child>,
+    hooks: Vec<Child>,
 }
 
 impl PersistentSession {
-    pub(super) fn reap(&mut self) {
+    /// Collect the children that have finished, reporting a launch command that failed.
+    ///
+    /// The command keeps no terminal of its own and fsel never waits for it, so one that
+    /// starts and then fails leaves no trace at all. A script the shell cannot execute is
+    /// the common case, and it is silent exactly when it needs explaining.
+    pub(super) fn reap(&mut self) -> Option<String> {
         self.children
             .retain_mut(|child| !matches!(child.try_wait(), Ok(Some(_))));
+
+        let mut failure = None;
+        self.hooks.retain_mut(|hook| match hook.try_wait() {
+            Ok(None) => true,
+            Ok(Some(status)) => {
+                if !status.success() {
+                    failure.get_or_insert_with(|| format!("Launch command {status}"));
+                }
+                false
+            }
+            Err(_) => false,
+        });
+        failure
     }
 
     pub(super) fn launch(&mut self, state: &mut State, cli: &Opts, db: &Arc<redb::Database>) {
@@ -52,7 +71,7 @@ impl PersistentSession {
                 };
                 match hook {
                     Some(Ok(hook)) => {
-                        self.children.push(hook);
+                        self.hooks.push(hook);
                         launched
                     }
                     Some(Err(error)) => {
@@ -177,7 +196,7 @@ mod tests {
         for child in &mut session.children {
             child.wait().unwrap();
         }
-        session.reap();
+        assert!(session.reap().is_none());
         assert!(session.children.is_empty());
     }
 
@@ -249,7 +268,7 @@ mod tests {
                 .contains("Launched Fixture; could not save history")
         );
         session.children[0].wait().unwrap();
-        session.reap();
+        assert!(session.reap().is_none());
         assert!(session.children.is_empty());
     }
 
@@ -272,16 +291,34 @@ mod tests {
 
         session.launch(&mut state, &cli, &db);
 
-        assert_eq!(session.children.len(), 2);
+        assert_eq!(session.children.len(), 1);
+        assert_eq!(session.hooks.len(), 1);
         let launched = session.children[0].id();
-        for child in &mut session.children {
+        for child in session.children.iter_mut().chain(&mut session.hooks) {
             child.wait().unwrap();
         }
         assert_eq!(
             fs::read_to_string(&report).unwrap(),
             format!("{}|Fixture|/bin/true|{launched}", std::process::id())
         );
+        assert!(session.reap().is_none());
         let _ = fs::remove_file(&report);
+    }
+
+    #[test]
+    fn a_launch_command_that_fails_is_reported_rather_than_swallowed() {
+        let db = database();
+        let (mut state, mut cli) = state("/bin/true");
+        cli.on_launch = Some("exit 126".to_string());
+        let mut session = PersistentSession::default();
+
+        session.launch(&mut state, &cli, &db);
+
+        assert_eq!(session.hooks.len(), 1);
+        session.hooks[0].wait().unwrap();
+        let failure = session.reap().expect("a failed command should be reported");
+        assert!(failure.contains("126"), "{failure}");
+        assert!(session.hooks.is_empty());
     }
 
     #[test]

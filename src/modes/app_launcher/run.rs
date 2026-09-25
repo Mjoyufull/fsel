@@ -154,7 +154,15 @@ pub async fn run(cli: Opts) -> Result<()> {
     let mut persistent = super::persistent::PersistentSession::default();
 
     loop {
-        persistent.reap();
+        if let Some(failure) = persistent.reap() {
+            state.set_status_message(failure);
+            state.update_info(
+                cli.highlight_color,
+                cli.fancy_mode,
+                cli.verbose.unwrap_or(0),
+            );
+            needs_redraw = true;
+        }
         if needs_redraw {
             let mut render_result = Ok((false, false));
             terminal.draw(|frame| {
