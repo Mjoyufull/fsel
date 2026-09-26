@@ -1,6 +1,6 @@
 <div align="center">
 
-  ![Logo](./assets/fsel.png)
+  ![Logo](./assets/usage.png)
 
 *(fast select)*
 
