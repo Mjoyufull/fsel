@@ -1,4 +1,4 @@
-// Clipboard database scanning functions
+//! Clipboard database queries and history parsing.
 
 use super::CclipItem;
 use eyre::{Result, eyre};
@@ -48,13 +48,13 @@ pub fn get_clipboard_history_by_tag(tag: &str) -> Result<Vec<CclipItem>> {
         return Err(eyre!("Failed to get clipboard history"));
     }
 
-    let items: Result<Vec<CclipItem>> = String::from_utf8_lossy(&output.stdout)
+    let items: Vec<CclipItem> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| CclipItem::from_line(line.to_string()))
-        .collect();
+        .collect::<Result<_>>()?;
 
-    items
+    Ok(items)
 }
 
 fn run_cclip_list(extra_args: &[&str], field_sets: &[&str]) -> Result<Output> {

@@ -42,7 +42,7 @@ Launch program directly, bypassing TUI. Respects \fB\-\-match-mode\fR; exact mod
 Pre-fill search in TUI (works with app launcher, dmenu, and cclip modes; must be last option)
 .TP
 .BR \-v ", " \-\-verbose
-Increase verbosity level (can be used multiple times: -v, -vv, -vvv)
+Increase verbosity level (can be used multiple times: -v, -vv, -vvv). In cclip mode, -v shows raw textual content and -vvv adds row ID, MIME type, and preview-view diagnostics. Binary payloads are never printed as text.
 .TP
 .B \-\-no-exec
 Print selected application to stdout instead of launching
@@ -204,6 +204,9 @@ Wipe ALL tags from cclip entries (requires cclip 3.2+). Removes the tag text fro
 .TP
 .B \-\-cclip-show-tag-color-names
 Show tag color names in clipboard item display (use with --cclip)
+.TP
+.BR \-x ", " \-\-copy-rendered
+Copy rendered HTML as text/plain;charset=utf-8 instead of preserving the HTML payload. wl-copy is used when available, with cclip copy - as a fallback. Other MIME types retain the original copy path. This is independent from verbosity, so -vx and -vvvvx show raw diagnostics while copying rendered text.
 .SS "General Options"
 .TP
 .BR \-h
@@ -330,7 +333,15 @@ Jump to first/last item
 .SS "Clipboard Mode Keybinds"
 .TP
 .BR "Alt-i"
-Open fullscreen image preview for selected clipboard item (native TUI; press Esc or q to return)
+Open a fullscreen image or scrollable text preview for the selected clipboard item.
+Text preserves newlines and indentation and wraps to the terminal width by default.
+HTML is rendered unless -v requests raw markup.
+Up/Down or j/k scroll; PageDown/Space/f and PageUp/b page; Home/g and End/G jump to the ends.
+Scrolling counts displayed rows, including wrapped continuations; resizing reflows the text.
+Set [cclip] wrap_long_lines = false or FSEL_CCLIP_WRAP_LONG_LINES=false to disable wrapping;
+Left/Right or h/l then pan long lines. Configured up/down bindings and the mouse wheel also scroll.
+Esc, q, Ctrl-C, or the configured image_preview binding returns without changing the selection.
+Enter does not copy while reading; return to the selector to copy.
 .TP
 .BR "Ctrl-T"
 Tag selected clipboard item

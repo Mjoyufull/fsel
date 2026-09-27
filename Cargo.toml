@@ -63,6 +63,8 @@ roxmltree = "0.21"
 svgtypes = "0.16"
 futures = "0.3"
 unicode-width = "0.2.2"
+encoding_rs = "0.8"
+html-escape = "0.2"
 
 ignore = "0.4.33"
 rayon = "1.11.0"

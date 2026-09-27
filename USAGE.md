@@ -432,6 +432,30 @@ Image rows show the local timestamp, readable size, and MIME type. When cclip li
 numbers are enabled, the cclip row ID is prefixed; an exact numeric ID search ranks
 that entry first without excluding normal text matches.
 
+### Content Preview Diagnostics
+```sh
+# Show raw textual content instead of rendering HTML as readable text
+fsel --cclip -v
+
+# Also identify the selected row ID, MIME type, and active preview view
+fsel --cclip -vvv
+
+# Show raw HTML for inspection, but copy its rendered text when selected
+fsel --cclip -vx
+
+# Verbosity remains independent from rendered copying
+fsel --cclip -vvvvx
+```
+
+Binary clipboard payloads are never printed as text. Image entries continue to use the terminal
+image preview when supported. `-x` changes only HTML copying: rendered HTML is offered as
+`text/plain;charset=utf-8`; plain text, images, and other MIME types retain the original copy path.
+`wl-copy` is used when available, with `cclip copy -` as the rendered-text fallback. Interactive
+HTML previews load complete content only for selected entries; noninteractive tagged listings also
+hydrate otherwise blank truncated HTML. Text decoding honors declared MIME charsets, replaces
+invalid byte sequences for display, preserves `<pre>` whitespace, and decodes standard named
+entities. Empty clipboard payloads remain valid on both original and rendered copy paths.
+
 ### Tag Management
 ```sh
 # Filter clipboard items by tag
@@ -460,9 +484,25 @@ fsel --cclip --tag wipe
 fsel --cclip --cclip-show-tag-color-names
 ```
 
+### Fullscreen text preview
+
+Select a text entry and press `Alt+i` to read its full content. Newlines and indentation are
+preserved, and long lines wrap to the terminal width by default. HTML uses the same rendered text as the inline
+preview, or raw markup with `-v`. Content loads asynchronously while the preview remains usable.
+
+Use Up/Down or `j`/`k` to scroll, Page Down/Space/`f` and Page Up/`b` for pages,
+Home/`g` and End/`G` for the ends. Scrolling and the footer count displayed rows, including wrapped
+continuations. Resizing reflows text to the new width. Set `[cclip] wrap_long_lines = false`
+(or `FSEL_CCLIP_WRAP_LONG_LINES=false`) to disable wrapping and use Left/Right or `h`/`l` to pan.
+Mouse-wheel scrolling
+and configured up/down bindings work too. `q`, Escape, Ctrl+C, or the configured preview
+binding returns to the selector with the query and selection intact. Enter does not copy from
+this view; return to the selector first. The existing `image_preview` binding controls both
+image and text fullscreen previews. Disabling inline images does not disable text previews.
+
 ### Keybindings in cclip mode
 - `Enter` - Copy selection to clipboard
-- `Alt+i` - Display image fullscreen (bypass TUI)
+- `Alt+i` - Open a fullscreen image or scrollable text preview
 - `Alt+Delete` - Delete selected clipboard entry (selection stays at the same physical index; next item becomes selected)
 - `Esc` - Exit without copying
 - Arrow keys - Navigate

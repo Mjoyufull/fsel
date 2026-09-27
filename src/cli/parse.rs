@@ -203,6 +203,40 @@ mod tests {
     }
 
     #[test]
+    fn clustered_verbosity_and_rendered_copy_flags_parse() {
+        let command =
+            parse_with_config(&args(&["fsel", "--cclip", "-vvvvx"]), FselConfig::default())
+                .unwrap();
+        let CliCommand::Run(opts) = command else {
+            panic!("expected run command");
+        };
+
+        assert_eq!(opts.verbose, Some(4));
+        assert!(opts.cclip_copy_rendered);
+    }
+
+    #[test]
+    fn rendered_copy_flag_can_follow_single_clustered_verbosity() {
+        let command =
+            parse_with_config(&args(&["fsel", "--cclip", "-vx"]), FselConfig::default()).unwrap();
+        let CliCommand::Run(opts) = command else {
+            panic!("expected run command");
+        };
+
+        assert_eq!(opts.verbose, Some(1));
+        assert!(opts.cclip_copy_rendered);
+    }
+
+    #[test]
+    fn rendered_copy_requires_cclip_mode() {
+        let error = parse_with_config(&args(&["fsel", "-x"]), FselConfig::default()).unwrap_err();
+
+        assert!(
+            matches!(error, CliError::Message(message) if message.contains("requires --cclip mode"))
+        );
+    }
+
+    #[test]
     fn preview_flag_enables_dmenu_mode_and_preserves_command() {
         let command = parse_with_config(
             &args(&["fsel", "--preview", "cat {}"]),

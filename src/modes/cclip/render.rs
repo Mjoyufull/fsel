@@ -126,6 +126,9 @@ pub(super) fn draw(
                 false
             };
 
+        if image_rendered {
+            render_image_diagnostics(frame, ui, content_inner, options);
+        }
         if show_content_panel && !image_rendered {
             frame.render_widget(content_paragraph, content_inner);
         }
@@ -199,6 +202,30 @@ pub(super) fn draw(
     draw_result?;
     render_error?;
     Ok(max_visible)
+}
+
+fn render_image_diagnostics(
+    frame: &mut ratatui::Frame,
+    ui: &DmenuUI<'_>,
+    area: Rect,
+    options: &CclipOptions,
+) {
+    let Some(diagnostics) = ui
+        .selected
+        .and_then(|selected| ui.shown.get(selected))
+        .and_then(|item| ui.get_cclip_diagnostics(item))
+    else {
+        return;
+    };
+    let inner = area;
+    if inner.height == 0 {
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new(diagnostics)
+            .style(ratatui::style::Style::default().fg(options.main_text_color)),
+        Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
+    );
 }
 
 fn set_synchronized_output(enabled: bool, enter: bool) {

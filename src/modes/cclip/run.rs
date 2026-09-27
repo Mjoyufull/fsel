@@ -52,6 +52,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     crate::ui::terminal::clear_fullscreen(&mut terminal).wrap_err("Failed to clear terminal")?;
 
     let mut ui = DmenuUI::new(items, options.wrap_long_lines, options.show_line_numbers);
+    ui.set_cclip_verbosity(cli.verbose.unwrap_or(0));
     if let Some(search) = &cli.search_string {
         ui.query = search.clone();
         ui.filter();
@@ -100,6 +101,9 @@ pub async fn run(cli: &Opts) -> Result<()> {
         tokio::select! {
             Some(_) = image_runtime.redraw_rx.recv() => {
                 needs_redraw = true;
+            }
+            completed = ui.wait_for_cclip_content(), if ui.has_cclip_content_activity() => {
+                needs_redraw = completed;
             }
             maybe_event = input.next() => {
                 let Some(event) = maybe_event else {

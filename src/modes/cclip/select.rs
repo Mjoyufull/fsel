@@ -1,8 +1,8 @@
-// Selection, copying, and tagging functionality
+//! Clipboard selection, provider lifecycle, deletion, and tagging.
 
 use super::CclipItem;
 use eyre::{Result, eyre};
-use std::io;
+use std::io::{self, Cursor, Read};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -51,46 +51,19 @@ impl CclipItem {
             .take()
             .ok_or_else(|| eyre!("failed to capture cclip stdout"))?;
 
-        let mut wl_copy_child = Command::new("wl-copy")
-            .args(["--type", &self.mime_type])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-
-        let wl_copy_stdin = wl_copy_child
-            .stdin
-            .take()
-            .ok_or_else(|| eyre!("failed to open wl-copy stdin"))?;
-
-        let pipe_handle = std::thread::spawn(move || {
-            let mut source = cclip_stdout;
-            let mut sink = wl_copy_stdin;
-            io::copy(&mut source, &mut sink)
-        });
-
-        let cclip_output = cclip_child.wait_with_output()?;
-        let copied_bytes = pipe_handle
-            .join()
-            .map_err(|_| eyre!("clipboard pipe thread panicked"))??;
-        wait_for_clipboard_provider_start(
-            &mut wl_copy_child,
-            "wl-copy",
+        let copy_result = copy_reader_with_wl_copy(
+            cclip_stdout,
+            &self.mime_type,
             CLIPBOARD_PROVIDER_STARTUP_TIMEOUT,
-        )?;
-
+        );
+        let cclip_output = cclip_child.wait_with_output()?;
         if !cclip_output.status.success() {
             return Err(eyre!(
                 "cclip get failed: {}",
                 String::from_utf8_lossy(&cclip_output.stderr)
             ));
         }
-
-        if copied_bytes == 0 {
-            return Err(eyre!("cclip get returned no data"));
-        }
-
-        Ok(())
+        copy_result.map(|_| ())
     }
 
     /// Copy this item back to the clipboard.
@@ -101,6 +74,105 @@ impl CclipItem {
 
         self.copy_to_clipboard_wayland()
     }
+
+    /// Copy rendered HTML as plain text, preserving the established path for every other MIME type.
+    pub fn copy_rendered_to_clipboard(&self) -> Result<()> {
+        if !super::html::is_html_mime(&self.mime_type) {
+            return self.copy_to_clipboard();
+        }
+        let rendered_content =
+            rendered_clipboard_content(&self.mime_type, self.get_content_for_preview()?)?
+                .ok_or_else(|| eyre!("failed to render HTML clipboard content"))?;
+
+        if std::env::var("WAYLAND_DISPLAY").is_err() {
+            return Err(eyre!("cclip mode requires a Wayland session"));
+        }
+        if command_is_available("wl-copy")
+            && copy_reader_with_wl_copy(
+                Cursor::new(rendered_content.clone()),
+                "text/plain;charset=utf-8",
+                CLIPBOARD_PROVIDER_STARTUP_TIMEOUT,
+            )
+            .is_ok()
+        {
+            return Ok(());
+        }
+        copy_bytes_with_cclip(rendered_content, CLIPBOARD_PROVIDER_STARTUP_TIMEOUT)
+    }
+}
+
+fn rendered_clipboard_content(mime_type: &str, bytes: Vec<u8>) -> Result<Option<Vec<u8>>> {
+    if !super::html::is_html_mime(mime_type) {
+        return Ok(None);
+    }
+
+    let html =
+        super::html::decode_text_bytes(mime_type, &bytes).map_err(|message| eyre!(message))?;
+    Ok(Some(
+        super::html::text_for_display(mime_type, &html).into_bytes(),
+    ))
+}
+
+fn copy_reader_with_wl_copy(
+    source: impl Read + Send + 'static,
+    mime_type: &str,
+    timeout: Duration,
+) -> Result<u64> {
+    let mut child = Command::new("wl-copy")
+        .args(["--type", mime_type])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    pipe_to_clipboard_provider(source, &mut child, "wl-copy", timeout)
+}
+
+fn copy_bytes_with_cclip(bytes: Vec<u8>, timeout: Duration) -> Result<()> {
+    let mut child = Command::new("cclip")
+        .args(["copy", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+    pipe_to_clipboard_provider(Cursor::new(bytes), &mut child, "cclip copy -", timeout).map(|_| ())
+}
+
+fn pipe_to_clipboard_provider(
+    mut source: impl Read + Send + 'static,
+    child: &mut Child,
+    command: &str,
+    timeout: Duration,
+) -> Result<u64> {
+    let Some(child_stdin) = child.stdin.take() else {
+        terminate_and_reap(child);
+        return Err(eyre!("failed to open {command} stdin"));
+    };
+
+    let pipe_handle = std::thread::spawn(move || {
+        let mut sink = child_stdin;
+        io::copy(&mut source, &mut sink)
+    });
+    let copy_result = match pipe_handle.join() {
+        Ok(result) => result,
+        Err(_) => {
+            terminate_and_reap(child);
+            return Err(eyre!("clipboard pipe thread panicked"));
+        }
+    };
+    let copied_bytes = match copy_result {
+        Ok(copied_bytes) => copied_bytes,
+        Err(error) => {
+            terminate_and_reap(child);
+            return Err(error.into());
+        }
+    };
+    wait_for_clipboard_provider_start(child, command, timeout)?;
+    Ok(copied_bytes)
+}
+
+fn terminate_and_reap(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn wait_for_clipboard_provider_start(
@@ -217,7 +289,11 @@ pub fn delete_tag(tag: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardProviderState, wait_for_clipboard_provider_start};
+    use super::{
+        ClipboardProviderState, pipe_to_clipboard_provider, rendered_clipboard_content,
+        wait_for_clipboard_provider_start,
+    };
+    use std::io::{self, Read};
     use std::process::{Command, Stdio};
     use std::time::Duration;
 
@@ -257,5 +333,73 @@ mod tests {
             wait_for_clipboard_provider_start(&mut child, "test-provider", Duration::from_secs(1));
 
         assert!(result.is_err());
+    }
+
+    struct FailingReader;
+
+    impl Read for FailingReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::other("source failed"))
+        }
+    }
+
+    #[test]
+    fn provider_is_terminated_when_the_pipe_fails() {
+        let mut child = Command::new("sh")
+            .args(["-c", "cat >/dev/null; sleep 30"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("test provider should spawn");
+
+        let result = pipe_to_clipboard_provider(
+            FailingReader,
+            &mut child,
+            "test-provider",
+            Duration::from_secs(1),
+        );
+
+        assert!(result.is_err());
+        assert!(
+            child
+                .try_wait()
+                .expect("provider status should be readable")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn rendered_copy_converts_html_to_plain_text() {
+        let rendered =
+            rendered_clipboard_content("text/html", b"<p>Hello &amp; goodbye</p>".to_vec())
+                .expect("valid HTML should render");
+
+        assert_eq!(rendered.as_deref(), Some(b"Hello & goodbye".as_slice()));
+    }
+
+    #[test]
+    fn rendered_copy_accepts_empty_visible_html() {
+        let rendered = rendered_clipboard_content("text/html", b"<style>x {}</style>".to_vec())
+            .expect("valid empty HTML should render");
+
+        assert_eq!(rendered, Some(Vec::new()));
+    }
+
+    #[test]
+    fn rendered_copy_honors_the_declared_charset() {
+        let rendered =
+            rendered_clipboard_content("text/html;charset=iso-8859-1", b"<p>caf\xe9</p>".to_vec())
+                .expect("declared HTML charset should render");
+
+        assert_eq!(rendered.as_deref(), Some("café".as_bytes()));
+    }
+
+    #[test]
+    fn rendered_copy_leaves_non_html_on_the_original_copy_path() {
+        let rendered = rendered_clipboard_content("text/plain", b"plain".to_vec())
+            .expect("plain text should be accepted");
+
+        assert_eq!(rendered, None);
     }
 }

@@ -1,10 +1,14 @@
+//! Shared selector state, filtering, content previews, and cclip fetch coordination.
+
 mod content;
 mod filter;
 mod tag_mode;
 
-use std::collections::HashMap;
-use std::sync::mpsc::Receiver;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use nucleo_matcher::{Config, Matcher};
 use ratatui::text::Line;
@@ -12,6 +16,8 @@ use ratatui::text::Line;
 use crate::common::Item;
 
 pub use tag_mode::TagMode;
+
+type CclipContentResult = (u64, String, Option<String>);
 
 /// Dmenu-specific UI for filtering and sorting.
 pub struct DmenuUI<'a> {
@@ -39,8 +45,20 @@ pub struct DmenuUI<'a> {
     pub tag_mode: TagMode,
     /// Cache for clipboard content to avoid repeated cclip calls.
     content_cache: HashMap<String, String>,
-    /// In-flight clipboard content fetches keyed by row ID.
-    content_requests: HashMap<String, Receiver<Option<String>>>,
+    /// Clipboard rows currently being fetched.
+    content_requests: HashSet<String>,
+    /// Clipboard rows whose fetch or decoding failed.
+    content_failures: HashMap<String, Instant>,
+    /// Completed clipboard fetch sender shared with bounded workers.
+    content_sender: UnboundedSender<CclipContentResult>,
+    /// Completed clipboard fetches drained by the UI thread.
+    content_receiver: UnboundedReceiver<CclipContentResult>,
+    /// Fetches still occupying one of this selector's worker slots.
+    content_in_flight: Arc<AtomicUsize>,
+    /// Invalidates results from an earlier item or verbosity generation.
+    content_generation: u64,
+    /// Controls raw content and diagnostics in cclip previews.
+    cclip_verbosity: u64,
     /// Temporary error/info message with expiration time.
     pub temp_message: Option<(String, Instant)>,
     #[doc(hidden)]
@@ -50,6 +68,7 @@ pub struct DmenuUI<'a> {
 impl<'a> DmenuUI<'a> {
     /// Creates a new DmenuUI from a `Vec<Item>`.
     pub fn new(items: Vec<Item>, wrap_long_lines: bool, show_line_numbers: bool) -> DmenuUI<'a> {
+        let (content_sender, content_receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut ui = DmenuUI {
             shown: vec![],
             hidden: items,
@@ -63,7 +82,13 @@ impl<'a> DmenuUI<'a> {
             match_nth: None,
             tag_mode: TagMode::Normal,
             content_cache: HashMap::new(),
-            content_requests: HashMap::new(),
+            content_requests: HashSet::new(),
+            content_failures: HashMap::new(),
+            content_sender,
+            content_receiver,
+            content_in_flight: Arc::new(AtomicUsize::new(0)),
+            content_generation: 0,
+            cclip_verbosity: 0,
             temp_message: None,
             matcher: Matcher::new(Config::DEFAULT.match_paths()),
         };
@@ -79,6 +104,24 @@ impl<'a> DmenuUI<'a> {
     /// Set match_nth columns.
     pub fn set_match_nth(&mut self, columns: Option<Vec<usize>>) {
         self.match_nth = columns;
+    }
+
+    /// Set cclip preview verbosity, clearing content fetched under the previous view.
+    pub fn set_cclip_verbosity(&mut self, verbosity: u64) {
+        if self.cclip_verbosity != verbosity {
+            self.reset_cclip_content();
+        }
+        self.cclip_verbosity = verbosity;
+    }
+
+    /// Return whether a background clipboard-content request can wake the renderer.
+    pub(crate) fn has_cclip_content_activity(&self) -> bool {
+        !self.content_requests.is_empty()
+            || !self.content_receiver.is_empty()
+            || self
+                .content_in_flight
+                .load(std::sync::atomic::Ordering::Acquire)
+                > 0
     }
 
     /// Set a temporary message that expires after 2 seconds.
@@ -108,9 +151,15 @@ impl<'a> DmenuUI<'a> {
         self.shown.clear();
         self.selected = None;
         self.scroll_offset = 0;
+        self.reset_cclip_content();
+        self.filter();
+    }
+
+    fn reset_cclip_content(&mut self) {
         self.content_cache.clear();
         self.content_requests.clear();
-        self.filter();
+        self.content_failures.clear();
+        self.content_generation = self.content_generation.wrapping_add(1);
     }
 
     fn temp_message_text(&self) -> Option<&str> {

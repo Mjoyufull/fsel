@@ -370,6 +370,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
+name = "encoding_rs"
+version = "0.8.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -473,9 +482,11 @@ version = "3.7.0-kiwicrab"
 dependencies = [
  "crossterm",
  "directories",
+ "encoding_rs",
  "eyre",
  "flate2",
  "futures",
+ "html-escape",
  "ignore",
  "image",
  "is-terminal",
@@ -676,6 +687,12 @@ name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
+
+[[package]]
+name = "html-escape"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9356095b4b41197bba32173600e1582792cda618f65d12f68e2e77d273413c5"
 
 [[package]]
 name = "icy_sixel"

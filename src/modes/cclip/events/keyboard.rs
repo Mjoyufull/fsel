@@ -73,9 +73,15 @@ pub(super) async fn handle_key_event(
     );
     match action {
         KeyAction::ImagePreview => {
-            ctx.image_runtime
-                .show_fullscreen_preview(ctx.terminal, input)
-                .await?;
+            if matches!(ctx.ui.tag_mode, TagMode::Normal) {
+                if ctx.image_runtime.current_is_image() {
+                    ctx.image_runtime
+                        .show_fullscreen_preview(ctx.terminal, input)
+                        .await?;
+                } else {
+                    super::super::text_preview::show(ctx, input).await?;
+                }
+            }
         }
         KeyAction::BeginTagCreation => {
             super::super::tags::begin_tag_creation(ctx.ui, ctx.image_runtime, ctx.terminal)?;

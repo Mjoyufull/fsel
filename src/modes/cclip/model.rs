@@ -2,7 +2,7 @@ use crate::common::Item;
 use eyre::{Result, eyre};
 use time::macros::format_description;
 
-use super::TagMetadataFormatter;
+use super::{TagMetadataFormatter, html};
 
 const IMAGE_TIMESTAMP_FORMAT: &[time::format_description::FormatItem<'static>] =
     format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
@@ -64,7 +64,7 @@ impl CclipItem {
         Ok(CclipItem {
             rowid: parts[0].to_string(),
             mime_type: parts[1].to_string(),
-            preview: parts[2].to_string(),
+            preview: html::text_for_display(parts[1], parts[2]),
             data_size,
             timestamp,
             original_line: line,
@@ -87,7 +87,14 @@ impl CclipItem {
     ) -> String {
         let base_name = match self.mime_type.as_str() {
             mime if mime.starts_with("image/") => self.image_display_name(mime),
-            mime if mime.starts_with("text/") => self.preview.chars().take(80).collect::<String>(),
+            mime if html::is_textual_mime(mime) => {
+                let preview = self.preview.chars().take(80).collect::<String>();
+                if preview.is_empty() && html::is_html_mime(mime) {
+                    "[HTML content]".to_string()
+                } else {
+                    preview
+                }
+            }
             _ => {
                 format!(
                     "{} ({})",
@@ -258,5 +265,29 @@ mod tests {
         assert_eq!(format_data_size(500), "500 B");
         assert_eq!(format_data_size(44_969), "43.92 KiB");
         assert_eq!(format_data_size(1_048_576), "1.00 MiB");
+    }
+    #[test]
+    fn html_items_render_text_but_preserve_original_clipboard_record() {
+        let original = concat!(
+            "42\ttext/html\t",
+            r#"<meta content="text/html"><p>Hello &amp; goodbye</p>"#,
+            "\ttag"
+        )
+        .to_string();
+
+        let item = CclipItem::from_line(original.clone()).expect("valid cclip item");
+
+        assert_eq!(item.preview, "Hello & goodbye");
+        assert_eq!(item.get_display_name(), "[tag] Hello & goodbye");
+        assert_eq!(item.original_line, original);
+    }
+
+    #[test]
+    fn truncated_html_markup_uses_the_lazy_content_placeholder() {
+        let item = CclipItem::from_line("42\ttext/html\t<meta charset=\"utf-8".to_string())
+            .expect("truncated cclip preview should parse");
+
+        assert!(item.preview.is_empty());
+        assert_eq!(item.get_display_name(), "[HTML content]");
     }
 }

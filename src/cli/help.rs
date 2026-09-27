@@ -65,7 +65,7 @@ Usage:
 │  ├─ Dmenu: --dmenu0 --password[=CHAR] --index --with-nth --accept-nth
 │  ├─        --match-nth --delimiter --only-match --exit-if-empty
 │  ├─        --select --select-index --auto-select --prompt-only --preview
-│  └─ Cclip: --tag <NAME|list|clear|wipe> --cclip-show-tag-color-names
+│  └─ Cclip: --tag <NAME|list|clear|wipe> -x/--copy-rendered --cclip-show-tag-color-names
 │
 └─ Help
    ├─ -h                           Show this summary
@@ -168,7 +168,11 @@ Usage:
 │  ├─ --tag list <NAME>            List clipboard entries carrying NAME, then exit
 │  ├─ --tag clear                  Remove stored tag metadata
 │  ├─ --tag wipe                   Remove all tags from every clipboard entry
-│  └─ --cclip-show-tag-color-names Show tag color names next to tags in cclip mode
+│  ├─ --cclip-show-tag-color-names Show tag color names next to tags in cclip mode
+│  ├─ -x, --copy-rendered          Copy rendered HTML as plain text; preserve other MIME types
+│  ├─ -v with --cclip              Show raw textual clipboard content in the preview
+│  ├─ -vvv with --cclip            Add row ID, MIME type, and preview-view diagnostics
+│  └─ Alt+i in --cclip             Fullscreen image or wrapped text pager; q/Esc returns
 │
 ├─ General
 │  ├─ -h                           Show the short summary
