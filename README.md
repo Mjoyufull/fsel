@@ -483,6 +483,7 @@ Thank you for helping improve fsel!
 fsel is a **unified TUI workflow tool** built for terminal-centric setups, combining fast application launching, dmenu piping, and rich clipboard history into a single cohesive interface with shared theming and keybinds.
 
 While crafted around a keyboard-driven workflow, **community contributions and feature suggestions are warmly welcomed!** Whether you have ideas for new layout customizations, integration scripts, performance improvements, or bug fixes, feel free to open an issue or start a discussion on GitHub. If something could make fsel better for your daily driver setup, we'd love to collaborate on it.
+
 ---
 
 ## Troubleshooting
