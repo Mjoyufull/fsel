@@ -157,7 +157,14 @@ fn raw_pty(tty: &File) -> io::Result<(File, OwnedFd, libc::winsize)> {
         let (mut master, mut slave) = (-1, -1);
         //For freebsd compatability keep as mut
         #[allow(clippy::unnecessary_mut_passed)]
-        if libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), &mut attrs, &mut size) == -1 {
+        if libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            &mut attrs,
+            &mut size,
+        ) == -1
+        {
             return Err(io::Error::last_os_error());
         }
         let master = File::from_raw_fd(master);
