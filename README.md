@@ -9,7 +9,7 @@
 
   Fast TUI app launcher and fuzzy finder for GNU/Linux and \*BSD
 
-  <img width="750" height="1016" alt="usage screenshot" src="./assets/usage.png" />
+  <img width="991" height="1056" alt="usage screenshot" src="./assets/Screenshot_20260927-005752.png" />
 
 
 
