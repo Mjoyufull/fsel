@@ -2,6 +2,7 @@
 
 mod events;
 mod item_layout;
+mod movement;
 mod options;
 pub(crate) mod panels;
 pub mod parse;

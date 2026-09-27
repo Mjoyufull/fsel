@@ -164,6 +164,7 @@ icon_vertical_align_percent = 50    # Fine adjustment within the preview icon ar
 # These settings MUST be in the [dmenu] section
 
 [dmenu]
+panel_edit = false # Alt+P edits panel placement for this session only when enabled.
 
 # Preview command (usually better set per invocation with --preview)
 # Placeholders: {} selected row, {q} query (unset in password mode),

@@ -150,8 +150,9 @@ Usage:
 │  ├─ --auto-select                Accept automatically when the filtered list reaches one row
 │  ├─ --prompt-only                Show only the input prompt and hide the list pane
 │  ├─ --preview <COMMAND>          Preview the selected row; supports {{}}, {{q}}, and {{n}}
-│  └─ --panel <NAME:SIDE:PERCENT:CMD>  Add a named command panel (maximum three)
+│  ├─ --panel <NAME:SIDE:PERCENT:CMD>  Add a named command panel (maximum three)
 │     Config: [[dmenu.panels]] with name, position, size, and command
+│  └─ --panel-edit                 Enable Alt+P panel movement mode
 │
 ├─ Clipboard Mode Options
 │  ├─ --tag <NAME>                 Show only clipboard entries tagged NAME
