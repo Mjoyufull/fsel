@@ -8,6 +8,8 @@ use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition};
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct FselConfig {
+    #[serde(default)]
+    pub panels: crate::ui::PanelSettings,
     #[serde(flatten)]
     pub general: GeneralConfig,
     #[serde(flatten)]
@@ -43,6 +45,7 @@ pub struct AppLauncherConfig {
     pub icon_mode: Option<DesktopIconMode>,
     #[serde(default, deserialize_with = "deserialize_optional_parsed")]
     pub icon_position: Option<HorizontalPosition>,
+    pub icon_description_position: Option<crate::ui::panels::PanelSide>,
     pub icon_preview_width_percent: Option<u16>,
     pub icon_list_width: Option<u16>,
     pub icon_list_height: Option<u16>,
@@ -96,6 +99,14 @@ pub struct GeneralConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct UiConfig {
+    #[serde(default)]
+    pub pinned_text_color: Option<String>,
+    #[serde(default)]
+    pub pinned_background_color: Option<String>,
+    #[serde(default)]
+    pub pinned_highlight_color: Option<String>,
+    #[serde(default)]
+    pub pinned_selection_background_color: Option<String>,
     #[serde(default = "super::defaults::default_highlight_color")]
     pub highlight_color: String,
     #[serde(default = "super::defaults::default_cursor")]

@@ -8,6 +8,12 @@ use crate::config::{ConfigError, FselConfig};
 pub(super) fn apply(cfg: &mut FselConfig, source: &impl OverrideSource) -> Result<(), ConfigError> {
     set_optional_parsed(
         source,
+        "FSEL_APP_LAUNCHER_ICON_DESCRIPTION_POSITION",
+        &mut cfg.app_launcher.icon_description_position,
+        "top, right, bottom, or left",
+    )?;
+    set_optional_parsed(
+        source,
         "FSEL_APP_LAUNCHER_FILTER_DESKTOP",
         &mut cfg.app_launcher.filter_desktop,
         BOOLEAN_EXPECTED,
