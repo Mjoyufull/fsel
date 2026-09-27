@@ -1,6 +1,6 @@
 <div align="center">
 
-  ![Logo](./assets/fsel.png)
+  <img src="./assets/fsel.png" alt="fsel launcher preview" width="300" />
 
 *(fast select)*
 
@@ -9,7 +9,7 @@
 
   Fast TUI app launcher and fuzzy finder for GNU/Linux and \*BSD
 
-  <img width="860" height="1019" alt="Screenshot_20251006-032156" src="https://github.com/user-attachments/assets/777bd0a4-eb52-4014-837b-d361ab57cfff" />
+  <img width="991" height="1056" alt="usage screenshot" src="./assets/Screenshot_20260927-005752.png" />
 
 
 
