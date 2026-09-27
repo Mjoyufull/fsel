@@ -1,3 +1,116 @@
+[4.0.0-nyamabeetle]
+
+Breaking changes
+
+- Dependency refresh & SVG stack overhaul (from pr #100)
+  - Updated `ratatui-image` to 11.0.8, `redb` to 4.2.0, `resvg` to 0.48.1, and modernized TOML parsing.
+  - Replaced unmaintained SVG font dependencies with native `resvg`/`usvg` text rendering.
+  - Database schema upgrades for redb 4.2 migrate automatically on startup; no manual database intervention is required.
+- Visual theme and panel schema reorganization (from pr #98, pr #101)
+  - Introduced unified `items_*` theming keys for launcher, dmenu, and cclip. Legacy `apps_*` keys are maintained as backward-compatible aliases.
+  - Docked panel geometry and rotation options enforce valid rectangular layouts.
+
+Added
+
+- Persistent detached application launching (from pr #108)
+  - Added `--detach --persistent` (or `-d --persistent`) to launch applications while keeping fsel running without losing the search query, selection, scroll state, panel layout, or cached icons.
+  - Exited child processes are automatically reaped in the background while the launcher stays interactive.
+  - Spawning errors no longer abort the launcher session; errors display cleanly in the UI info panel.
+  - Added `--on-launch <CMD>` to execute commands via `$SHELL` after each successful launch, passing `FSEL_LAUNCHED_APP`, `FSEL_LAUNCHED_COMMAND`, `FSEL_LAUNCHED_PID`, and `FSEL_PID` safely through the environment without shell injection risks.
+  - Credit to u/redhat_is_my_dad on Reddit whose footclient/dtach workflow inquiry sparked the architecture for keeping detached sessions alive.
+- Application grid mode (from pr #105)
+  - New `--app-grid` and `--grid-row-height` options (and `[app_launcher]` config) display applications in a two-dimensional grid with icons above names.
+  - Full keyboard and mouse grid navigation, equal-width cell spacing, and preserved pinned color styling.
+- Dmenu command and image previews (from pr #86, pr #88, addresses #45; originated from draft pr #53)
+  - Added fzf-style `--preview <COMMAND>` to dmenu mode with shell-safe `{}`, `{q}`, and `{n}` substitution.
+  - Asynchronous execution keeps preview rendering off the input loop with automatic cancellation of stale jobs.
+  - Output auto-detects text or images: renders terminal graphics via Kitty, Sixel, or half-blocks.
+  - Extended image decoder to support SVG and gzip-compressed SVG (`.svgz`) via `resvg`.
+- Custom dmenu multi-panel docking (from pr #103)
+  - Configure up to three independent text/image command panels around results using `--panel` or `[[dmenu.panels]]`.
+  - Supports top, bottom, left, and right docking with upright rotation.
+- Interactive dmenu panel editing (from pr #104)
+  - Added `--panel-edit` mode: press `Alt+P` to enter live layout editing. Use `Tab` to cycle panels, arrow keys or mouse dragging to dock to any edge, and `+`/`-` or mouse wheel to resize.
+- App launcher desktop icon preview and list modes (from pr #87, pr #89, addresses #44; originated from draft pr #53)
+  - Show selected application icons in the title panel (`icon_mode = "preview"`) with configurable alignment, position, and sizing.
+  - Added opt-in `icon_mode = "list"` and `"both"` to render icons directly beside result items, with configurable `icon_list_width`, `icon_list_height`, `icon_list_gap`, and pixel-level vertical alignment.
+  - Resolves XDG themes (GTK, KDE, LXQt settings detected) with inheritance and absolute icon paths.
+- HTML rendering and fullscreen text previews in cclip mode (from pr #95)
+  - HTML clipboard entries render as clean, formatted text by default with entity decoding and preformatted whitespace preservation.
+  - `-x` (`--cclip-copy-rendered-text`) copies rendered HTML as plain text instead of raw markup.
+  - `Alt+i` opens selected clipboard entries in a fullscreen scrollable pager with grapheme-aware line wrapping and vi-style navigation (`j`/`k`, `Space`/`b`, `g`/`G`).
+  - `-vvx` provides verbose diagnostics and raw HTML preview while copying rendered text.
+- Image ranking and timestamp improvements in cclip mode (from pr #94)
+  - Image entries display readable dates, sizes, and MIME types with priority ranking for exact row IDs.
+
+Changed
+
+- Desktop icon lookup performance (from pr #109)
+  - Reads theme directories once indexed by size, avoiding repeated filesystem traversals across launcher lists.
+- Unified selector visual system (from pr #98)
+  - Sharper icon previews, semantic backgrounds (`items_background_color`, `items_selection_background_color`), optional half-cell rounded row ends, and a command-style input panel (`input_panel_style = "command"`).
+- Docker and panel layout engine (from pr #101)
+  - Shared layout geometry across launcher, dmenu, and cclip modes for docking and mouse hit-testing.
+
+Fixed
+
+- Image redraw corruption and cursor timeouts (from pr #102)
+  - Retains existing images while replacement previews load instead of clearing the whole terminal.
+  - Fixed cursor query timeouts during fullscreen transitions and active input reading.
+- Sixel preview clean-up (from pr #103)
+  - Dropped trailing band advances and ensured Sixel graphics are erased within their panel boundaries.
+- Nix flake naersk crate 403 update (from pr #99, closes #96)
+  - Updated naersk in flake.lock to resolve crates.io 403 Forbidden errors during nix build and downstream Home Manager activation.
+
+Technical details
+
+- Terminal graphics probing & pipeline isolation: queries Kitty/Sixel capabilities strictly over the controlling terminal (`/dev/tty`) before event processing starts, keeping stdin and stdout unpolluted for pipeline and interactive data streams. In dmenu mode, current image previews are retained until replacement output arrives to prevent screen flashing; previews are erased strictly within their panel bounds, and trailing band advances in Sixel encoding are stripped.
+- Process group detachment & launch hooks: persistent launches spawn processes in their own process group (`setsid`) with desktop `Path=` directories applied to the child process rather than fsel's process. The launcher retains its search query, selection, scroll position, and loaded icons across launches. Exited child processes are reaped using non-blocking waitpid checks during the event loop. `--on-launch` commands run via `$SHELL` asynchronously without stalling the UI; hook failures across event frames are aggregated into the info panel.
+- Desktop icon resolution, caching, & lookup optimization: queries active desktop environment settings (GTK, KDE, LXQt), follows XDG icon theme inheritance (e.g. falling back to `hicolor`), and resolves absolute `Icon=` paths. Filesystem traversals are reduced from per-item walks to a single-pass size directory index per theme. Cached icon paths and rendered raster data are stored with lossless path-key encoding in redb.
+- SVG rendering engine: built on `resvg` and `usvg`, SVG and compressed `.svgz` rendering enforces a strict 2048px dimension ceiling, strips external network/filesystem references, disallows nested GIFs, and performs unpremultiplied RGBA color conversion.
+- Application grid geometry: dynamically computes slot dimensions based on configured columns and row height, keeping text labels centered independently of pin markers and selection arrows to maintain a uniform visual grid.
+- Clipboard HTML parsing & pager layout: parses declared MIME charsets, decodes named HTML entities, preserves `<pre>` whitespace, and strips markup; `-x` copies rendered plain text (`text/plain;charset=utf-8`); `-vvx` exposes raw markup and diagnostics in the TUI; Alt+i calculates cell widths using Unicode grapheme boundaries without breaking characters.
+- Database upgrade & backwards compatibility: automatically upgrades redb databases from 3.x to 4.2 on first access; missing tables are auto-created on demand without corrupting existing cache or pin data.
+
+Documentation
+
+- README: expanded highlights for image support and layouts; reorganized dmenu preview examples; updated configuration with `image_2.png`; refreshed Window Manager integrations with Hyprland Lua syntax; documented `--vvx`; and updated philosophy to welcome contributions.
+- USAGE.md: documented `--detach --persistent`, `--on-launch`, `--app-grid`, dmenu `--preview`, `--panel`, `--panel-edit`, cclip HTML rendering, and pager keybinds.
+- `fsel.1`: updated man page flags, environment variables, and release date for 4.0.0-nyamabeetle.
+- `config.toml` & `keybinds.toml`: documented all new layout, panel, icon, and preview settings.
+
+Notes
+
+- SemVer: MAJOR (3.7.0 -> 4.0.0-nyamabeetle).
+- Rationale & Codename: ughh cuz i wanted to and also im not too sure a decent few of my changes might break sum shit idk PLUS this was a Major visual architecture rework, we got new application grid, multi-panel layouts, SVG rasterization, and core dependency updates which i say justify the major version bump.
+
+Contributors
+
+- @Mjoyufull
+- @Marbowls co-maintainer (pr #89 co-author, pr #99) as well as the person who preposed images in fsel and orignal pr that lead to the stack (pr #53) 
+- Community suggestion: u/redhat_is_my_dad (Reddit) for proposing the `--persistent` detached launcher workflow.
+
+AI assistants (PR implementation & commit aid):
+
+- @Codex / OpenAI Codex chatgpt 6 astra low ( aided in closing / finishing quickly pr #101, pr #103, pr #95, pr #110)
+- @cubic-dev-ai (pr #98, pr #95)
+- @greptile-apps (pr #98, pr #95)
+
+Code review:
+
+- @cubic-dev-ai
+- @chatgpt-codex-connector
+- @greptile-apps
+
+Compatibility
+
+- Language/runtime: Rust 1.94+ stable; edition 2024.
+- Platforms: GNU/Linux and *BSD.
+- Config / database: backward-compatible config aliases maintained; redb 4.2 auto-upgrades tables on launch.
+- Breaking: none intended for standard usage, though extensive internal and visual changes warrant the 4.0.0 bump.
+
+---
+
 [3.7.0-kiwicrab]
 
 Added

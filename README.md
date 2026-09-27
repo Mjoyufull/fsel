@@ -58,7 +58,7 @@ Get up and running in 30 seconds:
 nix run github:Mjoyufull/fsel
 
 # Or install from Cargo
-cargo install fsel@3.7.0-kiwicrab
+cargo install fsel@4.0.0-nyamabeetle
 
 # Launch fsel
 fsel
@@ -105,11 +105,11 @@ All layouts are opt-in; see [panel and grid options](./USAGE.md#panel-layouts).
 
 * Build and install via Cargo:
     ```sh
-    $ cargo install fsel@3.7.0-kiwicrab
+    $ cargo install fsel@4.0.0-nyamabeetle
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@3.7.0-kiwicrab --force
+    $ cargo install fsel@4.0.0-nyamabeetle --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -179,19 +179,22 @@ fsel -p firefox
 ```
 
 **Highlights:**
+- **Graphics & Icon System**: Native Kitty, Sixel, and half-block icon/image previews in title preview, beside in listed apps, or an icon grid.
+- **Layout Customization**: Flexible dockable panels around results (top, right, bottom, left), interactive panel movement (`--panel-edit`) and multi-panel dmenu previews.
+- **Persistent Detached Launching**: Launch multiple apps without closing fsel (`--detach --persistent`), with `--on-launch` scripting hooks.
 - **Advanced Search Ranking**: Configurable scoring with `frecency`, `recency`, or `frequency`
-- **Smart Matching**: Searches names, descriptions, keywords, and categories
-- **Pin/Favorite Apps**: Press Ctrl-Space to pin apps - pinned apps always appear first
-- **Reversible Hiding**: Press Alt-Delete to hide one exact launcher source and Alt-U to undo
-- **Optional Deduplication**: Enable deterministic XDG-aware duplicate suppression when wanted
-- **Match Modes**: Fuzzy (default) or exact matching
+- **Smart Matching & Deduplication**: Fuzzy or exact search across names, descriptions, and keywords, with deterministic XDG duplicate suppression.
+- **Pin & Hide Controls**: Favorite apps with Ctrl-Space; persistently hide noisy entries with Alt-Delete (Alt-U to restore).
 
-Use `fsel --detach --persistent` to launch several applications from the same session without
-losing your query or selection. `--on-launch` runs a command of yours after each launch, which is
-how a script closes the window fsel runs in, or reports the launch elsewhere; see
-[USAGE.md - Reacting to a launch](./USAGE.md#reacting-to-a-launch).
+```sh
+# Launch multiple apps without losing your search query, selection, or warm icons
+fsel --detach --persistent
 
-See [USAGE.md - App Launcher](./USAGE.md#app-launcher) for TTY mode, launch prefixes, `--detach`, cache management, `--replace`, and more.
+# Run a post-launch hook (e.g., closing your window or notifying external scripts)
+fsel --detach --persistent --on-launch 'swaymsg [app_id="launcher"] kill'
+```
+
+See [USAGE.md - App Launcher](./USAGE.md#app-launcher) for TTY mode, launch prefixes, `--detach`, persistent sessions, reacting to launches, and cache management.
 
 Hidden entries are stored in fsel's database; their `.desktop` files and executables are not changed.
 Manage persistent hides without opening the TUI:
@@ -249,20 +252,29 @@ ls -la | fsel --dmenu
 find . -name "*.rs" | fsel --dmenu
 git log --oneline | fsel --dmenu
 
-# fzf-style preview command ({} is the selected row, passed via the environment)
+# Live command preview ({} expands to selected line, {q} to query, {n} to 0-based index)
 find . -type f | fsel --preview 'file --brief {}'
 
-# Preview image bytes with Kitty, Sixel, or the half-block fallback
+# Render syntax-highlighted code or text previews
+find . -name "*.rs" | fsel --preview 'bat --color=always --style=numbers {}'
+
+# Inline image previews with Kitty, Sixel, or half-block fallback (PNG, JPEG, SVG, WebP, GIF)
 find ~/Pictures -type f | fsel --preview 'cat {}'
+
+# Multi-panel layouts: dock up to 3 independent command/image panels
+fsel --dmenu --panel "top:git status -s" --panel "right:git diff HEAD -- {}"
+
+# Interactive layout editing: press Alt+P to drag, dock, and resize panels live
+fsel --dmenu --preview 'cat {}' --panel-edit
 ```
 
-See [USAGE.md - Dmenu Mode](./USAGE.md#dmenu-mode) for previews, column operations, password input, pre-selection, exact matching, `--dmenu0`, and prompt-only mode.
+See [USAGE.md - Dmenu Mode](./USAGE.md#dmenu-mode) for multi-panel docking, interactive panel editing, column operations, password input, pre-selection, exact matching, `--index-original`, and prompt-only mode.
 
 ### Clipboard History Mode
 Requires [cclip](https://github.com/heather7283/cclip).
 <img width="853" height="605" alt="image" src="https://github.com/user-attachments/assets/0bf71952-f09a-4ce2-8807-bca1003c8daf" />
 
-Browse and select from your clipboard history with image previews:
+Browse and select from your clipboard history with formatted text rendering and image previews:
 
 ```sh
 # Browse clipboard history with cclip integration
@@ -277,12 +289,20 @@ fsel --cclip --tag list
 # List items with specific tag (verbose shows details)
 fsel --cclip --tag list prompt -vv
 
+# Copy rendered HTML as plain text instead of raw markup (-x)
+fsel --cclip -x
+
+# Inspect raw HTML payloads and MIME diagnostics while copying rendered plain text (-vvx)
+fsel --cclip -vvx
+
 # Clear tag metadata from fsel database
 fsel --cclip --tag clear
 
 # Show tag color names in display
 fsel --cclip --cclip-show-tag-color-names
 ```
+
+HTML entries are rendered as readable text by default with entity decoding. Press `Alt+i` on any entry for a fullscreen scrollable preview (images or word-wrapped text). Use `-x` to copy rendered text, or `-vvx` to inspect raw HTML markup and diagnostics in the TUI while copying clean text.
 
 See [USAGE.md - Clipboard Mode](./USAGE.md#clipboard-mode) for tag management, keybindings, inline image details, and more clipboard-specific behavior.
 
@@ -304,6 +324,10 @@ See [USAGE.md](./USAGE.md) for more examples, launch methods, scripting recipes,
 ## Configuration
 
 Config file: `~/.config/fsel/config.toml`
+
+<div align="center">
+  <img alt="fsel customization and panel layouts" src="./assets/image_2.png" width="800" />
+</div>
 
 ### Basic Setup
 
@@ -356,25 +380,13 @@ icon_vertical_align_percent = 50    # Fine adjustment inside the preview icon ar
 # icon_theme = "Papirus-Dark"       # Optional override; desktop settings are detected by default
 ```
 
-The neutral `items_*` settings theme the launcher results, dmenu choices, and cclip history. The
-older `apps_*` names remain accepted as compatibility aliases.
 
-Desktop icons are resolved from the active XDG icon theme (GTK, KDE, and LXQt settings are
-detected), including inherited themes and
-absolute `Icon=` paths. PNG and SVG icons render through Kitty, Sixel, or the terminal-independent
-half-block fallback. The selected icon uses the left side of the title panel by default. Set
-`icon_mode = "list"` for icons beside results or `"both"` for both placements. `icon_list_width`,
-`icon_list_height` and `icon_list_gap` customize the list layout. List labels and markers remain on
-the first item row; `icon_list_vertical_align_percent` moves the artwork at pixel resolution instead.
-Negative values shift the complete artwork above the normal top-aligned position. This intentional
-overflow can overlap earlier list rows or panel chrome at extreme values, with protocol-specific
-stacking behavior.
-Transparent source padding is normalized so icons occupy a consistent visual box. The horizontal
-and vertical percentages provide optional fine adjustment within the chosen icon area.
 
-Field placement matters. Root-level UI options and `[app_launcher]` / `[dmenu]` / `[cclip]` sections are validated separately.
-See [config.toml](./config.toml) and [keybinds.toml](./keybinds.toml) for all options with detailed comments.
-`[app_launcher].match_mode = "exact"` also applies to `-p/--program`, where it requires an exact app or executable name.
+The neutral `items_*` settings theme launcher results, dmenu choices, and cclip history (`apps_*` names remain supported as backward-compatible aliases).
+
+Desktop icons resolve automatically from active XDG icon themes (GTK, KDE, and LXQt detected) or absolute `Icon=` paths. PNG and SVG icons render through Kitty, Sixel, or the half-block fallback. Choose `icon_mode = "preview"` (in title bar), `"list"` (beside results), `"both"`, or `--app-grid`. Fine-tune list layout with `icon_list_width`, `icon_list_height`, `icon_list_gap`, and `icon_list_vertical_align_percent`.
+
+Field placement matters: root UI options and `[app_launcher]`, `[dmenu]`, and `[cclip]` sections are validated separately. See [config.toml](./config.toml) and [keybinds.toml](./keybinds.toml) for all available options with detailed comments. `[app_launcher].match_mode = "exact"` also applies to `-p/--program`, where it requires an exact app or executable name.
 
 ### Environment variable overrides
 
@@ -404,24 +416,32 @@ for_window [title="^launcher$"] floating enable, resize set width 500 height 430
 bindsym $mod+v exec 'alacritty --title clipboard -e fsel --cclip'
 ```
 
-**Hyprland:**
-```sh
-# ~/.config/hypr/hyprland.conf
-bind = $mod, D, exec, alacritty --title launcher -e fsel
-windowrule {
-    match:title = launcher
-    float = on 
-    center = on 
-    size = 500 430
-}
+**Hyprland (Lua configuration):**
+```lua
+-- ~/.config/hypr/hyprland.lua
+hl.config({
+    bind = {
+        { mods = { "SUPER" }, key = "D", action = "exec", arg = "alacritty --title launcher -e fsel" },
+        { mods = { "SUPER" }, key = "V", action = "exec", arg = "alacritty --title clipboard -e fsel --cclip" },
+    },
+    windowrules = {
+        { rule = "float", match = { title = "^launcher$" } },
+        { rule = "center", match = { title = "^launcher$" } },
+        { rule = "size 500 430", match = { title = "^launcher$" } },
+        { rule = "float", match = { title = "^clipboard$" } },
+        { rule = "center", match = { title = "^clipboard$" } },
+        { rule = "size 700 500", match = { title = "^clipboard$" } },
+    }
+})
 ```
 
 **Niri:**
-```sh
+```kdl
 # ~/.config/niri/config.kdl
 window-rule {
     match title="launcher"
     open-floating true
+    default-floating-size width=500 height=430
 }
 
 # Add inside binds { ... }
@@ -460,11 +480,9 @@ Thank you for helping improve fsel!
 
 ## Philosophy
 
-fsel is a **unified TUI workflow tool** built for terminal-centric setups. It combines app launching, dmenu functionality, and clipboard history into one scriptable interface with consistent keybinds and theming.
+fsel is a **unified TUI workflow tool** built for terminal-centric setups, combining fast application launching, dmenu piping, and rich clipboard history into a single cohesive interface with shared theming and keybinds.
 
-**This means:**
-- It's built for my workflow first, but PRs for bug fixes and useful features are welcome as long as they fit in scope.
-- Older versions and the original gyr exist if you want something more minimal.
+While crafted around a keyboard-driven workflow, **community contributions and feature suggestions are warmly welcomed!** Whether you have ideas for new layout customizations, integration scripts, performance improvements, or bug fixes, feel free to open an issue or start a discussion on GitHub. If something could make fsel better for your daily driver setup, we'd love to collaborate on it.
 ---
 
 ## Troubleshooting

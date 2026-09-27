@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "fsel"
-version = "3.7.0-kiwicrab"
+version = "4.0.0-nyamabeetle"
 dependencies = [
  "crossterm",
  "directories",
