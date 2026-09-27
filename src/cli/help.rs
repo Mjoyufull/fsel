@@ -172,7 +172,7 @@ Usage:
 │  ├─ -x, --copy-rendered          Copy rendered HTML as plain text; preserve other MIME types
 │  ├─ -v with --cclip              Show raw textual clipboard content in the preview
 │  ├─ -vvv with --cclip            Add row ID, MIME type, and preview-view diagnostics
-│  └─ Alt+i in --cclip             Fullscreen image or scrollable text; q/Esc returns
+│  └─ Alt+i in --cclip             Fullscreen image or wrapped text pager; q/Esc returns
 │
 ├─ General
 │  ├─ -h                           Show the short summary

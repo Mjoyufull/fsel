@@ -1,5 +1,7 @@
 //! Scrollable fullscreen text for the selected clipboard entry.
 
+mod wrap;
+
 use super::events::EventContext;
 use crate::ui::{AsyncInput, InputEvent, Keybinds};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
@@ -38,16 +40,16 @@ async fn run(
     loop {
         let content = ctx.ui.get_cclip_content_for_display(item);
         let clean = clean_text(&content);
-        let lines: Vec<&str> = clean.split('\n').collect();
+        let mut row_count = 0;
         let mut page_height = 1;
         ctx.terminal.draw(|frame| {
-            page_height = draw(frame, &mut pager, &lines, ctx.options);
+            (row_count, page_height) = draw(frame, &mut pager, &clean, ctx.options);
         })?;
         tokio::select! {
             _ = ctx.ui.wait_for_cclip_content(), if ctx.ui.has_cclip_content_activity() => {}
             event = input.next() => match event {
                 Some(InputEvent::Input(key)) => {
-                    if pager.handle_key(key, &ctx.options.keybinds, lines.len(), page_height) {
+                    if pager.handle_key(key, &ctx.options.keybinds, row_count, page_height) {
                         break;
                     }
                 }
@@ -67,10 +69,11 @@ async fn run(
 fn draw(
     frame: &mut ratatui::Frame,
     pager: &mut Pager,
-    lines: &[&str],
+    content: &str,
     options: &super::state::CclipOptions,
-) -> usize {
+) -> (usize, usize) {
     let area = frame.area();
+    let lines = wrap::display_rows(content, area.width, options.wrap_long_lines);
     let body = Rect {
         height: area.height.saturating_sub(1),
         ..area
@@ -85,16 +88,30 @@ fn draw(
         .collect::<Vec<_>>()
         .join("\n");
     frame.render_widget(
-        Paragraph::new(text).scroll((0, pager.left)).style(
-            Style::default()
-                .fg(options.main_text_color)
-                .bg(options.main_background_color),
-        ),
+        Paragraph::new(text)
+            .scroll((
+                0,
+                if options.wrap_long_lines {
+                    0
+                } else {
+                    pager.left
+                },
+            ))
+            .style(
+                Style::default()
+                    .fg(options.main_text_color)
+                    .bg(options.main_background_color),
+            ),
         body,
     );
     if area.height > 0 {
+        let pan_hint = if options.wrap_long_lines {
+            "wrapped rows"
+        } else {
+            "←/→: pan"
+        };
         let status = format!(
-            " {}-{}/{}  j/k: scroll  Space/b: page  g/G: ends  ←/→: pan  q: back ",
+            " {}-{}/{}  j/k: scroll  Space/b: page  g/G: ends  {pan_hint}  q: back ",
             pager.top + 1,
             (pager.top + page_height).min(lines.len()),
             lines.len(),
@@ -104,7 +121,7 @@ fn draw(
             Rect::new(area.x, area.y + area.height - 1, area.width, 1),
         );
     }
-    page_height
+    (lines.len(), page_height)
 }
 
 fn clean_text(content: &str) -> String {

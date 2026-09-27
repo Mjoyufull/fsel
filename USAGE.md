@@ -487,11 +487,14 @@ fsel --cclip --cclip-show-tag-color-names
 ### Fullscreen text preview
 
 Select a text entry and press `Alt+i` to read its full content. Newlines and indentation are
-preserved; long lines can be panned horizontally. HTML uses the same rendered text as the inline
+preserved, and long lines wrap to the terminal width by default. HTML uses the same rendered text as the inline
 preview, or raw markup with `-v`. Content loads asynchronously while the preview remains usable.
 
 Use Up/Down or `j`/`k` to scroll, Page Down/Space/`f` and Page Up/`b` for pages,
-Home/`g` and End/`G` for the ends, and Left/Right or `h`/`l` to pan. Mouse-wheel scrolling
+Home/`g` and End/`G` for the ends. Scrolling and the footer count displayed rows, including wrapped
+continuations. Resizing reflows text to the new width. Set `[cclip] wrap_long_lines = false`
+(or `FSEL_CCLIP_WRAP_LONG_LINES=false`) to disable wrapping and use Left/Right or `h`/`l` to pan.
+Mouse-wheel scrolling
 and configured up/down bindings work too. `q`, Escape, Ctrl+C, or the configured preview
 binding returns to the selector with the query and selection intact. Enter does not copy from
 this view; return to the selector first. The existing `image_preview` binding controls both

@@ -482,7 +482,7 @@ fsel is a **unified TUI workflow tool** built for terminal-centric setups. It co
 - Use a Kitty-, Sixel-, or Halfblocks-capable terminal (e.g. Kitty, Foot, WezTerm). Image preview uses built-in [ratatui-image](https://github.com/benjajaja/ratatui-image); no chafa or other external viewer is needed (3.1.0+).
 - Check `image_preview = true` in config
 - Images render inside the content panel; press Alt+i for fullscreen preview
-- Alt+i also opens full clipboard text: j/k scroll, Space/b page, g/G jump to the ends, q returns
+- Alt+i also opens full clipboard text with wrapping: j/k scroll, Space/b page, g/G jump to the ends, q returns
 
 **Fuzzy matching too loose?**
 - Try `--match-mode=exact` for stricter matching

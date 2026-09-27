@@ -334,9 +334,12 @@ Jump to first/last item
 .TP
 .BR "Alt-i"
 Open a fullscreen image or scrollable text preview for the selected clipboard item.
-Text preserves newlines and indentation; HTML is rendered unless -v requests raw markup.
+Text preserves newlines and indentation and wraps to the terminal width by default.
+HTML is rendered unless -v requests raw markup.
 Up/Down or j/k scroll; PageDown/Space/f and PageUp/b page; Home/g and End/G jump to the ends.
-Left/Right or h/l pan long lines. Configured up/down bindings and the mouse wheel also scroll.
+Scrolling counts displayed rows, including wrapped continuations; resizing reflows the text.
+Set [cclip] wrap_long_lines = false or FSEL_CCLIP_WRAP_LONG_LINES=false to disable wrapping;
+Left/Right or h/l then pan long lines. Configured up/down bindings and the mouse wheel also scroll.
 Esc, q, Ctrl-C, or the configured image_preview binding returns without changing the selection.
 Enter does not copy while reading; return to the selector to copy.
 .TP
