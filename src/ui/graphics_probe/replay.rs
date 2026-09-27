@@ -144,7 +144,7 @@ fn pump(
 
 #[allow(unsafe_code)]
 fn raw_pty(tty: &File) -> io::Result<(File, OwnedFd, libc::winsize)> {
-    let size = window_size(tty)?;
+    let mut size = window_size(tty)?;
     let mut attrs = std::mem::MaybeUninit::<libc::termios>::uninit();
     // SAFETY: tcgetattr initializes attrs on success, and both pointers passed to openpty
     // refer to live initialized values. Successful descriptors are immediately owned.
@@ -155,7 +155,7 @@ fn raw_pty(tty: &File) -> io::Result<(File, OwnedFd, libc::winsize)> {
         let mut attrs = attrs.assume_init();
         libc::cfmakeraw(&mut attrs);
         let (mut master, mut slave) = (-1, -1);
-        if libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), &attrs, &size) == -1 {
+        if libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), &mut attrs, &mut size) == -1 {
             return Err(io::Error::last_os_error());
         }
         let master = File::from_raw_fd(master);
