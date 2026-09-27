@@ -223,6 +223,86 @@ fsel --detach
 fsel --no-exec
 ```
 
+### Persistent detached launcher
+
+`fsel --detach --persistent` keeps the current launcher session open after each launch.
+The query, selection, scroll position, panel layout, and prepared icons are retained; press Escape
+to close fsel when finished. Each selection starts a new detached process. Closing fsel does not
+terminate applications it already launched.
+
+Spawn failures are reported in the information panel and leave the launcher usable. Successful
+spawns increment history once; a history-write failure is reported separately without retrying the
+application launch. Exited children are reaped while the session remains open. Desktop `Path=`
+applies to the child, not to later launches or fsel itself.
+
+#### Reacting to a launch
+
+While the session stays open, nothing downstream of fsel can tell that something was launched.
+`--on-launch` runs a command through `$SHELL` after each successful launch, with the application
+in its environment:
+
+| Variable | Value |
+|---|---|
+| `FSEL_LAUNCHED_APP` | Name shown in the launcher |
+| `FSEL_LAUNCHED_COMMAND` | Command taken from the desktop entry |
+| `FSEL_LAUNCHED_PID` | Process id of the launched application |
+| `FSEL_PID` | Process id of fsel itself |
+
+```sh
+fsel --detach --persistent --on-launch 'notify-send "Launched $FSEL_LAUNCHED_APP"'
+```
+
+The command runs in its own process group with no terminal of its own, so it outlives the window
+fsel runs in. That is what a script closing that window relies on. Find fsel through `FSEL_PID`
+rather than `$PPID`: a shell that forks the command instead of replacing itself with it (fish,
+among others) sits between the script and fsel, so `$PPID` is the shell.
+
+Signal the terminal rather than fsel's parent. That parent is usually an interactive shell, and
+an interactive shell ignores what would end it: bash ignores `TERM`, and fish ignores `TERM` and
+`HUP` alike. The terminal is the parent of the session leader, however many shells sit between
+it and fsel. Under tmux there is no terminal to end — fsel outlives every window that attaches to
+its session — so the client is detached instead:
+
+```sh
+#!/bin/sh
+# close-on-launch.sh: leave the window fsel was launched from
+if [ -n "$TMUX" ]; then
+    # fsel stays in the session; detaching closes whatever window is attached to it
+    tmux detach-client -s "$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}')"
+    exit 0
+fi
+[ -n "$ZELLIJ$STY" ] && exit 0
+session=$(ps -o sid= -p "$FSEL_PID" | tr -d ' ')
+kill "$(ps -o ppid= -p "$session" | tr -d ' ')"
+```
+
+The tmux branch is what makes a persistent session usable as a launcher you attach to: fsel holds
+its query, selection and prepared icons in the session, and each launch hands the screen back
+without ending anything. Zellij and screen are still left alone, because the detach each of them
+needs is not this command and their servers own more than the one window.
+
+Under a terminal that serves several windows from one process, the session leader's parent is the
+server, and ending it closes every window it owns.
+
+```sh
+fsel --detach --persistent --on-launch ~/.local/bin/close-on-launch.sh
+```
+
+A launch that fails to spawn does not run the command, and a command that cannot start is reported
+next to the launch. So is one that runs and exits non-zero, once it finishes — a script the shell
+cannot execute is reported that way, since the shell starts and the script does not. The command's
+output is discarded, because fsel owns the terminal while the session is open; report from the
+command itself if it needs to say something.
+
+`--on-launch` requires `--persistent`: without it fsel exits after launching, which a wrapper
+script can already act on.
+
+This opt-in CLI flag requires detached interactive app launching. It rejects `--tty`, `--no-exec`,
+`--stdout`, direct-name launches (`-p`), dmenu, cclip, and maintenance commands. Use `-ss` to start
+with a query. Terminal applications use the configured external terminal launcher; they cannot
+replace fsel through TTY mode. Launch prefixes, systemd-run, and uwsm retain their existing behavior.
+The first-launch confirmation setting still applies only to direct-name launches, as before.
+
 ## Dmenu Mode
 
 ### Basic Dmenu

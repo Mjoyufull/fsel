@@ -136,6 +136,13 @@ pub(super) fn parse_cli_overrides(
             Short('d') | Long("detach") => {
                 default.detach = true;
             }
+            Long("persistent") => default.persistent = true,
+            Long("on-launch") => {
+                default.on_launch = Some(value_as_string(
+                    parser,
+                    "Launch command must be valid UTF-8",
+                )?);
+            }
             Long("dmenu") => {
                 default.dmenu_mode = true;
             }

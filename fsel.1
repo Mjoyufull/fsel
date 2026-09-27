@@ -120,6 +120,17 @@ Enable debug/test mode with detailed logging. Logs are written to \fI~/.config/f
 .BR \-d ", " \-\-detach
 Detach launched applications from terminal session (compatible with --launch-prefix, --systemd-run, and --uwsm)
 .TP
+.B \-\-persistent
+Keep the interactive launcher open after detached launches, preserving query and selection.
+Requires --detach; incompatible with --tty, --no-exec, --stdout, direct-name launches,
+dmenu, cclip, and maintenance commands. Escape closes only fsel, not launched applications.
+.TP
+.BI \-\-on\-launch " COMMAND"
+Run COMMAND through $SHELL after each successful persistent launch, with
+.BR FSEL_LAUNCHED_APP ", " FSEL_LAUNCHED_COMMAND ", " FSEL_LAUNCHED_PID " and " FSEL_PID
+in its environment. Requires --persistent, which is the case where fsel stays open
+after launching. The command runs in its own process group and keeps no terminal.
+.TP
 .BR \-t ", " \-\-tty
 Launch terminal apps in the current terminal (TTY mode). Replaces the fsel process with the launched app; use with -p/--program. Overrides terminal_launcher. Useful for TTY login sessions.
 .SS "Dmenu Mode Options"

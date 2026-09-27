@@ -38,6 +38,26 @@ fn isolated_command(runtime_dir: &Path) -> Command {
 }
 
 #[test]
+fn persistent_rejects_incompatible_modes_before_terminal_setup() {
+    let directory = isolated_runtime_dir("persistent-validation");
+    for args in [
+        vec!["--persistent"],
+        vec!["--detach", "--persistent", "--tty"],
+        vec!["--detach", "--persistent", "--no-exec"],
+        vec!["--detach", "--persistent", "--dmenu"],
+        vec!["--detach", "--persistent", "--stdout"],
+        vec!["--detach", "--persistent", "-p", "Fixture"],
+        vec!["--detach", "--persistent", "--cclip"],
+        vec!["--detach", "--persistent", "--refresh-cache"],
+    ] {
+        let output = isolated_command(&directory).args(args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--persistent requires --detach"));
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn version_flag_exits_successfully() {
     let output = Command::new(binary())
         .arg("--version")

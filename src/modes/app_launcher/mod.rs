@@ -5,6 +5,7 @@ mod direct;
 mod events;
 mod icons;
 pub mod launch;
+mod persistent;
 pub mod run;
 pub mod search;
 mod session;
