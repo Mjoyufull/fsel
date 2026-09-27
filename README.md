@@ -1,6 +1,6 @@
 <div align="center">
 
-  ![Logo](./assets/usage.png)
+  <img src="./assets/usage.png" alt="fsel launcher preview" width="300" />
 
 *(fast select)*
 
