@@ -4,6 +4,16 @@ pub(crate) fn short_usage(program_name: &str) -> String {
 Usage:
   {program_name} [OPTIONS]
 
+├─ Panel Layout
+│  ├─ --info-position <SIDE>       Dock information: top, right, bottom, left
+│  ├─ --input-position <SIDE>      Dock input relative to results
+│  ├─ --info-size <PERCENT>        Information panel share, 0-90
+│  ├─ --input-size <CELLS>         Input thickness in rows or columns
+│  ├─ --layout-rotation <DEGREES>  Rotate layout: 0, 90, 180, 270
+│  ├─ --item-width <COLUMNS>       Horizontal result width (default 24)
+│  ├─ --app-grid <COLUMNS>         Opt-in app grid, 0 disables (maximum 64)
+│  └─ --grid-row-height <ROWS>     Grid cell height, 2-16 (default 4)
+│
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately; exact mode refuses near matches
 │  ├─ --dmenu                      Read choices from stdin and print the selection
@@ -13,6 +23,8 @@ Usage:
 │  ├─ -c, --config <FILE>          Read config from FILE instead of ~/.config/fsel/config.toml
 │  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
 │  ├─ -d, --detach                 Start launched apps without keeping this terminal attached
+│  ├─ --persistent                 Keep the detached launcher open after selection
+│  ├─ --on-launch <CMD>            Run CMD after each persistent launch
 │  ├─ -t, --tty                    Run terminal apps in this TTY instead of a terminal launcher
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging and imply maximum verbosity
@@ -37,13 +49,22 @@ Usage:
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
 │  ├─ --stdout                     Print filtered desktop entries to stdout in json form
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
+│  ├─ --desktop-icons[=MODE]       Use preview, list, both, or none (default: preview)
+│  ├─ --icon-position <POSITION>   Place the preview left, center, or right
+│  ├─ --icon-description-position <SIDE>  Put description top/bottom/left/right of icon
+│  ├─ --icon-arrow-before          Put the selection arrow before a left list icon
+│  ├─ --icon-list-gap <N>          Add 0-16 columns between each icon and label
+│  ├─ --icon-list-vertical-align <N>  Offset artwork; negatives overflow upward (-100 to 100)
+│  ├─ --icon-horizontal-align <N>  Align icon content from left (0) to right (100)
+│  ├─ --icon-vertical-align <N>    Align preview artwork top (0) to bottom (100)
+│  ├─ --icon-theme <THEME>         Override automatic desktop icon-theme detection
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching
 │  └─ --prefix-depth <N>           Tune how long prefix matches outrank fuzzy matches
 │
 ├─ Mode-Specific Flags
 │  ├─ Dmenu: --dmenu0 --password[=CHAR] --index --with-nth --accept-nth
 │  ├─        --match-nth --delimiter --only-match --exit-if-empty
-│  ├─        --select --select-index --auto-select --prompt-only
+│  ├─        --select --select-index --auto-select --prompt-only --preview
 │  └─ Cclip: --tag <NAME|list|clear|wipe> -x/--copy-rendered --cclip-show-tag-color-names
 │
 └─ Help
@@ -60,6 +81,16 @@ pub(crate) fn detailed_usage(program_name: &str) -> String {
 Usage:
   {program_name} [OPTIONS]
 
+├─ Panel Layout
+│  ├─ --info-position <SIDE>       Dock information: top, right, bottom, left
+│  ├─ --input-position <SIDE>      Dock input relative to results
+│  ├─ --info-size <PERCENT>        Information panel share, 0-90
+│  ├─ --input-size <CELLS>         Input thickness in rows or columns
+│  ├─ --layout-rotation <DEGREES>  Rotate layout: 0, 90, 180, 270
+│  ├─ --item-width <COLUMNS>       Horizontal result width (default 24)
+│  ├─ --app-grid <COLUMNS>         Opt-in app grid, 0 disables (maximum 64)
+│  └─ --grid-row-height <ROWS>     Grid cell height, 2-16 (default 4)
+│
 ├─ Core Modes
 │  ├─ -p, --program <NAME>         Launch one app immediately; exact mode requires an exact hit
 │  ├─ --cclip                      Browse clipboard history and copy the selected item
@@ -69,6 +100,8 @@ Usage:
 │  ├─ -c, --config <FILE>          Read config from FILE before applying CLI overrides
 │  ├─ -r, --replace                Replace an existing fsel/cclip instance before starting
 │  ├─ -d, --detach                 Start launched GUI apps without keeping this terminal attached
+│  ├─ --persistent                 Keep the detached launcher open after selection
+│  ├─ --on-launch <CMD>            Run CMD after each persistent launch, with FSEL_LAUNCHED_* set
 │  ├─ -t, --tty                    Run terminal apps in this TTY and replace the fsel process
 │  ├─ -v, --verbose                Print more diagnostics; repeat as -vv or -vvv for more detail
 │  ├─ -T, --test                   Enable debug logging, write logs under ~/.config/fsel/logs/, and imply -vvv
@@ -93,6 +126,19 @@ Usage:
 │  ├─ --auto-hide-duplicates[=no]  Suppress duplicate IDs/names using XDG source precedence
 │  ├─ --hide-before-typing         Keep the list hidden until you type the first character
 │  ├─ --list-executables-in-path   Include executables from $PATH in launcher mode
+│  ├─ --desktop-icons[=MODE]       Use preview, list, both, or none (default: preview)
+│  ├─ --icon-position <POSITION>   Put the preview left, center, or right
+│  ├─ --icon-description-position <SIDE>  Put description top/bottom/left/right of icon
+│  ├─ --icon-preview-width <N>     Give the icon 10-90 percent of the title panel
+│  ├─ --icon-list-width <N>        Reserve 1-16 terminal columns for each list icon
+│  ├─ --icon-list-height <N>       Give each icon/list row 1-8 terminal rows
+│  ├─ --icon-list-gap <N>          Add 0-16 columns between each icon and label
+│  ├─ --icon-list-vertical-align <N>  Offset artwork; negatives overflow upward (-100 to 100)
+│  ├─ --icon-arrow-before          Put the selection arrow before a left list icon
+│  ├─ --icon-size <PX>             Request a themed icon size from 1-4096 pixels
+│  ├─ --icon-horizontal-align <N>  Align icon content from left (0) to right (100)
+│  ├─ --icon-vertical-align <N>    Align preview artwork top (0) to bottom (100)
+│  ├─ --icon-theme <THEME>         Override automatic desktop icon-theme detection
 │  ├─ --match-mode <MODE>          Choose fuzzy or exact matching (default: fuzzy)
 │  └─ --prefix-depth <N>           Set how long prefix matches outrank fuzzy matches (default: 3)
 │
@@ -100,6 +146,7 @@ Usage:
 │  ├─ --dmenu0                     Read NUL-separated input instead of newline-separated input
 │  ├─ --password[=CHAR]            Mask typed input; optionally choose the mask character
 │  ├─ --index                      Print the selected row index instead of the row text
+│  ├─ --index-original             Print the absolute original row index instead of the row text
 │  ├─ --with-nth <COLS>            Show only these 1-based columns (example: 1,3)
 │  ├─ --accept-nth <COLS>          Print only these columns after selection
 │  ├─ --match-nth <COLS>           Search only within these columns
@@ -109,7 +156,11 @@ Usage:
 │  ├─ --select <STRING>            Start with the first matching row preselected
 │  ├─ --select-index <N>           Start with row N preselected
 │  ├─ --auto-select                Accept automatically when the filtered list reaches one row
-│  └─ --prompt-only                Show only the input prompt and hide the list pane
+│  ├─ --prompt-only                Show only the input prompt and hide the list pane
+│  ├─ --preview <COMMAND>          Preview the selected row; supports {{}}, {{q}}, and {{n}}
+│  ├─ --panel <NAME:SIDE:PERCENT:CMD>  Add a named command panel (maximum three)
+│     Config: [[dmenu.panels]] with name, position, size, and command
+│  └─ --panel-edit                 Enable Alt+P panel movement mode
 │
 ├─ Clipboard Mode Options
 │  ├─ --tag <NAME>                 Show only clipboard entries tagged NAME
@@ -120,7 +171,8 @@ Usage:
 │  ├─ --cclip-show-tag-color-names Show tag color names next to tags in cclip mode
 │  ├─ -x, --copy-rendered          Copy rendered HTML as plain text; preserve other MIME types
 │  ├─ -v with --cclip              Show raw textual clipboard content in the preview
-│  └─ -vvv with --cclip            Add row ID, MIME type, and preview-view diagnostics
+│  ├─ -vvv with --cclip            Add row ID, MIME type, and preview-view diagnostics
+│  └─ Alt+i in --cclip             Fullscreen image or scrollable text; q/Esc returns
 │
 ├─ General
 │  ├─ -h                           Show the short summary
@@ -130,6 +182,7 @@ Usage:
 └─ Notes
    ├─ Pick only one launch method: --launch-prefix, --systemd-run, or --uwsm
    ├─ --dmenu and --cclip both imply --no-exec
+   ├─ --preview implies --dmenu and renders text or image bytes from command stdout
    ├─ --program respects --match-mode: exact requires an exact app or executable name
    ├─ --select and --select-index cannot be combined
    └─ Default config path: ~/.config/fsel/config.toml
@@ -150,6 +203,8 @@ Quick help:
   --no-exec              Print the selected item instead of launching it
   -r, --replace          Replace an existing fsel/cclip instance
   -d, --detach           Start launched apps without keeping the terminal attached
+      --persistent       Keep the detached launcher open after selection
+      --on-launch <CMD>  Run CMD after each persistent launch
   -v, --verbose          Print more diagnostics; repeat as -vv or -vvv
   -h                     Show the short summary
   -H, --help             Show the full option tree

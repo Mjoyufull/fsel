@@ -1,0 +1,32 @@
+//! Shared terminal UI rendering, input, graphics, and layout primitives.
+
+mod app_list;
+mod app_ui;
+mod dmenu_ui;
+mod graphics;
+pub(crate) mod graphics_probe;
+mod input;
+mod input_panel;
+mod keybinds;
+mod panel_layout;
+pub(crate) mod panels;
+pub(crate) mod result_layout;
+pub(crate) mod terminal;
+mod types;
+mod visual;
+
+pub(crate) use app_list::{launcher_list_icon_area, launcher_result_layout, launcher_visible_rows};
+pub use app_ui::{AppIcons, UI};
+pub(crate) use app_ui::{ListIconPlacement, launcher_preview_icon_area};
+pub use dmenu_ui::{DmenuUI, TagMode};
+pub use graphics::{DISPLAY_STATE, DisplayState, GraphicsAdapter, ImageManager};
+#[allow(unused_imports)]
+pub use input::{AsyncInput, Config as InputConfig, Event as InputEvent, Input};
+pub(crate) use input_panel::{InputPanelData, InputPanelTheme, render_panel as render_input_panel};
+pub use keybinds::Keybinds;
+pub(crate) use panel_layout::{PanelLayout, effective_content_height, split_content_panels};
+pub use panels::PanelSettings;
+pub use types::*;
+pub(crate) use visual::{
+    PanelTheme, panel_block, render_selection_background, selection_content_area,
+};

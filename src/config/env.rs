@@ -1,3 +1,5 @@
+//! Typed environment overrides and their precedence over loaded configuration.
+
 mod app_launcher;
 mod cclip;
 mod dmenu;
@@ -28,9 +30,9 @@ fn apply_overrides(
 #[cfg(test)]
 mod tests {
     use super::{apply_overrides, helpers};
-    use crate::cli::MatchMode;
+    use crate::cli::{DesktopIconMode, MatchMode};
     use crate::config::{ConfigError, FselConfig};
-    use crate::ui::PanelPosition;
+    use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition};
     use std::collections::HashMap;
 
     struct MapSource {
@@ -57,6 +59,26 @@ mod tests {
     }
 
     #[test]
+    fn pinned_color_environment_overrides_root_configuration() {
+        let mut config: FselConfig =
+            toml::from_str("pinned_text_color = 'Red'").expect("root pinned color should parse");
+        let source = MapSource::new(&[
+            ("FSEL_PINNED_TEXT_COLOR", "Yellow"),
+            ("FSEL_PINNED_BACKGROUND_COLOR", "Blue"),
+            ("FSEL_PINNED_HIGHLIGHT_COLOR", "Black"),
+            ("FSEL_PINNED_SELECTION_BACKGROUND_COLOR", "Green"),
+        ]);
+        apply_overrides(&mut config, &source).expect("pinned overrides should load");
+        assert_eq!(config.ui.pinned_text_color.as_deref(), Some("Yellow"));
+        assert_eq!(config.ui.pinned_background_color.as_deref(), Some("Blue"));
+        assert_eq!(config.ui.pinned_highlight_color.as_deref(), Some("Black"));
+        assert_eq!(
+            config.ui.pinned_selection_background_color.as_deref(),
+            Some("Green")
+        );
+    }
+
+    #[test]
     fn applies_typed_env_overrides_over_loaded_config_values() {
         let mut config: FselConfig = toml::from_str(
             r#"
@@ -75,6 +97,23 @@ prefix_depth = 2
             ("FSEL_MATCH_MODE", "exact"),
             ("FSEL_DMENU_TITLE_PANEL_POSITION", "bottom"),
             ("FSEL_APP_LAUNCHER_PREFIX_DEPTH", "8"),
+            ("FSEL_APP_LAUNCHER_ICON_MODE", "preview"),
+            ("FSEL_APP_LAUNCHER_ICON_POSITION", "left"),
+            ("FSEL_APP_LAUNCHER_ICON_ARROW_BEFORE", "true"),
+            ("FSEL_APP_LAUNCHER_ICON_HORIZONTAL_ALIGN_PERCENT", "25"),
+            ("FSEL_APP_LAUNCHER_ICON_VERTICAL_ALIGN_PERCENT", "75"),
+            ("FSEL_APP_LAUNCHER_ICON_LIST_GAP", "2"),
+            ("FSEL_APP_LAUNCHER_ICON_LIST_VERTICAL_ALIGN_PERCENT", "-35"),
+            ("FSEL_ITEMS_BACKGROUND_COLOR", "#101010"),
+            ("FSEL_ITEMS_SELECTION_BACKGROUND_COLOR", "Blue"),
+            ("FSEL_MAIN_BACKGROUND_COLOR", "#111111"),
+            ("FSEL_INPUT_BACKGROUND_COLOR", "#121212"),
+            ("FSEL_SHOW_ITEMS_BORDER", "false"),
+            ("FSEL_SHOW_INPUT_PROMPT", "false"),
+            ("FSEL_SELECTION_MARKER", "█"),
+            ("FSEL_INPUT_PANEL_STYLE", "command"),
+            ("FSEL_SHOW_SELECTION_MARKER", "false"),
+            ("FSEL_ITEMS_SELECTION_ROUNDED", "true"),
         ]);
 
         apply_overrides(&mut config, &source).unwrap();
@@ -85,6 +124,48 @@ prefix_depth = 2
             Some(PanelPosition::Bottom)
         );
         assert_eq!(config.app_launcher.prefix_depth, Some(8));
+        assert_eq!(
+            config.app_launcher.icon_mode,
+            Some(DesktopIconMode::Preview)
+        );
+        assert_eq!(
+            config.app_launcher.icon_position,
+            Some(HorizontalPosition::Left)
+        );
+        assert_eq!(config.app_launcher.icon_arrow_before, Some(true));
+        assert_eq!(config.app_launcher.icon_horizontal_align_percent, Some(25));
+        assert_eq!(config.app_launcher.icon_vertical_align_percent, Some(75));
+        assert_eq!(config.app_launcher.icon_list_gap, Some(2));
+        assert_eq!(
+            config.app_launcher.icon_list_vertical_align_percent,
+            Some(-35)
+        );
+        assert_eq!(config.ui.items_background_color, "#101010");
+        assert_eq!(config.ui.items_selection_background_color, "Blue");
+        assert_eq!(config.ui.main_background_color, "#111111");
+        assert_eq!(config.ui.input_background_color, "#121212");
+        assert!(!config.ui.show_items_border);
+        assert!(!config.ui.show_input_prompt);
+        assert_eq!(config.ui.selection_marker, "█");
+        assert_eq!(config.ui.input_panel_style, InputPanelStyle::Command);
+        assert!(!config.ui.show_selection_marker);
+        assert!(config.ui.items_selection_rounded);
+    }
+
+    #[test]
+    fn neutral_item_environment_names_override_legacy_aliases() {
+        let mut config = FselConfig::default();
+        let source = MapSource::new(&[
+            ("FSEL_APPS_BACKGROUND_COLOR", "Red"),
+            ("FSEL_ITEMS_BACKGROUND_COLOR", "Blue"),
+            ("FSEL_SHOW_APPS_BORDER", "true"),
+            ("FSEL_SHOW_ITEMS_BORDER", "false"),
+        ]);
+
+        apply_overrides(&mut config, &source).unwrap();
+
+        assert_eq!(config.ui.items_background_color, "Blue");
+        assert!(!config.ui.show_items_border);
     }
 
     #[test]

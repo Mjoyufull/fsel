@@ -1,11 +1,15 @@
+//! Deserializable configuration schema and compatibility aliases.
+
 use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
 
-use crate::cli::{MatchMode, PinnedOrderMode, RankingMode};
-use crate::ui::PanelPosition;
+use crate::cli::{DesktopIconMode, MatchMode, PinnedOrderMode, RankingMode};
+use crate::ui::{HorizontalPosition, InputPanelStyle, PanelPosition};
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct FselConfig {
+    #[serde(default)]
+    pub panels: crate::ui::PanelSettings,
     #[serde(flatten)]
     pub general: GeneralConfig,
     #[serde(flatten)]
@@ -23,6 +27,8 @@ pub struct FselConfig {
 /// Legacy `[app_launcher]` section for backward compatibility.
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct AppLauncherConfig {
+    pub grid_columns: Option<u16>,
+    pub grid_row_height: Option<u16>,
     pub filter_desktop: Option<bool>,
     pub filter_actions: Option<bool>,
     pub auto_hide_duplicates: Option<bool>,
@@ -37,6 +43,21 @@ pub struct AppLauncherConfig {
     pub pinned_order: Option<PinnedOrderMode>,
     pub confirm_first_launch: Option<bool>,
     pub prefix_depth: Option<usize>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
+    pub icon_mode: Option<DesktopIconMode>,
+    #[serde(default, deserialize_with = "deserialize_optional_parsed")]
+    pub icon_position: Option<HorizontalPosition>,
+    pub icon_description_position: Option<crate::ui::panels::PanelSide>,
+    pub icon_preview_width_percent: Option<u16>,
+    pub icon_list_width: Option<u16>,
+    pub icon_list_height: Option<u16>,
+    pub icon_list_gap: Option<u16>,
+    pub icon_list_vertical_align_percent: Option<i16>,
+    pub icon_arrow_before: Option<bool>,
+    pub icon_size: Option<u16>,
+    pub icon_horizontal_align_percent: Option<u16>,
+    pub icon_vertical_align_percent: Option<u16>,
+    pub icon_theme: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -80,6 +101,14 @@ pub struct GeneralConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct UiConfig {
+    #[serde(default)]
+    pub pinned_text_color: Option<String>,
+    #[serde(default)]
+    pub pinned_background_color: Option<String>,
+    #[serde(default)]
+    pub pinned_highlight_color: Option<String>,
+    #[serde(default)]
+    pub pinned_selection_background_color: Option<String>,
     #[serde(default = "super::defaults::default_highlight_color")]
     pub highlight_color: String,
     #[serde(default = "super::defaults::default_cursor")]
@@ -88,18 +117,54 @@ pub struct UiConfig {
     pub hard_stop: bool,
     #[serde(default = "super::defaults::default_true")]
     pub rounded_borders: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_main_border: bool,
+    #[serde(default = "super::defaults::default_true")]
+    #[serde(alias = "show_apps_border")]
+    pub show_items_border: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_input_border: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_panel_titles: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_input_count: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_input_prompt: bool,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_selection_marker: bool,
+    #[serde(default = "super::defaults::default_selection_marker")]
+    pub selection_marker: String,
+    #[serde(default = "super::defaults::default_true")]
+    pub show_pin_icons: bool,
+    #[serde(default, deserialize_with = "deserialize_parsed_or_default")]
+    pub input_panel_style: InputPanelStyle,
     #[serde(default)]
     pub disable_mouse: bool,
     #[serde(default = "super::defaults::default_white")]
     pub main_border_color: String,
+    #[serde(default = "super::defaults::default_reset")]
+    pub main_background_color: String,
     #[serde(default = "super::defaults::default_white")]
-    pub apps_border_color: String,
+    #[serde(alias = "apps_border_color")]
+    pub items_border_color: String,
+    #[serde(default = "super::defaults::default_reset")]
+    #[serde(alias = "apps_background_color")]
+    pub items_background_color: String,
+    #[serde(default = "super::defaults::default_reset")]
+    #[serde(alias = "apps_selection_background_color")]
+    pub items_selection_background_color: String,
+    #[serde(default)]
+    #[serde(alias = "apps_selection_rounded")]
+    pub items_selection_rounded: bool,
     #[serde(default = "super::defaults::default_white")]
     pub input_border_color: String,
+    #[serde(default = "super::defaults::default_reset")]
+    pub input_background_color: String,
     #[serde(default = "super::defaults::default_white")]
     pub main_text_color: String,
     #[serde(default = "super::defaults::default_white")]
-    pub apps_text_color: String,
+    #[serde(alias = "apps_text_color")]
+    pub items_text_color: String,
     #[serde(default = "super::defaults::default_white")]
     pub input_text_color: String,
     #[serde(default)]
@@ -129,7 +194,12 @@ pub struct LayoutConfig {
 
 #[derive(Debug, Deserialize, Clone, Default)]
 pub struct DmenuConfig {
+    #[serde(default)]
+    pub panel_edit: bool,
+    #[serde(default)]
+    pub panels: Vec<crate::modes::dmenu::panels::DmenuPanel>,
     pub delimiter: Option<String>,
+    pub preview: Option<String>,
     pub password_character: Option<String>,
     pub show_line_numbers: Option<bool>,
     pub wrap_long_lines: Option<bool>,

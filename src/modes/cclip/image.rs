@@ -1,3 +1,5 @@
+//! Inline and fullscreen clipboard image preview lifecycle management.
+
 mod fullscreen;
 mod loading;
 
@@ -6,7 +8,7 @@ use crate::ui::{DISPLAY_STATE, DisplayState, DmenuUI, ImageManager, TagMode};
 use eyre::Result;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui_image::picker::Picker;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
@@ -40,11 +42,8 @@ impl ImageRuntime {
         let supports_graphics = !matches!(detected_adapter, crate::ui::GraphicsAdapter::None);
         let image_preview_enabled =
             image_preview_allowed && options.image_preview_enabled(supports_graphics);
-        let image_manager = image_preview_enabled.then(|| {
-            Arc::new(Mutex::new(ImageManager::new(picker_for_adapter(
-                detected_adapter,
-            ))))
-        });
+        let image_manager = image_preview_enabled
+            .then(|| Arc::new(Mutex::new(ImageManager::new(detected_adapter.picker()))));
         let failed_rowids = Arc::new(Mutex::new(HashSet::<String>::new()));
         let (redraw_tx, redraw_rx) = mpsc::unbounded_channel::<()>();
 
@@ -190,8 +189,7 @@ impl ImageRuntime {
         if let Some(manager) = &mut self.image_manager
             && let Ok(mut manager_lock) = manager.try_lock()
         {
-            manager_lock.render(frame, area)?;
-            return Ok(true);
+            return manager_lock.render(frame, area);
         }
 
         Ok(false)
@@ -224,16 +222,6 @@ impl ImageRuntime {
     }
 }
 
-fn picker_for_adapter(adapter: crate::ui::GraphicsAdapter) -> Picker {
-    let mut picker = Picker::halfblocks();
-    match adapter {
-        crate::ui::GraphicsAdapter::Kitty => picker.set_protocol_type(ProtocolType::Kitty),
-        crate::ui::GraphicsAdapter::Sixel => picker.set_protocol_type(ProtocolType::Sixel),
-        crate::ui::GraphicsAdapter::None => {}
-    }
-    picker
-}
-
 fn selected_image_rowid(ui: &DmenuUI<'_>) -> Option<String> {
     let selected = ui.selected?;
     let item = ui.shown.get(selected)?;
@@ -256,6 +244,7 @@ mod tests {
         explicit_image_preview: Option<bool>,
     ) -> super::super::state::CclipOptions {
         super::super::state::CclipOptions {
+            panels: crate::ui::PanelSettings::default(),
             disable_mouse: false,
             hard_stop: false,
             wrap_long_lines: true,
@@ -271,6 +260,21 @@ mod tests {
             input_text_color: Color::White,
             header_title_color: Color::White,
             rounded_borders: true,
+            show_main_border: true,
+            show_items_border: true,
+            show_input_border: true,
+            show_panel_titles: true,
+            show_input_count: true,
+            show_input_prompt: true,
+            show_selection_marker: true,
+            selection_marker: ">".to_string(),
+            input_panel_style: crate::ui::InputPanelStyle::Classic,
+            main_background_color: Color::Reset,
+            items_background_color: Color::Reset,
+            items_selection_background_color: Color::Reset,
+            items_selection_rounded: false,
+            input_background_color: Color::Reset,
+            keybinds: crate::ui::Keybinds::default(),
             content_panel_height_percent: 30,
             input_panel_height: 3,
             content_panel_position: PanelPosition::Top,

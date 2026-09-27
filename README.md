@@ -58,7 +58,7 @@ Get up and running in 30 seconds:
 nix run github:Mjoyufull/fsel
 
 # Or install from Cargo
-cargo install fsel@3.6.0-kiwicrab
+cargo install fsel@3.7.0-kiwicrab
 
 # Launch fsel
 fsel
@@ -73,6 +73,10 @@ fsel --cclip
 That's it. Type to search, arrow keys to navigate, Enter to launch.
 
 Need install variants, launch methods, or mode-specific examples? See [USAGE.md](./USAGE.md).
+
+Make the layout yours: dock panels around the results, add independent dmenu previews, move them
+interactively, or switch the launcher to an icon grid with distinct pinned-row colors.
+All layouts are opt-in; see [panel and grid options](./USAGE.md#panel-layouts).
 
 
 ## Install
@@ -101,11 +105,11 @@ Need install variants, launch methods, or mode-specific examples? See [USAGE.md]
 
 * Build and install via Cargo:
     ```sh
-    $ cargo install fsel@3.6.0-kiwicrab
+    $ cargo install fsel@3.7.0-kiwicrab
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@3.6.0-kiwicrab --force
+    $ cargo install fsel@3.7.0-kiwicrab --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh
@@ -182,6 +186,11 @@ fsel -p firefox
 - **Optional Deduplication**: Enable deterministic XDG-aware duplicate suppression when wanted
 - **Match Modes**: Fuzzy (default) or exact matching
 
+Use `fsel --detach --persistent` to launch several applications from the same session without
+losing your query or selection. `--on-launch` runs a command of yours after each launch, which is
+how a script closes the window fsel runs in, or reports the launch elsewhere; see
+[USAGE.md - Reacting to a launch](./USAGE.md#reacting-to-a-launch).
+
 See [USAGE.md - App Launcher](./USAGE.md#app-launcher) for TTY mode, launch prefixes, `--detach`, cache management, `--replace`, and more.
 
 Hidden entries are stored in fsel's database; their `.desktop` files and executables are not changed.
@@ -239,9 +248,15 @@ echo "foo:bar:baz" | fsel --dmenu --delimiter ":"
 ls -la | fsel --dmenu
 find . -name "*.rs" | fsel --dmenu
 git log --oneline | fsel --dmenu
+
+# fzf-style preview command ({} is the selected row, passed via the environment)
+find . -type f | fsel --preview 'file --brief {}'
+
+# Preview image bytes with Kitty, Sixel, or the half-block fallback
+find ~/Pictures -type f | fsel --preview 'cat {}'
 ```
 
-See [USAGE.md - Dmenu Mode](./USAGE.md#dmenu-mode) for column operations, password input, pre-selection, exact matching, `--dmenu0`, and prompt-only mode.
+See [USAGE.md - Dmenu Mode](./USAGE.md#dmenu-mode) for previews, column operations, password input, pre-selection, exact matching, `--dmenu0`, and prompt-only mode.
 
 ### Clipboard History Mode
 Requires [cclip](https://github.com/heather7283/cclip).
@@ -300,9 +315,24 @@ cursor = "█"
 # App launcher
 terminal_launcher = "alacritty -e"
 
-# Pin/favorite settings (root-level UI options)
+# Shared launcher, dmenu, and cclip visual settings
 pin_color = "rgb(255,165,0)"       # Color for pin icon (orange)
 pin_icon = "📌"                     # Icon for pinned apps
+items_background_color = "Reset"  # Items panel background
+items_selection_background_color = "Reset" # Selected row background
+items_selection_rounded = false    # Optional half-cell rounded row ends
+main_background_color = "Reset"   # Main info panel background
+input_background_color = "Reset"  # Input panel background
+show_main_border = true
+show_items_border = true
+show_input_border = true
+show_panel_titles = true
+show_input_count = true
+show_input_prompt = true
+show_selection_marker = true
+selection_marker = ">"              # Any marker text, for example "█"
+show_pin_icons = true
+input_panel_style = "classic"       # "classic" or "command"
 
 [app_launcher]
 filter_desktop = true              # Filter apps by desktop environment
@@ -312,7 +342,35 @@ list_executables_in_path = false   # Show CLI tools from $PATH
 match_mode = "fuzzy"               # "fuzzy" or "exact"
 ranking_mode = "frecency"          # "frecency", "recency", or "frequency"
 pinned_order = "ranking"           # "ranking", "alphabetical", "oldest_pinned", "newest_pinned"
+icon_mode = "preview"               # "preview", "list", "both", or "none"
+icon_position = "left"              # Preview: "left", "center", or "right"
+icon_preview_width_percent = 40
+icon_list_width = 4                  # Terminal columns reserved beside each app
+icon_list_height = 2                 # Terminal rows per app when list icons are enabled
+icon_list_gap = 1                    # Columns between each list icon and label
+icon_list_vertical_align_percent = 0 # Offset artwork vertically; negatives overflow upward
+icon_arrow_before = false            # Put selection arrow before left-side list icons
+icon_size = 128
+icon_horizontal_align_percent = 50  # Fine adjustment inside the chosen icon area
+icon_vertical_align_percent = 50    # Fine adjustment inside the preview icon area
+# icon_theme = "Papirus-Dark"       # Optional override; desktop settings are detected by default
 ```
+
+The neutral `items_*` settings theme the launcher results, dmenu choices, and cclip history. The
+older `apps_*` names remain accepted as compatibility aliases.
+
+Desktop icons are resolved from the active XDG icon theme (GTK, KDE, and LXQt settings are
+detected), including inherited themes and
+absolute `Icon=` paths. PNG and SVG icons render through Kitty, Sixel, or the terminal-independent
+half-block fallback. The selected icon uses the left side of the title panel by default. Set
+`icon_mode = "list"` for icons beside results or `"both"` for both placements. `icon_list_width`,
+`icon_list_height` and `icon_list_gap` customize the list layout. List labels and markers remain on
+the first item row; `icon_list_vertical_align_percent` moves the artwork at pixel resolution instead.
+Negative values shift the complete artwork above the normal top-aligned position. This intentional
+overflow can overlap earlier list rows or panel chrome at extreme values, with protocol-specific
+stacking behavior.
+Transparent source padding is normalized so icons occupy a consistent visual box. The horizontal
+and vertical percentages provide optional fine adjustment within the chosen icon area.
 
 Field placement matters. Root-level UI options and `[app_launcher]` / `[dmenu]` / `[cclip]` sections are validated separately.
 See [config.toml](./config.toml) and [keybinds.toml](./keybinds.toml) for all options with detailed comments.
@@ -424,6 +482,7 @@ fsel is a **unified TUI workflow tool** built for terminal-centric setups. It co
 - Use a Kitty-, Sixel-, or Halfblocks-capable terminal (e.g. Kitty, Foot, WezTerm). Image preview uses built-in [ratatui-image](https://github.com/benjajaja/ratatui-image); no chafa or other external viewer is needed (3.1.0+).
 - Check `image_preview = true` in config
 - Images render inside the content panel; press Alt+i for fullscreen preview
+- Alt+i also opens full clipboard text: j/k scroll, Space/b page, g/G jump to the ends, q returns
 
 **Fuzzy matching too loose?**
 - Try `--match-mode=exact` for stricter matching

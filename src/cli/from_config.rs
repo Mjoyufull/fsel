@@ -1,3 +1,5 @@
+//! Conversion from layered configuration into runtime CLI options.
+
 use super::color::string_to_color;
 use super::launch::{set_launch_prefix, set_systemd_run, set_uwsm};
 use super::types::Opts;
@@ -74,30 +76,101 @@ fn apply_app_launcher_overrides(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(pinned_order_mode) = fsel_config.app_launcher.pinned_order {
         default.pinned_order_mode = pinned_order_mode;
     }
+    if let Some(icon_mode) = fsel_config.app_launcher.icon_mode {
+        default.desktop_icon_mode = icon_mode;
+    }
+    if let Some(icon_position) = fsel_config.app_launcher.icon_position {
+        default.desktop_icon_position = icon_position;
+    }
+    default.icon_description_position = fsel_config.app_launcher.icon_description_position;
+    if let Some(width) = fsel_config.app_launcher.icon_preview_width_percent {
+        default.desktop_icon_preview_width_percent = width;
+    }
+    if let Some(width) = fsel_config.app_launcher.icon_list_width {
+        default.desktop_icon_list_width = width;
+    }
+    if let Some(height) = fsel_config.app_launcher.icon_list_height {
+        default.desktop_icon_list_height = height;
+    }
+    if let Some(columns) = fsel_config.app_launcher.grid_columns {
+        default.app_grid_columns = columns;
+    }
+    if let Some(height) = fsel_config.app_launcher.grid_row_height {
+        default.app_grid_row_height = height;
+    }
+    if let Some(gap) = fsel_config.app_launcher.icon_list_gap {
+        default.desktop_icon_list_gap = gap;
+    }
+    if let Some(align) = fsel_config.app_launcher.icon_list_vertical_align_percent {
+        default.desktop_icon_list_vertical_align_percent = align;
+    }
+    if let Some(arrow_before) = fsel_config.app_launcher.icon_arrow_before {
+        default.desktop_icon_arrow_before = arrow_before;
+    }
+    if let Some(size) = fsel_config.app_launcher.icon_size {
+        default.desktop_icon_size = size;
+    }
+    if let Some(align) = fsel_config.app_launcher.icon_horizontal_align_percent {
+        default.desktop_icon_horizontal_align_percent = align;
+    }
+    if let Some(align) = fsel_config.app_launcher.icon_vertical_align_percent {
+        default.desktop_icon_vertical_align_percent = align;
+    }
+    default.desktop_icon_theme = fsel_config.app_launcher.icon_theme.clone();
 }
 
 fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
+    default.pinned_text_color = parse_optional_color(fsel_config.ui.pinned_text_color.as_deref());
+    default.pinned_background_color =
+        parse_optional_color(fsel_config.ui.pinned_background_color.as_deref());
+    default.pinned_highlight_color =
+        parse_optional_color(fsel_config.ui.pinned_highlight_color.as_deref());
+    default.pinned_selection_background_color =
+        parse_optional_color(fsel_config.ui.pinned_selection_background_color.as_deref());
     if let Ok(color) = string_to_color(&fsel_config.ui.highlight_color) {
         default.highlight_color = color;
     }
     default.cursor = fsel_config.ui.cursor.clone();
     default.hard_stop = fsel_config.ui.hard_stop;
     default.rounded_borders = fsel_config.ui.rounded_borders;
+    default.show_main_border = fsel_config.ui.show_main_border;
+    default.show_items_border = fsel_config.ui.show_items_border;
+    default.show_input_border = fsel_config.ui.show_input_border;
+    default.show_panel_titles = fsel_config.ui.show_panel_titles;
+    default.show_input_count = fsel_config.ui.show_input_count;
+    default.show_input_prompt = fsel_config.ui.show_input_prompt;
+    default.show_selection_marker = fsel_config.ui.show_selection_marker;
+    default.selection_marker = fsel_config.ui.selection_marker.clone();
+    default.show_pin_icons = fsel_config.ui.show_pin_icons;
+    default.input_panel_style = fsel_config.ui.input_panel_style;
     default.disable_mouse = fsel_config.ui.disable_mouse;
     if let Ok(color) = string_to_color(&fsel_config.ui.main_border_color) {
         default.main_border_color = color;
     }
-    if let Ok(color) = string_to_color(&fsel_config.ui.apps_border_color) {
-        default.apps_border_color = color;
+    if let Ok(color) = string_to_color(&fsel_config.ui.main_background_color) {
+        default.main_background_color = color;
     }
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_border_color) {
+        default.items_border_color = color;
+    }
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_background_color) {
+        default.items_background_color = color;
+    }
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_selection_background_color) {
+        default.items_selection_background_color = color;
+    }
+    default.items_selection_rounded = fsel_config.ui.items_selection_rounded;
     if let Ok(color) = string_to_color(&fsel_config.ui.input_border_color) {
         default.input_border_color = color;
+    }
+    if let Ok(color) = string_to_color(&fsel_config.ui.input_background_color) {
+        default.input_background_color = color;
     }
     if let Ok(color) = string_to_color(&fsel_config.ui.main_text_color) {
         default.main_text_color = color;
     }
-    if let Ok(color) = string_to_color(&fsel_config.ui.apps_text_color) {
-        default.apps_text_color = color;
+    if let Ok(color) = string_to_color(&fsel_config.ui.items_text_color) {
+        default.items_text_color = color;
     }
     if let Ok(color) = string_to_color(&fsel_config.ui.input_text_color) {
         default.input_text_color = color;
@@ -115,6 +188,7 @@ fn apply_ui_config(default: &mut Opts, fsel_config: &FselConfig) {
 
 fn apply_layout_config(default: &mut Opts, fsel_config: &FselConfig) {
     default.title_panel_height_percent = fsel_config.layout.title_panel_height_percent;
+    default.panels = fsel_config.panels.clone();
     default.input_panel_height = fsel_config.layout.input_panel_height;
     default.title_panel_position = Some(fsel_config.layout.title_panel_position);
 }
@@ -126,6 +200,9 @@ fn apply_dmenu_config(default: &mut Opts, fsel_config: &FselConfig) {
     if let Some(character) = fsel_config.dmenu.password_character.as_deref() {
         default.dmenu_password_character = character.to_string();
     }
+    default.dmenu_preview = fsel_config.dmenu.preview.clone();
+    default.dmenu_panels = fsel_config.dmenu.panels.clone();
+    default.dmenu_panel_edit = fsel_config.dmenu.panel_edit;
     if let Some(show_line_numbers) = fsel_config.dmenu.show_line_numbers {
         default.dmenu_show_line_numbers = show_line_numbers;
     }

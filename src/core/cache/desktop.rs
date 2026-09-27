@@ -1,4 +1,6 @@
-use super::tables::{DESKTOP_CACHE_TABLE, FILE_LIST_TABLE, NAME_INDEX_TABLE};
+use super::tables::{
+    DESKTOP_CACHE_TABLE, FILE_LIST_TABLE, ICON_PATH_CACHE_TABLE, NAME_INDEX_TABLE,
+};
 use crate::desktop::App;
 use eyre::{Result, eyre};
 use redb::{Database, ReadableDatabase, ReadableTable};
@@ -43,6 +45,7 @@ impl DesktopCache {
             let _ = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
             let _ = write_txn.open_table(NAME_INDEX_TABLE)?;
             let _ = write_txn.open_table(FILE_LIST_TABLE)?;
+            let _ = write_txn.open_table(ICON_PATH_CACHE_TABLE)?;
         }
         write_txn.commit()?;
 
@@ -149,10 +152,12 @@ impl DesktopCache {
             let mut cache_table = write_txn.open_table(DESKTOP_CACHE_TABLE)?;
             let mut index_table = write_txn.open_table(NAME_INDEX_TABLE)?;
             let mut file_list_table = write_txn.open_table(FILE_LIST_TABLE)?;
+            let mut icon_path_table = write_txn.open_table(ICON_PATH_CACHE_TABLE)?;
 
             remove_all_rows(&mut cache_table)?;
             remove_all_rows(&mut index_table)?;
             remove_all_rows(&mut file_list_table)?;
+            remove_all_rows(&mut icon_path_table)?;
         }
         write_txn.commit()?;
         Ok(())
@@ -162,7 +167,9 @@ impl DesktopCache {
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(FILE_LIST_TABLE)?;
+            let mut icon_path_table = write_txn.open_table(ICON_PATH_CACHE_TABLE)?;
             remove_all_rows(&mut table)?;
+            remove_all_rows(&mut icon_path_table)?;
         }
         write_txn.commit()?;
         Ok(())
@@ -260,6 +267,16 @@ fn deserialize_cache_entry(data: &[u8]) -> Option<CacheEntry> {
 }
 
 fn cache_entry_is_fresh(path: &Path, entry: &CacheEntry) -> bool {
+    // Icon values containing desktop-entry escapes predate icon normalization.
+    // Reparse those rows so the resolver never receives a stale raw value.
+    if entry
+        .app
+        .icon
+        .as_deref()
+        .is_some_and(|icon| icon.contains('\\'))
+    {
+        return false;
+    }
     if let Ok(metadata) = fs::metadata(path)
         && let Ok(mtime) = metadata.modified()
     {
@@ -469,6 +486,34 @@ mod tests {
 
         assert_eq!(loaded_by_name.name, app.name);
         assert_eq!(loaded_by_path.command, app.command);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn escaped_cached_icons_are_invalidated_for_reparsing() {
+        let dir = test_temp_dir("escaped-icon");
+        let db_path = dir.join("desktop-cache.redb");
+        let db = Arc::new(redb::Database::create(&db_path).expect("database should be created"));
+        let cache = DesktopCache::new(Arc::clone(&db)).expect("desktop cache should initialize");
+        let desktop_path = dir.join("escaped.desktop");
+        fs::write(
+            &desktop_path,
+            "[Desktop Entry]\nType=Application\nName=EscapedIcon\nExec=/bin/true\nIcon=/opt/My\\sApp/icon.png\n",
+        )
+        .expect("desktop entry should be written");
+        let mut app = sample_app("EscapedIcon");
+        app.icon = Some("/opt/My\\sApp/icon.png".to_string());
+        cache
+            .set(&desktop_path, app)
+            .expect("cache set should succeed");
+
+        assert!(
+            cache
+                .get(&desktop_path)
+                .expect("cache lookup should succeed")
+                .is_none()
+        );
 
         let _ = fs::remove_dir_all(dir);
     }

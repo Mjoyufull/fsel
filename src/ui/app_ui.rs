@@ -1,8 +1,12 @@
+//! Launcher panel layout and selected-application preview rendering.
+
+use eyre::Result;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
+use ratatui::layout::{Constraint, Direction, Layout, Margin, Rect};
+use ratatui::style::Style;
+use ratatui::text::Line;
+use ratatui::widgets::Paragraph;
+use std::collections::{HashMap, HashSet};
 
 pub(crate) fn effective_title_height(total_height: u16, title_panel_height_percent: u16) -> u16 {
     if title_panel_height_percent == 0 {
@@ -12,8 +16,159 @@ pub(crate) fn effective_title_height(total_height: u16, title_panel_height_perce
     }
 }
 
+pub(crate) fn launcher_panel_areas(size: Rect, cli: &crate::cli::Opts) -> (Rect, Rect, Rect) {
+    if cli.panels.enabled() {
+        return cli.panels.split(
+            size,
+            cli.title_panel_height_percent,
+            cli.input_panel_height,
+            cli.title_panel_position.unwrap_or_default(),
+        );
+    }
+    let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
+    let chunks = match cli.title_panel_position {
+        Some(crate::ui::PanelPosition::Bottom) => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(cli.input_panel_height),
+                Constraint::Length(title_height),
+            ])
+            .split(size),
+        Some(crate::ui::PanelPosition::Middle) => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0),
+                Constraint::Length(title_height),
+                Constraint::Length(cli.input_panel_height),
+                Constraint::Min(0),
+            ])
+            .split(size),
+        _ => Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(title_height),
+                Constraint::Min(0),
+                Constraint::Length(cli.input_panel_height),
+            ])
+            .split(size),
+    };
+
+    match cli.title_panel_position {
+        Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
+        Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
+        _ => (chunks[0], chunks[2], chunks[1]),
+    }
+}
+
+fn split_icon_preview(
+    area: Rect,
+    position: crate::ui::HorizontalPosition,
+    icon_width_percent: u16,
+    description_position: Option<crate::ui::panels::PanelSide>,
+) -> (Rect, Option<Rect>) {
+    if let Some(side) = description_position {
+        use crate::ui::panels::PanelSide;
+        let text_first = matches!(side, PanelSide::Top | PanelSide::Left);
+        let direction = if matches!(side, PanelSide::Top | PanelSide::Bottom) {
+            Direction::Vertical
+        } else {
+            Direction::Horizontal
+        };
+        let first_percent = if text_first {
+            100u16.saturating_sub(icon_width_percent)
+        } else {
+            icon_width_percent
+        };
+        let parts = Layout::default()
+            .direction(direction)
+            .constraints([
+                Constraint::Percentage(first_percent),
+                Constraint::Percentage(100u16.saturating_sub(first_percent)),
+            ])
+            .split(area);
+        return if text_first {
+            (parts[1], Some(parts[0]))
+        } else {
+            (parts[0], Some(parts[1]))
+        };
+    }
+    if position == crate::ui::HorizontalPosition::Center {
+        let icon_width = (u32::from(area.width) * u32::from(icon_width_percent) / 100)
+            .min(u32::from(area.width)) as u16;
+        let icon_x = area.x + area.width.saturating_sub(icon_width) / 2;
+        return (Rect::new(icon_x, area.y, icon_width, area.height), None);
+    }
+
+    let text_width_percent = 100u16.saturating_sub(icon_width_percent);
+    let constraints = match position {
+        crate::ui::HorizontalPosition::Left => [
+            Constraint::Percentage(icon_width_percent),
+            Constraint::Percentage(text_width_percent),
+        ],
+        crate::ui::HorizontalPosition::Right => [
+            Constraint::Percentage(text_width_percent),
+            Constraint::Percentage(icon_width_percent),
+        ],
+        crate::ui::HorizontalPosition::Center => unreachable!("center was handled above"),
+    };
+    let content = Layout::horizontal(constraints).split(area);
+    match position {
+        crate::ui::HorizontalPosition::Left => (content[0], Some(content[1])),
+        crate::ui::HorizontalPosition::Right => (content[1], Some(content[0])),
+        crate::ui::HorizontalPosition::Center => unreachable!("center was handled above"),
+    }
+}
+
+pub(crate) fn launcher_preview_icon_area(size: Rect, cli: &crate::cli::Opts) -> Rect {
+    let (title_area, _, _) = launcher_panel_areas(size, cli);
+    if title_area.is_empty() {
+        return Rect::default();
+    }
+    let panel_inner = info_block("", cli).inner(title_area);
+    let (icon_area, _) = split_icon_preview(
+        panel_inner,
+        cli.desktop_icon_position,
+        cli.desktop_icon_preview_width_percent,
+        cli.icon_description_position,
+    );
+    let icon_area = icon_area.inner(Margin {
+        horizontal: 1,
+        vertical: 0,
+    });
+    Rect::new(0, 0, icon_area.width, icon_area.height)
+}
+
+fn info_block<'a>(title: &'a str, cli: &crate::cli::Opts) -> ratatui::widgets::Block<'a> {
+    super::panel_block(
+        title,
+        super::PanelTheme {
+            show_border: cli.show_main_border,
+            show_title: cli.show_panel_titles,
+            bold_title: false,
+            rounded_border: cli.rounded_borders,
+            border_color: cli.main_border_color,
+            background_color: cli.main_background_color,
+            title_color: cli.header_title_color,
+        },
+    )
+}
+
 /// App filtering and sorting UI (Stateless Renderer)
 pub struct UI;
+
+/// Borrowed application icon state used by the launcher renderer.
+pub struct AppIcons<'a> {
+    pub(crate) image_manager: &'a mut crate::ui::ImageManager,
+    pub(crate) preview_key: Option<&'a str>,
+    pub(crate) list_icons: &'a HashMap<String, ListIconPlacement>,
+    pub(crate) failed_list_icons: &'a mut HashSet<String>,
+}
+
+pub(crate) struct ListIconPlacement {
+    pub(crate) key: String,
+    pub(crate) top_overflow_rows: u16,
+}
 
 impl UI {
     /// Create new stateless UI renderer
@@ -22,46 +177,17 @@ impl UI {
     }
 
     /// Render the UI using the centralized State
-    pub fn render(&self, f: &mut Frame, state: &crate::core::state::State, cli: &crate::cli::Opts) {
+    pub fn render(
+        &self,
+        f: &mut Frame,
+        state: &crate::core::state::State,
+        cli: &crate::cli::Opts,
+        mut app_icons: Option<AppIcons<'_>>,
+    ) -> Result<(bool, bool)> {
         let size = f.area();
-        let title_height = effective_title_height(size.height, cli.title_panel_height_percent);
-        let should_render_border = title_height > 0;
-
-        // Layout calculations
-        let chunks = match cli.title_panel_position {
-            Some(crate::ui::PanelPosition::Bottom) => Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(cli.input_panel_height),
-                    Constraint::Length(title_height),
-                ])
-                .split(size),
-            Some(crate::ui::PanelPosition::Middle) => Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Min(0),
-                    Constraint::Length(title_height),
-                    Constraint::Length(cli.input_panel_height),
-                    Constraint::Min(0),
-                ])
-                .split(size),
-            _ => Layout::default() // Top default
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(title_height),
-                    Constraint::Min(0), // Apps panel
-                    Constraint::Length(cli.input_panel_height),
-                ])
-                .split(size),
-        };
-
-        let (title_area, input_area, apps_area) = match cli.title_panel_position {
-            Some(crate::ui::PanelPosition::Bottom) => (chunks[2], chunks[1], chunks[0]),
-            Some(crate::ui::PanelPosition::Middle) => (chunks[1], chunks[2], chunks[0]),
-            // Default: Title (0), Apps (1), Input (2)
-            _ => (chunks[0], chunks[2], chunks[1]),
-        };
+        let mut icon_render_failed = false;
+        let (title_area, input_area, apps_area) = launcher_panel_areas(size, cli);
+        let should_render_border = !title_area.is_empty();
 
         // Render Title/Info Panel
         if should_render_border {
@@ -80,152 +206,76 @@ impl UI {
                 "Fsel".to_string()
             };
 
-            let info_block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(cli.main_border_color))
-                .title(Span::styled(
-                    format!(" {} ", title),
-                    Style::default().fg(cli.header_title_color),
-                ))
-                .border_type(if cli.rounded_borders {
-                    BorderType::Rounded
-                } else {
-                    BorderType::Plain
-                });
+            let title = format!(" {title} ");
+            let info_block = info_block(&title, cli);
 
             // Text rendering from state.text which should be populated by state.update_info
             let info_text: Vec<Line> = state.text.lines().map(Line::from).collect();
-            let paragraph = Paragraph::new(info_text)
-                .block(info_block)
-                .style(Style::default().fg(cli.main_text_color));
-            f.render_widget(paragraph, title_area);
-        }
-
-        // Render Input
-        let input_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(cli.input_border_color))
-            .title(Span::styled(
-                " Input ",
-                Style::default().fg(cli.header_title_color),
-            ))
-            .border_type(if cli.rounded_borders {
-                BorderType::Rounded
-            } else {
-                BorderType::Plain
-            });
-
-        // Legacy Formatting: (Selected/Total) >> Query
-        // Colors:
-        // - Brackets/Slash/Text: Input Text Color
-        // - Selected Number: Highlight Color
-        // - > Cursor: Highlight Color
-        // - Cursor Block: Highlight Color
-
-        let spans = vec![
-            Span::styled("(", Style::default().fg(cli.input_text_color)),
-            Span::styled(
-                (state.selected.map_or(0, |v| v + 1)).to_string(),
-                Style::default().fg(cli.highlight_color),
-            ),
-            Span::styled("/", Style::default().fg(cli.input_text_color)),
-            Span::styled(
-                state.shown.len().to_string(),
-                Style::default().fg(cli.input_text_color),
-            ),
-            Span::styled(") ", Style::default().fg(cli.input_text_color)),
-            Span::styled(">", Style::default().fg(cli.highlight_color)),
-            Span::styled("> ", Style::default().fg(cli.input_text_color)),
-            Span::styled(&state.query, Style::default().fg(cli.input_text_color)),
-            Span::styled(&cli.cursor, Style::default().fg(cli.highlight_color)),
-        ];
-
-        let line = Line::from(spans);
-        let text_len = line.width();
-
-        let available_width = input_area.width.saturating_sub(2) as usize; // Account for borders
-
-        let scroll_x = if text_len > available_width {
-            (text_len - available_width) as u16
-        } else {
-            0
-        };
-
-        let input = Paragraph::new(line)
-            .block(input_block)
-            .style(Style::default().fg(cli.input_text_color))
-            .scroll((0, scroll_x));
-        f.render_widget(input, input_area);
-
-        // Calculate max visible rows (subtract borders)
-        let max_visible = apps_area.height.saturating_sub(2) as usize;
-
-        // Apps block with border
-        let apps_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(cli.apps_border_color))
-            .title(Span::styled(
-                " Apps ",
-                Style::default().fg(cli.header_title_color),
-            ))
-            .border_type(if cli.rounded_borders {
-                BorderType::Rounded
-            } else {
-                BorderType::Plain
-            });
-
-        // only render whats on screen, not the whole dang list
-        let items: Vec<ListItem> = state
-            .shown
-            .iter()
-            .skip(state.scroll_offset)
-            .take(max_visible)
-            .map(|app| {
-                let mut spans = Vec::new();
-
-                // Pin support
-                if app.pinned {
-                    spans.push(Span::styled(
-                        &cli.pin_icon,
-                        Style::default().fg(cli.pin_color),
-                    ));
-                    spans.push(Span::raw(" "));
+            if app_icons
+                .as_ref()
+                .and_then(|icons| icons.preview_key)
+                .is_some()
+            {
+                let inner = info_block.inner(title_area);
+                let (icon_area, text_area) = split_icon_preview(
+                    inner,
+                    cli.desktop_icon_position,
+                    cli.desktop_icon_preview_width_percent,
+                    cli.icon_description_position,
+                );
+                let icon_area = icon_area.inner(Margin {
+                    horizontal: 1,
+                    vertical: 0,
+                });
+                f.render_widget(info_block, title_area);
+                let icon_rendered = if icon_area.width > 0 && icon_area.height > 0 {
+                    let icons = app_icons
+                        .as_mut()
+                        .expect("preview key requires application icon state");
+                    let key = icons
+                        .preview_key
+                        .expect("preview key was checked before rendering");
+                    Some(icons.image_manager.render_cached(f, key, icon_area)?)
+                } else {
+                    None
+                };
+                if icon_rendered == Some(true) {
+                    if let Some(text_area) = text_area {
+                        f.render_widget(
+                            Paragraph::new(info_text)
+                                .style(Style::default().fg(cli.main_text_color)),
+                            text_area,
+                        );
+                    }
+                } else {
+                    icon_render_failed = icon_rendered == Some(false);
+                    f.render_widget(
+                        Paragraph::new(info_text).style(Style::default().fg(cli.main_text_color)),
+                        inner,
+                    );
                 }
-
-                spans.push(Span::styled(
-                    &app.name,
-                    Style::default().fg(cli.apps_text_color),
-                ));
-
-                ListItem::new(Line::from(spans))
-            })
-            .collect();
-
-        let list = List::new(items)
-            .block(apps_block)
-            .highlight_style(
-                Style::default()
-                    .fg(cli.highlight_color)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("> ");
-
-        // gotta adjust for the scroll offset innit
-        let mut list_state = ratatui::widgets::ListState::default();
-        if let Some(sel) = state.selected {
-            // Only highlight if selection is within visible range
-            if sel >= state.scroll_offset && sel < state.scroll_offset + max_visible {
-                list_state.select(Some(sel - state.scroll_offset));
+            } else {
+                let paragraph = Paragraph::new(info_text)
+                    .block(info_block)
+                    .style(Style::default().fg(cli.main_text_color));
+                f.render_widget(paragraph, title_area);
             }
         }
 
-        f.render_stateful_widget(list, apps_area, &mut list_state);
+        super::input_panel::render(f, state, cli, input_area);
+
+        let list_render_failed =
+            super::app_list::render(f, state, cli, apps_area, app_icons.as_mut())?;
+        Ok((icon_render_failed, list_render_failed))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::effective_title_height;
+    use super::{effective_title_height, launcher_preview_icon_area, split_icon_preview};
+    use crate::cli::{DesktopIconMode, Opts};
+    use crate::ui::HorizontalPosition;
+    use ratatui::layout::Rect;
 
     #[test]
     fn effective_title_height_allows_zero() {
@@ -235,5 +285,115 @@ mod tests {
     #[test]
     fn effective_title_height_matches_percentage_rounding() {
         assert_eq!(effective_title_height(21, 10), 2);
+    }
+
+    #[test]
+    fn icon_preview_can_place_icon_on_the_right() {
+        let (icon, text) = split_icon_preview(
+            Rect::new(0, 0, 100, 10),
+            HorizontalPosition::Right,
+            40,
+            None,
+        );
+
+        assert_eq!(text, Some(Rect::new(0, 0, 60, 10)));
+        assert_eq!(icon, Rect::new(60, 0, 40, 10));
+    }
+
+    #[test]
+    fn icon_preview_can_swap_to_the_left() {
+        let (icon, text) =
+            split_icon_preview(Rect::new(0, 0, 100, 10), HorizontalPosition::Left, 35, None);
+
+        assert_eq!(icon, Rect::new(0, 0, 35, 10));
+        assert_eq!(text, Some(Rect::new(35, 0, 65, 10)));
+    }
+
+    #[test]
+    fn icon_preview_can_use_the_center_of_the_title_panel() {
+        let (icon, text) = split_icon_preview(
+            Rect::new(10, 3, 100, 10),
+            HorizontalPosition::Center,
+            40,
+            None,
+        );
+
+        assert_eq!(icon, Rect::new(40, 3, 40, 10));
+        assert_eq!(text, None);
+    }
+
+    #[test]
+    fn centered_preview_percentage_does_not_saturate_on_wide_terminals() {
+        let (icon, _) = split_icon_preview(
+            Rect::new(0, 0, 2_000, 10),
+            HorizontalPosition::Center,
+            40,
+            None,
+        );
+
+        assert_eq!(icon, Rect::new(600, 0, 800, 10));
+    }
+
+    #[test]
+    fn preview_worker_area_matches_the_rendered_icon_slot() {
+        let cli = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            title_panel_height_percent: 25,
+            desktop_icon_preview_width_percent: 40,
+            ..Opts::default()
+        };
+
+        assert_eq!(
+            launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &cli),
+            Rect::new(0, 0, 37, 8)
+        );
+    }
+
+    #[test]
+    fn description_can_stack_on_either_side_without_overlap() {
+        use crate::ui::panels::PanelSide;
+        for side in [
+            PanelSide::Top,
+            PanelSide::Bottom,
+            PanelSide::Left,
+            PanelSide::Right,
+        ] {
+            let area = Rect::new(4, 3, 100, 20);
+            let (icon, text) = split_icon_preview(area, HorizontalPosition::Center, 40, Some(side));
+            let text = text.expect("explicit description placement retains text");
+            assert!(icon.intersection(text).is_empty());
+            assert_eq!(icon.area() + text.area(), area.area());
+            match side {
+                PanelSide::Top => assert_eq!(text.bottom(), icon.y),
+                PanelSide::Bottom => assert_eq!(icon.bottom(), text.y),
+                PanelSide::Left => assert_eq!(text.right(), icon.x),
+                PanelSide::Right => assert_eq!(icon.right(), text.x),
+            }
+        }
+    }
+
+    #[test]
+    fn borderless_preview_uses_the_released_panel_cells() {
+        let cli = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            title_panel_height_percent: 25,
+            desktop_icon_preview_width_percent: 40,
+            show_main_border: false,
+            ..Opts::default()
+        };
+
+        assert_eq!(
+            launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &cli),
+            Rect::new(0, 0, 38, 9)
+        );
+
+        let titleless = Opts {
+            show_panel_titles: false,
+            ..cli
+        };
+        assert_eq!(
+            launcher_preview_icon_area(Rect::new(0, 0, 100, 40), &titleless),
+            Rect::new(0, 0, 38, 10)
+        );
     }
 }

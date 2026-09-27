@@ -48,7 +48,7 @@ impl<'a> DmenuUI<'a> {
     }
 
     /// Get actual clipboard content for display.
-    pub(super) fn get_cclip_content_for_display(&mut self, item: &crate::common::Item) -> String {
+    pub(crate) fn get_cclip_content_for_display(&mut self, item: &crate::common::Item) -> String {
         let parts: Vec<&str> = item.original_line.splitn(4, '\t').collect();
 
         if parts.len() >= 3 {

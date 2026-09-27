@@ -5,7 +5,6 @@ use crate::ui::DmenuUI;
 use eyre::{Result, WrapErr};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::widgets::ListState;
 use scopeguard::defer;
 use std::io;
 
@@ -50,7 +49,7 @@ pub async fn run(cli: &Opts) -> Result<()> {
     let backend = CrosstermBackend::new(io::stderr());
     let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
-    terminal.clear().wrap_err("Failed to clear terminal")?;
+    crate::ui::terminal::clear_fullscreen(&mut terminal).wrap_err("Failed to clear terminal")?;
 
     let mut ui = DmenuUI::new(items, options.wrap_long_lines, options.show_line_numbers);
     ui.set_cclip_verbosity(cli.verbose.unwrap_or(0));
@@ -64,7 +63,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
 
     let mut image_runtime = super::image::ImageRuntime::new(&options, &mut ui).await;
     options.set_graphics_adapter(image_runtime.detected_adapter());
-    let mut list_state = ListState::default();
     let mut max_visible = 0usize;
     let mut needs_redraw = true;
 
@@ -76,7 +74,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
             &mut ui,
             &options,
             &tag_metadata_formatter,
-            &mut list_state,
             &mut image_runtime,
         )?;
         needs_redraw = false;
@@ -97,7 +94,6 @@ pub async fn run(cli: &Opts) -> Result<()> {
                 &mut ui,
                 &options,
                 &tag_metadata_formatter,
-                &mut list_state,
                 &mut image_runtime,
             )?;
         }

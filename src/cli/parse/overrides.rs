@@ -2,7 +2,7 @@ use super::helpers::{parse_column_list, value_as_string};
 use crate::cli::error::CliError;
 use crate::cli::help::unknown_argument_help;
 use crate::cli::launch::{parse_launch_prefix, set_launch_prefix, set_systemd_run, set_uwsm};
-use crate::cli::{CliCommand, MatchMode, Opts};
+use crate::cli::{CliCommand, DesktopIconMode, MatchMode, Opts};
 use lexopt::prelude::*;
 
 pub(super) enum OverridesResult {
@@ -19,6 +19,66 @@ pub(super) fn parse_cli_overrides(
 
     while let Some(arg) = parser.next()? {
         match arg {
+            Long("app-grid") => {
+                default.app_grid_columns = value_as_string(parser, "Invalid grid columns")?
+                    .parse()
+                    .map_err(|_| CliError::message("grid columns must be an integer"))?;
+            }
+            Long("grid-row-height") => {
+                default.app_grid_row_height = value_as_string(parser, "Invalid grid height")?
+                    .parse()
+                    .map_err(|_| CliError::message("grid row height must be an integer"))?;
+            }
+            Long("panel-edit") => {
+                default.dmenu_panel_edit = true;
+                default.dmenu_mode = true;
+            }
+            Long("panel") => {
+                let spec = value_as_string(parser, "Invalid panel specification")?;
+                default.dmenu_panels.push(
+                    crate::modes::dmenu::panels::DmenuPanel::parse(&spec)
+                        .map_err(CliError::message)?,
+                );
+                default.dmenu_mode = true;
+            }
+            Long("info-position") => {
+                default.panels.info_position = Some(
+                    value_as_string(parser, "Invalid panel side")?
+                        .parse()
+                        .map_err(CliError::message)?,
+                );
+            }
+            Long("input-position") => {
+                default.panels.input_position = Some(
+                    value_as_string(parser, "Invalid panel side")?
+                        .parse()
+                        .map_err(CliError::message)?,
+                );
+            }
+            Long("info-size") => {
+                default.panels.info_size = Some(
+                    value_as_string(parser, "Invalid info size")?
+                        .parse()
+                        .map_err(|_| CliError::message("info size must be an integer"))?,
+                );
+            }
+            Long("input-size") => {
+                default.panels.input_size = Some(
+                    value_as_string(parser, "Invalid input size")?
+                        .parse()
+                        .map_err(|_| CliError::message("input size must be an integer"))?,
+                );
+            }
+            Long("layout-rotation") => {
+                default.panels.rotation = value_as_string(parser, "Invalid rotation")?
+                    .parse()
+                    .map_err(|_| CliError::message("layout rotation must be an integer"))?;
+            }
+            Long("item-width") => {
+                default.panels.item_width = value_as_string(parser, "Invalid item width")?
+                    .parse()
+                    .map_err(|_| CliError::message("item width must be an integer"))?;
+            }
             Short('t') | Long("tty") => {
                 default.tty = true;
                 default.terminal_launcher.clear();
@@ -76,6 +136,13 @@ pub(super) fn parse_cli_overrides(
             Short('d') | Long("detach") => {
                 default.detach = true;
             }
+            Long("persistent") => default.persistent = true,
+            Long("on-launch") => {
+                default.on_launch = Some(value_as_string(
+                    parser,
+                    "Launch command must be valid UTF-8",
+                )?);
+            }
             Long("dmenu") => {
                 default.dmenu_mode = true;
             }
@@ -93,6 +160,13 @@ pub(super) fn parse_cli_overrides(
                 default.dmenu_mode = true;
                 default.dmenu_null_separated = true;
             }
+            Long("preview") => {
+                default.dmenu_mode = true;
+                default.dmenu_preview = Some(value_as_string(
+                    parser,
+                    "Preview command must be valid UTF-8",
+                )?);
+            }
             Long("password") => {
                 default.dmenu_password_mode = true;
                 if let Some(value) = parser.optional_value() {
@@ -103,6 +177,9 @@ pub(super) fn parse_cli_overrides(
             }
             Long("index") => {
                 default.dmenu_index_mode = true;
+            }
+            Long("index-original") => {
+                default.dmenu_index_original_mode = true;
             }
             Long("accept-nth") => {
                 default.dmenu_accept_nth =
@@ -173,6 +250,106 @@ pub(super) fn parse_cli_overrides(
             }
             Long("list-executables-in-path") => {
                 default.list_executables_in_path = true;
+            }
+            Long("desktop-icons") => {
+                default.desktop_icon_mode = match parser.optional_value() {
+                    Some(value) => value
+                        .into_string()
+                        .map_err(|_| CliError::message("Desktop icon mode must be valid UTF-8"))?
+                        .parse::<DesktopIconMode>()
+                        .map_err(CliError::message)?,
+                    None => DesktopIconMode::Preview,
+                };
+            }
+            Long("icon-position") => {
+                default.desktop_icon_position =
+                    value_as_string(parser, "Desktop icon position must be valid UTF-8")?
+                        .parse()
+                        .map_err(CliError::message)?;
+            }
+            Long("icon-description-position") => {
+                default.icon_description_position = Some(
+                    value_as_string(parser, "Description position must be valid UTF-8")?
+                        .parse()
+                        .map_err(CliError::message)?,
+                );
+            }
+            Long("icon-preview-width") => {
+                default.desktop_icon_preview_width_percent =
+                    value_as_string(parser, "Desktop icon preview width must be valid UTF-8")?
+                        .parse::<u16>()
+                        .map_err(|_| {
+                            CliError::message("Desktop icon preview width must be an integer")
+                        })?;
+            }
+            Long("icon-list-width") => {
+                default.desktop_icon_list_width =
+                    value_as_string(parser, "Desktop list icon width must be valid UTF-8")?
+                        .parse::<u16>()
+                        .map_err(|_| {
+                            CliError::message("Desktop list icon width must be an integer")
+                        })?;
+            }
+            Long("icon-list-height") => {
+                default.desktop_icon_list_height =
+                    value_as_string(parser, "Desktop list icon height must be valid UTF-8")?
+                        .parse::<u16>()
+                        .map_err(|_| {
+                            CliError::message("Desktop list icon height must be an integer")
+                        })?;
+            }
+            Long("icon-list-gap") => {
+                default.desktop_icon_list_gap =
+                    value_as_string(parser, "Desktop list icon gap must be valid UTF-8")?
+                        .parse::<u16>()
+                        .map_err(|_| {
+                            CliError::message("Desktop list icon gap must be an integer")
+                        })?;
+            }
+            Long("icon-list-vertical-align") => {
+                default.desktop_icon_list_vertical_align_percent = value_as_string(
+                    parser,
+                    "Desktop list icon vertical alignment must be valid UTF-8",
+                )?
+                .parse::<i16>()
+                .map_err(|_| {
+                    CliError::message("Desktop list icon vertical alignment must be an integer")
+                })?;
+            }
+            Long("icon-arrow-before") => {
+                default.desktop_icon_arrow_before = true;
+            }
+            Long("icon-size") => {
+                default.desktop_icon_size =
+                    value_as_string(parser, "Desktop icon size must be valid UTF-8")?
+                        .parse::<u16>()
+                        .map_err(|_| CliError::message("Desktop icon size must be an integer"))?;
+            }
+            Long("icon-horizontal-align") => {
+                default.desktop_icon_horizontal_align_percent = value_as_string(
+                    parser,
+                    "Desktop icon horizontal alignment must be valid UTF-8",
+                )?
+                .parse::<u16>()
+                .map_err(|_| {
+                    CliError::message("Desktop icon horizontal alignment must be an integer")
+                })?;
+            }
+            Long("icon-vertical-align") => {
+                default.desktop_icon_vertical_align_percent = value_as_string(
+                    parser,
+                    "Desktop icon vertical alignment must be valid UTF-8",
+                )?
+                .parse::<u16>()
+                .map_err(|_| {
+                    CliError::message("Desktop icon vertical alignment must be an integer")
+                })?;
+            }
+            Long("icon-theme") => {
+                default.desktop_icon_theme = Some(value_as_string(
+                    parser,
+                    "Desktop icon theme must be valid UTF-8",
+                )?);
             }
             Long("match-mode") => {
                 let mode = value_as_string(parser, "Match mode must be valid UTF-8")?;

@@ -149,6 +149,23 @@ impl State {
         self.status_message = Some(message.into());
     }
 
+    pub(crate) fn update_launch_metadata(&mut self, name: &str, count: u64) {
+        let last_access = self.frecency_data.get(name).map(|entry| entry.last_access);
+        for app in self
+            .apps
+            .iter_mut()
+            .chain(&mut self.eligible_apps)
+            .chain(&mut self.shown)
+        {
+            if app.name == name {
+                app.history = count;
+                if last_access.is_some() {
+                    app.last_access = last_access;
+                }
+            }
+        }
+    }
+
     pub(crate) fn clear_status_message(&mut self) {
         self.status_message = None;
     }

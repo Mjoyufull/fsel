@@ -1,8 +1,13 @@
 use super::error::CliError;
 use super::launch::active_launch_method_count;
-use super::types::Opts;
+use super::types::{DesktopIconMode, Opts};
 
 pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<(), CliError> {
+    default
+        .panels
+        .validate()
+        .map_err(|error| CliError::message(format!("Error: {error}\n")))?;
+    crate::modes::dmenu::panels::validate(&default.dmenu_panels).map_err(CliError::message)?;
     let hidden_commands = usize::from(default.list_hidden)
         + usize::from(default.unhide.is_some())
         + usize::from(default.unhide_all);
@@ -21,6 +26,102 @@ pub(super) fn validate(default: &mut Opts, cli_launch_methods: usize) -> Result<
     if hidden_commands > 0 && (default.program.is_some() || default.search_string.is_some()) {
         return Err(CliError::message(
             "Error: hidden-entry commands cannot be combined with launch or search requests\n",
+        ));
+    }
+
+    let uses_desktop_icons = !default.dmenu_mode
+        && !default.cclip_mode
+        && !default.stdout
+        && default.program.is_none()
+        && hidden_commands == 0
+        && !default.clear_history
+        && !default.clear_cache
+        && !default.refresh_cache;
+    if default.persistent
+        && (!default.detach || default.tty || default.no_exec || !uses_desktop_icons)
+    {
+        return Err(CliError::message(
+            "Error: --persistent requires --detach in the interactive app launcher \
+             and cannot use --tty or --no-exec\n",
+        ));
+    }
+    if default.on_launch.is_some() && !default.persistent {
+        return Err(CliError::message(
+            "Error: --on-launch requires --persistent; without it fsel exits after launching\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.app_grid_columns > 0
+        && (default.app_grid_columns > 64 || !(2..=16).contains(&default.app_grid_row_height))
+    {
+        return Err(CliError::message(
+            "grid columns must be 1-64 and grid row height must be 2-16",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_preview()
+        && !(10..=90).contains(&default.desktop_icon_preview_width_percent)
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon preview width must be between 10 and 90\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode != DesktopIconMode::None
+        && (default.desktop_icon_size == 0 || default.desktop_icon_size > 4096)
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon size must be between 1 and 4096\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode != DesktopIconMode::None
+        && default.desktop_icon_horizontal_align_percent > 100
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon horizontal alignment must be between 0 and 100\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_preview()
+        && default.desktop_icon_vertical_align_percent > 100
+    {
+        return Err(CliError::message(
+            "Error: Desktop preview icon vertical alignment must be between 0 and 100\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_list()
+        && !(1..=16).contains(&default.desktop_icon_list_width)
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon list width must be between 1 and 16\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_list()
+        && default.app_grid_columns == 0
+        && !(1..=8).contains(&default.desktop_icon_list_height)
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon list height must be between 1 and 8\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_list()
+        && default.app_grid_columns == 0
+        && default.desktop_icon_list_gap > 16
+    {
+        return Err(CliError::message(
+            "Error: Desktop icon list gap must be between 0 and 16\n",
+        ));
+    }
+    if uses_desktop_icons
+        && default.desktop_icon_mode.shows_list()
+        && !(-100..=100).contains(&default.desktop_icon_list_vertical_align_percent)
+    {
+        return Err(CliError::message(
+            "Error: Desktop list icon vertical alignment must be between -100 and 100\n",
         ));
     }
 
@@ -53,6 +154,12 @@ Dmenu mode reads from stdin and outputs to stdout\n",
     if default.dmenu_select.is_some() && default.dmenu_select_index.is_some() {
         return Err(CliError::message(
             "Error: Cannot use --select and --select-index together\n",
+        ));
+    }
+
+    if default.dmenu_index_mode && default.dmenu_index_original_mode {
+        return Err(CliError::message(
+            "Error: Cannot use --index and --index-original together\n",
         ));
     }
 
@@ -116,4 +223,253 @@ Available methods: --launch-prefix, --systemd-run, --uwsm\n",
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate;
+    use crate::cli::{DesktopIconMode, Opts};
+
+    #[test]
+    fn persistent_requires_detached_interactive_launching() {
+        let valid = || Opts {
+            persistent: true,
+            detach: true,
+            ..Default::default()
+        };
+        assert!(validate(&mut valid(), 0).is_ok());
+        for mut invalid in [
+            Opts {
+                detach: false,
+                ..valid()
+            },
+            Opts {
+                tty: true,
+                ..valid()
+            },
+            Opts {
+                no_exec: true,
+                ..valid()
+            },
+            Opts {
+                stdout: true,
+                ..valid()
+            },
+            Opts {
+                program: Some("fixture".into()),
+                ..valid()
+            },
+            Opts {
+                dmenu_mode: true,
+                ..valid()
+            },
+            Opts {
+                cclip_mode: true,
+                ..valid()
+            },
+            Opts {
+                refresh_cache: true,
+                ..valid()
+            },
+        ] {
+            assert!(validate(&mut invalid, 0).is_err());
+        }
+    }
+
+    #[test]
+    fn a_launch_hook_requires_the_session_that_outlives_a_launch() {
+        let mut without_persistence = Opts {
+            detach: true,
+            on_launch: Some("true".into()),
+            ..Default::default()
+        };
+        assert!(validate(&mut without_persistence, 0).is_err());
+
+        let mut persistent = Opts {
+            persistent: true,
+            detach: true,
+            on_launch: Some("true".into()),
+            ..Default::default()
+        };
+        assert!(validate(&mut persistent, 0).is_ok());
+    }
+
+    #[test]
+    fn grid_dimensions_are_validated_only_when_active() {
+        for (columns, height) in [(65, 4), (4, 1), (4, 17)] {
+            let mut cli = Opts {
+                app_grid_columns: columns,
+                app_grid_row_height: height,
+                ..Default::default()
+            };
+            assert!(validate(&mut cli, 0).is_err());
+        }
+        let mut disabled = Opts {
+            app_grid_row_height: 0,
+            ..Default::default()
+        };
+        assert!(validate(&mut disabled, 0).is_ok());
+        let mut grid = Opts {
+            app_grid_columns: 4,
+            desktop_icon_mode: DesktopIconMode::List,
+            desktop_icon_list_height: 0,
+            desktop_icon_list_gap: 99,
+            ..Default::default()
+        };
+        assert!(validate(&mut grid, 0).is_ok());
+    }
+
+    #[test]
+    fn reject_both_index_modes() {
+        let mut cli = Opts {
+            dmenu_index_mode: true,
+            dmenu_index_original_mode: true,
+            ..Default::default()
+        };
+
+        let result = validate(&mut cli, 0);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Cannot use --index and --index-original")
+        );
+    }
+
+    #[test]
+    fn disabled_icon_layout_ignores_unused_dimensions() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::None,
+            desktop_icon_preview_width_percent: 0,
+            desktop_icon_size: 0,
+            desktop_icon_list_width: 0,
+            desktop_icon_list_height: 0,
+            ..Opts::default()
+        };
+
+        assert!(validate(&mut options, 0).is_ok());
+    }
+
+    #[test]
+    fn preview_icon_layout_ignores_unused_list_dimensions() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            desktop_icon_list_width: 0,
+            desktop_icon_list_height: 0,
+            ..Opts::default()
+        };
+
+        assert!(validate(&mut options, 0).is_ok());
+    }
+
+    #[test]
+    fn active_icon_layout_rejects_horizontal_alignment_over_one_hundred() {
+        let mut options = Opts {
+            desktop_icon_horizontal_align_percent: 101,
+            ..Opts::default()
+        };
+
+        let error = validate(&mut options, 0).expect_err("alignment should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("horizontal alignment must be between 0 and 100")
+        );
+    }
+
+    #[test]
+    fn preview_layout_rejects_vertical_alignment_over_one_hundred() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            desktop_icon_vertical_align_percent: 101,
+            ..Opts::default()
+        };
+
+        let error = validate(&mut options, 0).expect_err("alignment should be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("preview icon vertical alignment must be between 0 and 100")
+        );
+    }
+
+    #[test]
+    fn list_only_layout_ignores_unused_preview_vertical_alignment() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::List,
+            desktop_icon_vertical_align_percent: 101,
+            ..Opts::default()
+        };
+
+        assert!(validate(&mut options, 0).is_ok());
+    }
+
+    #[test]
+    fn active_list_layout_rejects_vertical_alignment_outside_the_signed_range() {
+        for align in [-101, 101] {
+            let mut options = Opts {
+                desktop_icon_mode: DesktopIconMode::List,
+                desktop_icon_list_vertical_align_percent: align,
+                ..Opts::default()
+            };
+
+            let error = validate(&mut options, 0).expect_err("alignment should be rejected");
+            assert!(
+                error
+                    .to_string()
+                    .contains("list icon vertical alignment must be between -100 and 100")
+            );
+        }
+    }
+
+    #[test]
+    fn disabled_list_layout_ignores_unused_vertical_alignment() {
+        let mut options = Opts {
+            desktop_icon_mode: DesktopIconMode::Preview,
+            desktop_icon_list_vertical_align_percent: 101,
+            ..Opts::default()
+        };
+
+        assert!(validate(&mut options, 0).is_ok());
+    }
+
+    #[test]
+    fn non_launcher_modes_ignore_launcher_icon_dimensions() {
+        for mut options in [
+            Opts {
+                dmenu_mode: true,
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                desktop_icon_list_width: 0,
+                desktop_icon_list_height: 0,
+                ..Opts::default()
+            },
+            Opts {
+                cclip_mode: true,
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                desktop_icon_list_width: 0,
+                desktop_icon_list_height: 0,
+                ..Opts::default()
+            },
+            Opts {
+                program: Some("true".to_string()),
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                desktop_icon_list_width: 0,
+                desktop_icon_list_height: 0,
+                ..Opts::default()
+            },
+            Opts {
+                stdout: true,
+                desktop_icon_preview_width_percent: 0,
+                desktop_icon_size: 0,
+                desktop_icon_list_width: 0,
+                desktop_icon_list_height: 0,
+                ..Opts::default()
+            },
+        ] {
+            assert!(validate(&mut options, 0).is_ok());
+        }
+    }
 }

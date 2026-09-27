@@ -91,6 +91,105 @@ desktop-file IDs and equal normalized names. `$XDG_DATA_HOME` wins first, follow
 hiding the current winner exposes the next eligible source, which keeps the behavior usable on
 Bedrock Linux and for duplicates inside the same application directory.
 
+### Desktop Icons
+
+The selected application's icon appears on the left side of the title panel by default. fsel
+detects GTK, KDE, and LXQt icon-theme settings, follows XDG theme inheritance, and supports absolute desktop-entry icon
+paths. PNG and SVG icons render with Kitty, Sixel, or the half-block fallback.
+
+```sh
+# Default left-side selected-icon preview
+fsel --desktop-icons
+
+# Icons beside results, or both placements
+fsel --desktop-icons=list
+fsel --desktop-icons=both
+
+# Move the preview to the left and request a 96px theme asset
+fsel --icon-position left --icon-size 96
+
+# Put the selection arrow before left-side list icons
+fsel --desktop-icons=list --icon-position left --icon-arrow-before
+
+# Add two columns between list icons and labels
+fsel --desktop-icons=list --icon-list-gap 2
+
+# Override theme detection
+fsel --icon-theme Papirus-Dark
+
+# Disable desktop icon loading
+fsel --desktop-icons=no
+```
+
+Use `--icon-description-position bottom` to put the selected icon above its description
+(including verbose details), or choose `top`, `left`, or `right`. This preview-only setting
+overrides the text placement implied by `--icon-position`; list icons are unchanged.
+`--icon-preview-width` controls the icon's percentage along the chosen split axis, so it controls
+height for top/bottom descriptions. Without this option the existing preview layout is unchanged.
+Set `[app_launcher] icon_description_position = "bottom"` in TOML, or
+`FSEL_APP_LAUNCHER_ICON_DESCRIPTION_POSITION=bottom` in the environment.
+
+Persistent configuration belongs in `[app_launcher]`:
+
+```toml
+icon_mode = "preview"               # "preview", "list", "both", or "none"
+icon_position = "left"              # Preview: "left", "center", or "right"
+icon_preview_width_percent = 40      # 10-90
+icon_list_width = 4                  # 1-16 terminal columns
+icon_list_height = 2                 # 1-8 terminal rows per app
+icon_list_gap = 1                    # 0-16 columns between icon and label
+icon_list_vertical_align_percent = 0 # Offset artwork vertically; negatives overflow upward
+icon_arrow_before = false            # Arrow before left-side list icons
+icon_size = 128                      # 1-4096
+icon_horizontal_align_percent = 50  # Fine adjustment inside the chosen icon area
+icon_vertical_align_percent = 50    # Fine adjustment inside the preview icon area
+# icon_theme = "Papirus-Dark"
+```
+
+List labels and selection markers stay on the first row of each item. Use
+`icon_list_vertical_align_percent` for pixel-level artwork adjustment without moving text between
+terminal rows. Values from `-100` to `-1` shift the complete artwork above the normal top-aligned
+position. This deliberately allows overlap with earlier list rows or panel chrome, and overlapping
+graphics may stack differently between terminal protocols. The preview keeps its independent
+`icon_vertical_align_percent` setting.
+
+### Shared Selector Chrome and Backgrounds
+
+The launcher, dmenu, and cclip panels use the same semantic backgrounds and independently
+configurable chrome. `Reset` inherits the terminal background. An OpenCode-like flat layout can be
+built without changing the compatibility defaults:
+
+```toml
+main_background_color = "#101010"
+items_background_color = "#141414"
+items_selection_background_color = "#ffb07c"
+input_background_color = "#101010"
+items_selection_rounded = false
+input_panel_style = "command"
+show_main_border = false
+show_items_border = false
+show_input_border = false
+show_panel_titles = false
+show_input_count = true
+show_input_prompt = false
+show_selection_marker = true
+selection_marker = "█"
+show_pin_icons = true
+input_panel_height = 5
+
+# Optional alternatives: set either value to zero to hide that entire bar.
+# title_panel_height_percent = 0
+# input_panel_height = 0
+```
+
+Set `items_selection_rounded = true` for half-cell rounded ends around the selected row. List text
+and icons are inset automatically so the caps are not overwritten. The `command` input style uses
+a thicker accent rail, highlights the selected item name, and moves the selection count plus the
+active select/exit key hints into a footer. `selection_marker` accepts arbitrary marker text
+independently of the input `cursor`. `classic` preserves the original inline
+`(selected/total) >> query` design. The older `apps_*` TOML and `FSEL_APPS_*` environment names
+remain accepted as compatibility aliases for the neutral `items_*` names.
+
 ### Launch Methods
 ```sh
 # Default (direct execution)
@@ -124,6 +223,86 @@ fsel --detach
 fsel --no-exec
 ```
 
+### Persistent detached launcher
+
+`fsel --detach --persistent` keeps the current launcher session open after each launch.
+The query, selection, scroll position, panel layout, and prepared icons are retained; press Escape
+to close fsel when finished. Each selection starts a new detached process. Closing fsel does not
+terminate applications it already launched.
+
+Spawn failures are reported in the information panel and leave the launcher usable. Successful
+spawns increment history once; a history-write failure is reported separately without retrying the
+application launch. Exited children are reaped while the session remains open. Desktop `Path=`
+applies to the child, not to later launches or fsel itself.
+
+#### Reacting to a launch
+
+While the session stays open, nothing downstream of fsel can tell that something was launched.
+`--on-launch` runs a command through `$SHELL` after each successful launch, with the application
+in its environment:
+
+| Variable | Value |
+|---|---|
+| `FSEL_LAUNCHED_APP` | Name shown in the launcher |
+| `FSEL_LAUNCHED_COMMAND` | Command taken from the desktop entry |
+| `FSEL_LAUNCHED_PID` | Process id of the launched application |
+| `FSEL_PID` | Process id of fsel itself |
+
+```sh
+fsel --detach --persistent --on-launch 'notify-send "Launched $FSEL_LAUNCHED_APP"'
+```
+
+The command runs in its own process group with no terminal of its own, so it outlives the window
+fsel runs in. That is what a script closing that window relies on. Find fsel through `FSEL_PID`
+rather than `$PPID`: a shell that forks the command instead of replacing itself with it (fish,
+among others) sits between the script and fsel, so `$PPID` is the shell.
+
+Signal the terminal rather than fsel's parent. That parent is usually an interactive shell, and
+an interactive shell ignores what would end it: bash ignores `TERM`, and fish ignores `TERM` and
+`HUP` alike. The terminal is the parent of the session leader, however many shells sit between
+it and fsel. Under tmux there is no terminal to end — fsel outlives every window that attaches to
+its session — so the client is detached instead:
+
+```sh
+#!/bin/sh
+# close-on-launch.sh: leave the window fsel was launched from
+if [ -n "$TMUX" ]; then
+    # fsel stays in the session; detaching closes whatever window is attached to it
+    tmux detach-client -s "$(tmux display-message -p -t "$TMUX_PANE" '#{session_name}')"
+    exit 0
+fi
+[ -n "$ZELLIJ$STY" ] && exit 0
+session=$(ps -o sid= -p "$FSEL_PID" | tr -d ' ')
+kill "$(ps -o ppid= -p "$session" | tr -d ' ')"
+```
+
+The tmux branch is what makes a persistent session usable as a launcher you attach to: fsel holds
+its query, selection and prepared icons in the session, and each launch hands the screen back
+without ending anything. Zellij and screen are still left alone, because the detach each of them
+needs is not this command and their servers own more than the one window.
+
+Under a terminal that serves several windows from one process, the session leader's parent is the
+server, and ending it closes every window it owns.
+
+```sh
+fsel --detach --persistent --on-launch ~/.local/bin/close-on-launch.sh
+```
+
+A launch that fails to spawn does not run the command, and a command that cannot start is reported
+next to the launch. So is one that runs and exits non-zero, once it finishes — a script the shell
+cannot execute is reported that way, since the shell starts and the script does not. The command's
+output is discarded, because fsel owns the terminal while the session is open; report from the
+command itself if it needs to say something.
+
+`--on-launch` requires `--persistent`: without it fsel exits after launching, which a wrapper
+script can already act on.
+
+This opt-in CLI flag requires detached interactive app launching. It rejects `--tty`, `--no-exec`,
+`--stdout`, direct-name launches (`-p`), dmenu, cclip, and maintenance commands. Use `-ss` to start
+with a query. Terminal applications use the configured external terminal launcher; they cannot
+replace fsel through TTY mode. Launch prefixes, systemd-run, and uwsm retain their existing behavior.
+The first-launch confirmation setting still applies only to direct-name launches, as before.
+
 ## Dmenu Mode
 
 ### Basic Dmenu
@@ -140,6 +319,39 @@ git branch | fsel --dmenu
 # Null-separated input
 find . -print0 | fsel --dmenu0
 ```
+
+### Preview Commands
+
+`--preview` accepts a shell command and implies `--dmenu`. Its core fzf-style placeholders are
+passed through dedicated shell environment variables rather than interpolated into command source:
+
+- `{}`: selected input row
+- `{q}`: current query (left unset in password mode so masked input is never exported)
+- `{n}`: zero-based original input ordinal
+
+Place placeholders directly in the command rather than inside single quotes. Heredoc preview
+templates are rejected because their expanded body can become source for another interpreter.
+
+The preview panel renders text output after stripping terminal escape sequences. If stdout contains
+PNG, JPEG, GIF, BMP, WebP, or SVG bytes, fsel renders the image using Kitty, Sixel, or its half-block
+fallback.
+
+```sh
+# Text metadata
+find . -type f | fsel --preview 'file --brief {}'
+
+# Syntax-highlighted tools are safe; ANSI color escapes are stripped for the TUI
+find src -name '*.rs' | fsel --preview 'bat --color=always --style=numbers {}'
+
+# Native image preview
+find ~/Pictures -type f | fsel --preview 'cat {}'
+
+# Query and index placeholders
+printf 'one\ntwo\nthree\n' | fsel --preview 'printf "row=%s query=%s" {n} {q}'
+```
+
+Selecting another row cancels the stale preview process. Use `[dmenu]`
+`title_panel_height_percent` and `title_panel_position` to size and place the preview panel.
 
 ### Column Operations
 ```sh
@@ -164,8 +376,12 @@ echo -e "pass1\npass2" | fsel --dmenu --password
 # Custom password character
 echo -e "pass1\npass2" | fsel --dmenu --password=•
 
-# Output index instead of text
+# Output index instead of text (0-indexed)
 echo -e "A\nB\nC" | fsel --dmenu --index
+
+# Output original line number instead of 0-indexed text
+# Note: --index and --index-original are mutually exclusive
+echo -e "A\nB\nC" | fsel --dmenu --index-original
 
 # Prompt-only (no list)
 fsel --dmenu --prompt-only
@@ -211,6 +427,10 @@ fsel --cclip -ss image
 # With image previews (Kitty, Sixel, or Halfblocks-capable terminal; 3.1.0+ uses built-in ratatui-image, no chafa)
 fsel --cclip  # Images show automatically if supported
 ```
+
+Image rows show the local timestamp, readable size, and MIME type. When cclip line
+numbers are enabled, the cclip row ID is prefixed; an exact numeric ID search ranks
+that entry first without excluding normal text matches.
 
 ### Content Preview Diagnostics
 ```sh
@@ -264,9 +484,22 @@ fsel --cclip --tag wipe
 fsel --cclip --cclip-show-tag-color-names
 ```
 
+### Fullscreen text preview
+
+Select a text entry and press `Alt+i` to read its full content. Newlines and indentation are
+preserved; long lines can be panned horizontally. HTML uses the same rendered text as the inline
+preview, or raw markup with `-v`. Content loads asynchronously while the preview remains usable.
+
+Use Up/Down or `j`/`k` to scroll, Page Down/Space/`f` and Page Up/`b` for pages,
+Home/`g` and End/`G` for the ends, and Left/Right or `h`/`l` to pan. Mouse-wheel scrolling
+and configured up/down bindings work too. `q`, Escape, Ctrl+C, or the configured preview
+binding returns to the selector with the query and selection intact. Enter does not copy from
+this view; return to the selector first. The existing `image_preview` binding controls both
+image and text fullscreen previews. Disabling inline images does not disable text previews.
+
 ### Keybindings in cclip mode
 - `Enter` - Copy selection to clipboard
-- `Alt+i` - Display image fullscreen (bypass TUI)
+- `Alt+i` - Open a fullscreen image or scrollable text preview
 - `Alt+Delete` - Delete selected clipboard entry (selection stays at the same physical index; next item becomes selected)
 - `Esc` - Exit without copying
 - Arrow keys - Navigate
@@ -426,7 +659,7 @@ fsel -T
 === FSEL DEBUG SESSION STARTED ===
 Timestamp: 2026-02-02 14:30:45.123
 PID: 12345
-Version: 3.6.0-kiwicrab
+Version: 3.7.0-kiwicrab
 Log file: /home/user/.config/fsel/logs/fsel-debug-20260202-143045-pid12345.log
 
 [STARTUP] Configuration:
@@ -556,13 +789,13 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 
 `FSEL_TERMINAL_LAUNCHER`, `FSEL_FILTER_DESKTOP`, `FSEL_LIST_EXECUTABLES_IN_PATH`, `FSEL_HIDE_BEFORE_TYPING`, `FSEL_MATCH_MODE`, `FSEL_RANKING_MODE`, `FSEL_PINNED_ORDER`, `FSEL_SYSTEMD_RUN`, `FSEL_UWSM`, `FSEL_DETACH`, `FSEL_NO_EXEC`, `FSEL_CONFIRM_FIRST_LAUNCH`, `FSEL_PREFIX_DEPTH`
 
-**Default UI / layout (applies when a mode does not override):**
+**Default UI / layout (shared by launcher, dmenu, and cclip):**
 
-`FSEL_HIGHLIGHT_COLOR`, `FSEL_CURSOR`, `FSEL_HARD_STOP`, `FSEL_ROUNDED_BORDERS`, `FSEL_DISABLE_MOUSE`, `FSEL_TITLE_PANEL_HEIGHT_PERCENT`, `FSEL_INPUT_PANEL_HEIGHT`, `FSEL_TITLE_PANEL_POSITION`
+`FSEL_HIGHLIGHT_COLOR`, `FSEL_CURSOR`, `FSEL_HARD_STOP`, `FSEL_ROUNDED_BORDERS`, `FSEL_DISABLE_MOUSE`, `FSEL_MAIN_BORDER_COLOR`, `FSEL_MAIN_BACKGROUND_COLOR`, `FSEL_ITEMS_BORDER_COLOR`, `FSEL_ITEMS_BACKGROUND_COLOR`, `FSEL_ITEMS_SELECTION_BACKGROUND_COLOR`, `FSEL_ITEMS_SELECTION_ROUNDED`, `FSEL_INPUT_BORDER_COLOR`, `FSEL_INPUT_BACKGROUND_COLOR`, `FSEL_MAIN_TEXT_COLOR`, `FSEL_ITEMS_TEXT_COLOR`, `FSEL_INPUT_TEXT_COLOR`, `FSEL_HEADER_TITLE_COLOR`, `FSEL_SHOW_MAIN_BORDER`, `FSEL_SHOW_ITEMS_BORDER`, `FSEL_SHOW_INPUT_BORDER`, `FSEL_SHOW_PANEL_TITLES`, `FSEL_SHOW_INPUT_COUNT`, `FSEL_SHOW_INPUT_PROMPT`, `FSEL_SHOW_SELECTION_MARKER`, `FSEL_SELECTION_MARKER`, `FSEL_SHOW_PIN_ICONS`, `FSEL_INPUT_PANEL_STYLE`, `FSEL_TITLE_PANEL_HEIGHT_PERCENT`, `FSEL_INPUT_PANEL_HEIGHT`, `FSEL_TITLE_PANEL_POSITION`
 
 **`[dmenu]` overrides (`FSEL_DMENU_*`):**
 
-`DELIMITER`, `PASSWORD_CHARACTER`, `SHOW_LINE_NUMBERS`, `WRAP_LONG_LINES`, `EXIT_IF_EMPTY`, `DISABLE_MOUSE`, `HARD_STOP`, `ROUNDED_BORDERS`, `CURSOR`, `HIGHLIGHT_COLOR`, `MAIN_BORDER_COLOR`, `ITEMS_BORDER_COLOR`, `INPUT_BORDER_COLOR`, `MAIN_TEXT_COLOR`, `ITEMS_TEXT_COLOR`, `INPUT_TEXT_COLOR`, `HEADER_TITLE_COLOR`, `TITLE_PANEL_HEIGHT_PERCENT`, `INPUT_PANEL_HEIGHT`, `TITLE_PANEL_POSITION` (each prefixed with `FSEL_DMENU_`)
+`DELIMITER`, `PREVIEW`, `PANEL_EDIT`, `PASSWORD_CHARACTER`, `SHOW_LINE_NUMBERS`, `WRAP_LONG_LINES`, `EXIT_IF_EMPTY`, `DISABLE_MOUSE`, `HARD_STOP`, `ROUNDED_BORDERS`, `CURSOR`, `HIGHLIGHT_COLOR`, `MAIN_BORDER_COLOR`, `ITEMS_BORDER_COLOR`, `INPUT_BORDER_COLOR`, `MAIN_TEXT_COLOR`, `ITEMS_TEXT_COLOR`, `INPUT_TEXT_COLOR`, `HEADER_TITLE_COLOR`, `TITLE_PANEL_HEIGHT_PERCENT`, `INPUT_PANEL_HEIGHT`, `TITLE_PANEL_POSITION` (each prefixed with `FSEL_DMENU_`)
 
 **`[cclip]` overrides (`FSEL_CCLIP_*`):**
 
@@ -570,7 +803,7 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 
 **`[app_launcher]` overrides (`FSEL_APP_LAUNCHER_*`):**
 
-`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH` (each prefixed with `FSEL_APP_LAUNCHER_`)
+`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `GRID_COLUMNS`, `GRID_ROW_HEIGHT`, `ICON_MODE`, `ICON_POSITION`, `ICON_DESCRIPTION_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_LIST_VERTICAL_ALIGN_PERCENT`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
 
 Keybinds are not configurable via environment variables; use `~/.config/fsel/keybinds.toml` or the `[keybinds]` section in `config.toml`. When both are present, the embedded `[keybinds]` section takes precedence.
 
@@ -599,13 +832,13 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 ### Field Reference
 
 **Root Level Fields:**
-- Colors: `highlight_color`, `main_border_color`, `apps_border_color`, `input_border_color`, `main_text_color`, `apps_text_color`, `input_text_color`, `header_title_color`, `pin_color`
-- UI: `cursor`, `rounded_borders`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
+- Colors: `highlight_color`, `main_border_color`, `main_background_color`, `items_border_color`, `items_background_color`, `items_selection_background_color`, `input_border_color`, `input_background_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`, `pin_color`, `pinned_text_color`, `pinned_background_color`, `pinned_highlight_color`, `pinned_selection_background_color`
+- UI: `cursor`, `selection_marker`, `rounded_borders`, `items_selection_rounded`, `input_panel_style`, `show_main_border`, `show_items_border`, `show_input_border`, `show_panel_titles`, `show_input_count`, `show_input_prompt`, `show_selection_marker`, `show_pin_icons`, `hard_stop`, `fancy_mode`, `pin_icon`, `disable_mouse`
 - Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`
+- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`, `grid_columns`, `grid_row_height`, `icon_mode`, `icon_position`, `icon_description_position`, `icon_preview_width_percent`, `icon_list_width`, `icon_list_height`, `icon_list_gap`, `icon_list_vertical_align_percent`, `icon_arrow_before`, `icon_size`, `icon_horizontal_align_percent`, `icon_vertical_align_percent`, `icon_theme`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`
@@ -620,3 +853,175 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - Layout: `title_panel_height_percent`, `input_panel_height`, `title_panel_position`
 - Display: `show_line_numbers`, `wrap_long_lines`
 - Images: `image_preview`, `hide_inline_image_message`
+# Panel layouts
+
+## Application grid
+
+The launcher has an opt-in grid; ordinary lists, dmenu, and cclip retain their layouts.
+
+```sh
+fsel --no-exec --app-grid 4 --desktop-icons=both --grid-row-height 4
+fsel --no-exec --app-grid 4 --desktop-icons=list --info-position left --info-size 30
+```
+
+`--app-grid` requests up to 64 columns; zero disables the grid. Narrow panels reduce the column
+count to keep cells at least eight columns wide where possible. `--grid-row-height` sets cell
+height from 2–16 terminal rows (default 4). With list icons enabled, artwork occupies the upper
+rows and the label/selection marker occupies the last row. Without list icons, the grid shows
+text only. Names are clipped to their own cells; icons retain proportional sizing and the existing
+normalization/cache behavior. `--icon-list-width` controls artwork width; the ordinary list's
+height, gap, and arrow-before placement do not change grid geometry. Negative artwork alignment
+retains its documented opt-in overflow behavior.
+
+At rotation zero, Left/Right move one item and Up/Down move one grid row. Quarter turns use
+column-first ordering, and arrow movement follows the visible orientation. Tab/Shift+Tab move
+one logical item. Search, mouse selection, pins, pinned colors, and backgrounds work normally.
+Scrolling advances a complete grid row (or column after a quarter turn); resizing keeps the
+selected item visible. With `hard_stop`, moves beyond available items stop; otherwise they wrap.
+
+```toml
+[app_launcher]
+grid_columns = 4
+grid_row_height = 4
+icon_mode = "both"
+```
+
+Environment overrides are `FSEL_APP_LAUNCHER_GRID_COLUMNS` and
+`FSEL_APP_LAUNCHER_GRID_ROW_HEIGHT`. These launcher-specific settings do not change dmenu or cclip.
+
+## Pinned row styling
+
+Pinned launcher rows can use their own text and background colors, independently of the pin glyph.
+Put these optional settings at the root of the configuration, outside `[app_launcher]`:
+
+```toml
+pinned_text_color = "#e4c779"
+pinned_background_color = "#252219"
+pinned_highlight_color = "#101010"
+pinned_selection_background_color = "#e4c779"
+```
+
+Unselected pins use the first two colors; selected pins use the latter two. Omitted values inherit
+`items_text_color`, `items_background_color`, `highlight_color`, and
+`items_selection_background_color`, respectively. Ordinary rows are unaffected. `pin_color`
+continues to style the glyph, and pinned-row colors still work with `show_pin_icons = false`.
+The same names prefixed with `FSEL_` and uppercased are environment overrides—for example,
+`FSEL_PINNED_SELECTION_BACKGROUND_COLOR=Blue`. Rounded selection caps and icon placement are unchanged.
+
+## Docking panels
+
+The result list anchors the layout. Information and input panels can dock on any edge.
+Text stays upright when the layout rotates. Existing configurations retain their layout until
+one of the new docking settings is supplied.
+
+## Launcher and clipboard history
+
+```sh
+fsel --info-position left --info-size 35 --input-position bottom
+fsel --cclip --info-position right --info-size 45 --input-position top
+fsel --layout-rotation 90 --input-size 20 --item-width 24
+```
+
+`--info-position` and `--input-position` accept `top`, `right`, `bottom`, or `left`.
+`--info-size` is 0–90 percent of the terminal along the information panel's docking axis.
+`--input-size` is a number of columns for a side panel, or rows for a top/bottom panel.
+Zero hides that panel. An oversized input panel shrinks to leave at least one result cell.
+The information panel is allocated first, then input, and results take the remaining rectangle.
+If both panels occupy the same edge, information is outside input.
+
+`--layout-rotation` accepts 0, 90, 180, or 270 clockwise degrees. Quarter turns dock the panels
+on the rotated edges and arrange results horizontally. Half turns reverse the list order on
+screen. Arrow navigation and pointer selection follow the visible order. `--item-width`
+sets horizontal result width in columns; it does not resize text. A narrow terminal displays
+fewer complete entries. Search, selection, pins, backgrounds, and images retain their behavior.
+
+For example, under `[panels]` in the configuration:
+
+```toml
+[panels]
+info_position = "left"
+input_position = "bottom"
+info_size = 35
+input_size = 3
+rotation = 0
+item_width = 24
+```
+
+Environment names are `FSEL_PANELS_INFO_POSITION`, `FSEL_PANELS_INPUT_POSITION`,
+`FSEL_PANELS_INFO_SIZE`, `FSEL_PANELS_INPUT_SIZE`, `FSEL_PANELS_ROTATION`, and
+`FSEL_PANELS_ITEM_WIDTH`. CLI values override environment and file values.
+Legacy title position/height and input height supply defaults when the corresponding new
+setting is omitted. With no docking controls, legacy `middle` placement is preserved exactly.
+
+Negative desktop-icon alignment still intentionally permits overflow into neighboring rows
+or chrome. Moving a panel does not change that opt-in policy.
+
+## Dmenu command panels
+
+Dmenu supports the same `[panels]` docking settings and rotation controls as the launcher.
+`--preview` supplies the primary information panel; use `--info-position right --info-size 40`
+to place it beside the result list. Text and supported image bytes use the same preview command.
+
+```sh
+printf 'README.md\nCargo.toml\n' |
+  fsel --preview 'cat {}' --info-position right --info-size 40 \
+    --panel 'details:bottom:20:file --brief {}'
+```
+
+`--panel NAME:SIDE:PERCENT:COMMAND` adds a named panel and implies dmenu mode. It may be repeated
+up to three times in addition to the primary preview. The first three colons delimit the name,
+edge, and size; the remaining command may contain colons. Names must be unique and cannot be
+`preview`, `input`, or `items`. Edges are `top`, `right`, `bottom`, and `left`; sizes are 0–90
+percent of the remaining result region on that edge. A size of zero hides the panel and stops
+its command. Panels are allocated in declaration order after the primary information and input
+panels, leaving the result list as the remaining rectangle.
+
+Persistent panels use an array under `[dmenu]`:
+
+```toml
+[[dmenu.panels]]
+name = "details"
+position = "right"
+size = 30
+command = "file --brief {}"
+```
+
+CLI panels append to configured panels. Every panel uses the existing `{}`, `{q}`, and `{n}`
+placeholders, ANSI stripping, output limits, cancellation, and password-query isolation.
+Commands are trusted shell commands: only configure commands you intend to execute. Each panel
+has at most one active command and one decoding worker, with bounded result queues. Obsolete
+results cannot replace the current selection; the previous image remains visible while a new
+image is prepared. The primary and custom panels update independently.
+
+### Moving dmenu panels interactively
+
+Add `--panel-edit` to enable **Alt+P**. Without this option, existing key handling is unchanged.
+The persistent equivalent is `panel_edit = true` under `[dmenu]`; the environment equivalent is
+`FSEL_DMENU_PANEL_EDIT=true`.
+
+```sh
+printf 'README.md\nCargo.toml\n' |
+  fsel --preview 'cat {}' --panel 'details:right:30:file --brief {}' --panel-edit
+```
+
+Press Alt+P to enter layout editing. A banner names the focused panel. Tab and Shift+Tab cycle
+between the primary preview, input, and custom panels, including hidden panels. Arrow keys dock
+the focused panel on the corresponding screen edge, even when the layout is rotated. `+`/`-`
+grow/shrink information and custom panels by five percentage points, or input by one cell. Zero
+hides a panel; growing it makes it visible again. The result list always receives the remaining
+space. Click a panel to focus it and drag toward a result-list edge to dock it there. Mouse wheel
+up/down grows/shrinks the focused panel. Mouse controls require mouse capture to be enabled.
+
+Escape, Enter, or Alt+P leaves layout editing without selecting an item. Normal query editing,
+selection, and scrolling resume afterward. While editing, typing and mouse clicks cannot launch
+or select a result. Layout changes affect only this process: neither the configuration file nor
+the original stdin rows are modified. Terminal resizing preserves the requested positions/sizes,
+clamping visible rectangles to the available space.
+
+## Layout references
+
+- [fzf preview window options](https://github.com/junegunn/fzf/blob/master/man/man1/fzf.1)
+- [matchmaker preview layouts](https://github.com/Squirreljetpack/matchmaker#configuration)
+
+The borrowed concepts are edge placement, explicit sizing, and changing layouts interactively.
+The selector keeps its existing matching and command semantics.

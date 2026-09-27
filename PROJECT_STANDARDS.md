@@ -2,8 +2,8 @@
 
 > A Manual for Maintaining Sensible Git Discipline Without Sacrificing Productive Chaos
 
-**Document Version:** 1.4.1  
-**Last Updated:** 2026-04-14  
+**Document Version:** 1.5.0  
+**Last Updated:** 2026-08-15  
 **Audience:** Future me, contributors, and anyone brave enough to work on these projects
 
 ---
@@ -449,32 +449,125 @@ A maintainer creates a release branch when:
 
 ### Preparation
 
-1. **Merge main into dev** so dev has the latest docs (docs live on main and are synced to dev via main → dev).
-2. Ensure all feature PRs for the release are merged into dev.
-3. Confirm all tests pass on dev.
-4. Create a release branch from dev (this freezes the release point):
-   ```bash
-   git checkout dev
-   git pull origin dev
-   git checkout -b release/v3.0.0-kiwicrab  # Replace with actual version
-   ```
-5. Update version references on the release branch:
-   - `Cargo.toml` (root directory)
-   - `flake.nix` (root directory)
-   - `README.md` (installation instructions, if needed)
-   - Man pages (`fsel.1` or similar)
-   - Example configs if they contain version info
-6. Commit version bump:
-   ```bash
-   git commit -am "chore: bump version to 3.0.0-kiwicrab"
-   ```
-7. Prepare release notes using the [Release body template](#release-body-template) below; update **RELEASELOG.md** on the release branch with the release title and body, adding a `---` separator above the previous release(s).
-8. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance.
-9. Run final tests on the release branch:
-   ```bash
-   cargo test
-   cargo build --release
-   ```
+Throughout this section, replace `3.0.0-kiwicrab` with the version you are releasing and `3.6.0` with the **previous** release tag. Every step runs locally unless stated otherwise.
+
+**1. Merge main into dev** so dev has the latest docs (docs live on main and are synced to dev via main → dev).
+
+```bash
+git checkout dev
+git pull origin dev
+git fetch origin main
+git merge origin/main
+git push origin dev
+```
+
+**2. Confirm every PR for this release is merged into dev.** Nothing still open should be release-blocking.
+
+```bash
+gh pr list --base dev --state open        # anything here is NOT in this release
+git log --oneline 3.6.0..dev              # what actually landed since the last tag
+```
+
+**3. Confirm dev is green** before you freeze it.
+
+```bash
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo build --release
+```
+
+If any of these fail, fix it **on dev** through a normal PR before creating the release branch. Do not carry a known-red dev into a release branch and patch it there.
+
+**4. Create the release branch from dev.** This freezes the release point; dev keeps accepting PRs afterwards without affecting the release.
+
+```bash
+git checkout dev
+git pull origin dev
+git checkout -b release/v3.0.0-kiwicrab
+git push -u origin release/v3.0.0-kiwicrab
+```
+
+**5. Update every version reference on the release branch.**
+
+- `Cargo.toml` — `version = "3.0.0-kiwicrab"`
+- `Cargo.lock` — regenerate, never hand-edit: `cargo build`
+- `flake.nix` — both the top-level `description` and the package `version`/`meta.description`
+- `README.md` — `cargo install fsel@…` lines (install and update variants)
+- `USAGE.md` — the version printed in sample debug output
+- Man page (`fsel.1`)
+- Example configs, if they carry version info
+
+Catch stragglers before you commit:
+
+```bash
+grep -rn "3\.6\.0" --exclude-dir=.git --exclude-dir=target --exclude=RELEASELOG.md .
+```
+
+RELEASELOG.md is excluded on purpose — historical entries keep their original version numbers.
+
+**6. Verify the docs match the CLI surface that actually shipped.** Every flag, config key, and keybind added this cycle must appear in **all** of `--help`, `fsel.1`, and `USAGE.md`/`README.md`.
+
+```bash
+cargo build --release
+./target/release/fsel --help        # compare against fsel.1 and USAGE.md
+man ./fsel.1
+git diff 3.6.0..HEAD -- src/cli/help.rs fsel.1 USAGE.md README.md
+```
+
+This is the single most commonly missed step. A PR can pass review with `--help` updated and the man page untouched, and nobody notices until after the tag exists. Fixing docs here is fine — docs are exactly what release branches are for.
+
+**7. Write the release notes into RELEASELOG.md** using the [Release body template](#release-body-template) below. Prepend the new block at the top of the file with a `---` separator above the previous entry. Do this **before** committing so the version bump and the log entry land as one coherent state.
+
+Gather the material from the actual range — do not write from memory:
+
+```bash
+git log --oneline 3.6.0..HEAD
+git diff --stat 3.6.0..HEAD
+gh pr list --base dev --state merged --limit 30
+gh pr view 93                                  # per PR: body, review discussion, commits
+gh pr view 93 --json commits,reviews,comments
+```
+
+Read the diffs, not just the commit subjects. Commit messages joke, understate, and occasionally lie — a commit titled like an emergency can turn out to be a formatting fix, and a one-line subject can hide a user-visible behavior change. What a user can observe goes under Added / Changed / Fixed; what only a contributor cares about goes under Technical details.
+
+Credit **everyone** who touched the change in Contributors, not only the PR author: co-maintainers who pushed cleanup or fixup commits onto the contributor's branch get their own line with what they did, and reviewers (human or bot) get a `Code review:` line.
+
+**8. Commit the version bump and the release log together.**
+
+```bash
+git add -A
+git commit -m "chore: bump version to 3.0.0-kiwicrab"
+git push
+```
+
+One commit is preferred. If you split it, use `chore: bump version to 3.0.0-kiwicrab` and `docs: add 3.0.0-kiwicrab entry to RELEASELOG`.
+
+**9. Verify [Semantic Versioning 2.0.0](https://semver.org/) compliance** against [Versioning Scheme](#versioning-scheme). Breaking → MAJOR (and choose a new codename), new feature → MINOR, fixes only → PATCH. The tag carries the number only; the codename appears in the display version and the release title.
+
+**10. Run final checks on the release branch.**
+
+```bash
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo test
+cargo build --release
+./target/release/fsel --version        # must print the new version
+```
+
+If a code-level failure shows up here, it belongs on dev, not on the release branch: fix it in dev, then merge dev into the release branch, or ship without the fix (see [Release Branches](#release-branches)).
+
+### Common Release-Prep Mistakes
+
+Real ones, from real releases:
+
+| Mistake | Consequence | Prevention |
+|---------|-------------|------------|
+| Man page not updated with a new flag | Flag ships undocumented; needs a follow-up commit after freeze | Step 6 — diff `--help` against `fsel.1` every cycle |
+| `cargo fmt` / `cargo clippy` not run before merging a PR to dev | Formatting fixups land on the release branch after the freeze | Step 3 — dev must be green *before* branching |
+| Release notes written from commit subjects only | Real user-visible changes get missed or misdescribed | Step 7 — read `git diff` and the PR discussion |
+| Only the PR author listed in Contributors | Co-maintainers and reviewers who did real work go uncredited | Step 7 — list cleanup commits and reviewers separately |
+| Version bumped in `Cargo.toml` but missed in `flake.nix`/README/USAGE | Install instructions point at the wrong version | Step 5 — `grep -rn` the old version before committing |
 
 ### Process
 
@@ -514,6 +607,24 @@ If `--ff-only` fails, rebase the **release branch** onto latest `main`, then ret
 **Release title:** Use exactly `[version-codename]` in brackets, e.g. `[3.0.0-kiwicrab]`. No date or extra text in the title.
 
 **Git tag:** Use the version number only (no codename), e.g. `3.0.0`, `2.5.0`, `2.4.0`. Create the tag on main after the release branch is merged; then create the GitHub release from that tag and paste the release body below (same content as in RELEASELOG.md for this release).
+
+**Creating it:** the body is the RELEASELOG.md block you already wrote — extract it rather than retyping, so the two never drift apart.
+
+```bash
+# Extract this release's block from RELEASELOG.md (everything above the first `---`)
+sed -n '1,/^---$/p' RELEASELOG.md | sed '$d' > /tmp/release-body.md
+
+# Create the release from the tag you pushed
+gh release create 3.0.0 \
+  --title "[3.0.0-kiwicrab]" \
+  --notes-file /tmp/release-body.md
+
+# If you attach prebuilt binaries, upload them and their checksums,
+# then add the "## Download fsel <version>" table to the release body
+gh release upload 3.0.0 fsel-x86_64-unknown-linux-gnu.tar.xz{,.sha256}
+```
+
+Verify afterwards: `gh release view 3.0.0 --web`.
 
 ### Release body template
 

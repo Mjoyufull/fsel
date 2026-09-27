@@ -1,4 +1,4 @@
-.TH FSEL 1 "2026-07-20" "3.6.0-kiwicrab" "User Commands"
+.TH FSEL 1 "2026-08-15" "3.7.0-kiwicrab" "User Commands"
 .SH NAME
 fsel \- fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD
 .SH SYNOPSIS
@@ -68,6 +68,43 @@ Suppress equal desktop-file IDs and normalized visible names using XDG applicati
 .B \-\-list-executables-in-path
 Include executables from $PATH alongside desktop apps
 .TP
+.BR \-\-desktop-icons [=\fIMODE\fR]
+Configure desktop icons: preview (default), list, both, or none.
+.TP
+.BR \-\-icon-position " " \fISIDE\fR
+Place title and list icons on the left or right (default: right).
+.TP
+.BR \-\-icon-description-position " " \fISIDE\fR
+Place preview description text top, bottom, left, or right of the icon. Overrides preview
+text placement only. Icon preview width becomes a height percentage for top/bottom.
+.TP
+.BR \-\-icon-preview-width " " \fIN\fR
+Set the icon preview width to 10-90 percent of the title panel (default: 40).
+.TP
+.BR \-\-icon-list-width " " \fIN\fR
+Reserve 1-16 terminal columns for icons beside results (default: 4).
+.TP
+.BR \-\-icon-list-height " " \fIN\fR
+Give each app 1-8 terminal rows when list icons are enabled (default: 2).
+.TP
+.BR \-\-icon-list-vertical-align " " \fIN\fR
+Offset list artwork vertically from -100 to 100 (default: 0). Negative values intentionally overflow into earlier rows instead of cropping the icon.
+.TP
+.B \-\-icon-arrow-before
+Place the selection arrow before a left-side list icon.
+.TP
+.BR \-\-icon-size " " \fIPX\fR
+Request this pixel size during icon-theme lookup (default: 128).
+.TP
+.BR \-\-icon-horizontal-align " " \fIN\fR
+Align icon content horizontally: 0 is left and 100 is right (default: 50).
+.TP
+.BR \-\-icon-vertical-align " " \fIN\fR
+Align icon content vertically: 0 is top and 100 is bottom (default: 50).
+.TP
+.BR \-\-icon-theme " " \fITHEME\fR
+Override automatic GTK icon-theme detection.
+.TP
 .B \-\-hide-before-typing
 Hide list until first character is typed
 .TP
@@ -83,6 +120,17 @@ Enable debug/test mode with detailed logging. Logs are written to \fI~/.config/f
 .BR \-d ", " \-\-detach
 Detach launched applications from terminal session (compatible with --launch-prefix, --systemd-run, and --uwsm)
 .TP
+.B \-\-persistent
+Keep the interactive launcher open after detached launches, preserving query and selection.
+Requires --detach; incompatible with --tty, --no-exec, --stdout, direct-name launches,
+dmenu, cclip, and maintenance commands. Escape closes only fsel, not launched applications.
+.TP
+.BI \-\-on\-launch " COMMAND"
+Run COMMAND through $SHELL after each successful persistent launch, with
+.BR FSEL_LAUNCHED_APP ", " FSEL_LAUNCHED_COMMAND ", " FSEL_LAUNCHED_PID " and " FSEL_PID
+in its environment. Requires --persistent, which is the case where fsel stays open
+after launching. The command runs in its own process group and keeps no terminal.
+.TP
 .BR \-t ", " \-\-tty
 Launch terminal apps in the current terminal (TTY mode). Replaces the fsel process with the launched app; use with -p/--program. Overrides terminal_launcher. Useful for TTY login sessions.
 .SS "Dmenu Mode Options"
@@ -93,11 +141,17 @@ Dmenu mode: read from stdin, output selection to stdout
 .B \-\-dmenu0
 Like --dmenu but null-separated input
 .TP
+.BR \-\-preview " " \fICOMMAND\fR
+Run COMMAND for the selected input row and show its stdout in the preview panel. This option implies --dmenu. The fzf-style placeholders {} (selected row), {q} (query), and {n} (zero-based original input ordinal) are passed through dedicated shell environment variables rather than interpolated into shell source. In password mode, the query variable is left unset so masked input is not exported. Place placeholders directly in COMMAND, not inside single quotes. Heredoc templates are rejected. Text and common raster image output are supported.
+.TP
 .BR \-\-password [=\fICHAR\fR]
 Password mode: mask input (default char: *)
 .TP
 .B \-\-index
-Output index instead of text
+Output 0\-based index of the selected item within the filtered list instead of text
+.TP
+.B \-\-index\-original
+Output the original 1\-based line number of the selected item as received from stdin, regardless of filtering. Mutually exclusive with \fB\-\-index\fR.
 .TP
 .BR \-\-with-nth " " \fICOLS\fR
 Display only specified columns (comma-separated, e.g., 1,3)
@@ -185,7 +239,7 @@ hard_stop = false
 
 # Border colors
 main_border_color = "White"
-apps_border_color = "White"
+items_border_color = "White"
 input_border_color = "White"
 
 # Layout
@@ -209,11 +263,22 @@ ranking_mode = "frecency"
 pinned_order = "ranking"
 confirm_first_launch = false
 prefix_depth = 3
+icon_mode = "preview"
+icon_position = "right"
+icon_preview_width_percent = 40
+icon_list_width = 4
+icon_list_height = 2
+icon_arrow_before = false
+icon_size = 128
+icon_horizontal_align_percent = 50
+icon_vertical_align_percent = 50
+# icon_theme = "Papirus-Dark"
 
 # Dmenu mode overrides (optional)
 [dmenu]
 delimiter = " "
 show_line_numbers = true
+# preview = "file --brief {}"
 
 # Clipboard mode overrides (optional)
 [cclip]
@@ -268,7 +333,12 @@ Jump to first/last item
 .SS "Clipboard Mode Keybinds"
 .TP
 .BR "Alt-i"
-Open fullscreen image preview for selected clipboard item (native TUI; press Esc or q to return)
+Open a fullscreen image or scrollable text preview for the selected clipboard item.
+Text preserves newlines and indentation; HTML is rendered unless -v requests raw markup.
+Up/Down or j/k scroll; PageDown/Space/f and PageUp/b page; Home/g and End/G jump to the ends.
+Left/Right or h/l pan long lines. Configured up/down bindings and the mouse wheel also scroll.
+Esc, q, Ctrl-C, or the configured image_preview binding returns without changing the selection.
+Enter does not copy while reading; return to the selector to copy.
 .TP
 .BR "Ctrl-T"
 Tag selected clipboard item
@@ -395,6 +465,13 @@ echo -e "Option 1\\nOption 2\\nOption 3" | fsel --dmenu
 .RE
 .fi
 .TP
+Preview files with a shell command:
+.nf
+.RS
+find . -type f | fsel --preview 'file --brief {}'
+.RE
+.fi
+.TP
 Process killer:
 .nf
 .RS
@@ -491,6 +568,12 @@ Set to \fBtrue\fR to hide desktop action entries in app launcher mode, or \fBfal
 .TP
 .B FSEL_APP_LAUNCHER_AUTO_HIDE_DUPLICATES
 Set to \fBtrue\fR to enable deterministic duplicate suppression in app launcher mode (default: false)
+.TP
+.B FSEL_APP_LAUNCHER_ICON_*
+Override icon mode, position, preview width, lookup size, or theme. See config.toml for the corresponding keys.
+.TP
+.B FSEL_APP_LAUNCHER_GRID_COLUMNS, FSEL_APP_LAUNCHER_GRID_ROW_HEIGHT
+Set grid columns (0 disables, maximum 64) and cell height (2-16 rows).
 .SH FILES
 .TP
 .I ~/.config/fsel/config.toml
@@ -538,3 +621,22 @@ Original gyr by Namkhai B.
 .BR systemd-run (1)
 .PP
 Project homepage: https://github.com/Mjoyufull/fsel
+.SH PANEL LAYOUT
+--info-position and --input-position accept top, right, bottom, or left.
+--info-size sets the information panel percentage (0-90); --input-size sets its
+input panel thickness in cells. --layout-rotation accepts 0, 90, 180, or 270
+clockwise degrees; text stays upright and list navigation follows orientation.
+--item-width sets horizontal result width in columns. See USAGE.md.
+.PP
+In dmenu mode, --panel NAME:SIDE:PERCENT:COMMAND adds a named command panel.
+The equivalent configuration is [[dmenu.panels]] with name, position, size, and command fields.
+At most three custom panels supplement --preview. Commands use the same
+placeholders and cancellation behavior as --preview. Zero percent hides a panel.
+.PP
+--panel-edit enables Alt+P layout editing. Tab cycles panels, arrows dock,
+plus/minus resize, and Escape returns to selection. Mouse dragging docks panels;
+the wheel resizes the focused panel. Changes are session-only.
+.PP
+--app-grid COLUMNS enables a launcher grid (0 disables, maximum 64).
+--grid-row-height ROWS sets cell height (2-16, default 4). List icons appear
+above labels. Arrow navigation and mouse selection follow grid cells.

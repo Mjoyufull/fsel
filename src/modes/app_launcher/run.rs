@@ -129,28 +129,82 @@ pub async fn run(cli: Opts) -> Result<()> {
     let backend = CrosstermBackend::new(io::stderr());
     let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
     terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
-    terminal.clear().wrap_err("Failed to clear terminal")?;
+    crate::ui::terminal::clear_fullscreen(&mut terminal).wrap_err("Failed to clear terminal")?;
+
+    // The graphics capability probe must run before the input reader, but it can
+    // wait for an unanswered terminal response. Show a usable launcher first.
+    let mut initial_render_result = Ok((false, false));
+    terminal.draw(|frame| {
+        initial_render_result = UI::new().render(frame, &state, &cli, None);
+    })?;
+    initial_render_result?;
+
+    let mut icons = super::icons::IconRuntime::new(&cli, Arc::clone(&db));
+    icons.request_if_changed(&state, terminal.size()?.into(), &cli);
 
     let mut input = InputConfig {
         disable_mouse: cli.disable_mouse,
-        tick_rate: Duration::from_millis(16),
+        tick_rate: Duration::from_millis(250),
+        render_rate: None,
         exit_key: KeyCode::Null,
         ..InputConfig::default()
     }
     .init_async();
+    let mut needs_redraw = true;
+    let mut persistent = super::persistent::PersistentSession::default();
 
     loop {
-        terminal.draw(|frame| {
-            UI::new().render(frame, &state, &cli);
-        })?;
+        if let Some(failure) = persistent.reap() {
+            state.set_status_message(failure);
+            state.update_info(
+                cli.highlight_color,
+                cli.fancy_mode,
+                cli.verbose.unwrap_or(0),
+            );
+            needs_redraw = true;
+        }
+        if needs_redraw {
+            let mut render_result = Ok((false, false));
+            terminal.draw(|frame| {
+                render_result = UI::new().render(frame, &state, &cli, icons.render_state());
+            })?;
+            let (preview_failed, list_failed) = render_result?;
+            if preview_failed || list_failed {
+                icons.handle_render_failure(preview_failed);
+                needs_redraw = true;
+                continue;
+            }
+        }
 
-        let Some(event) = input.next().await else {
-            break;
-        };
-
-        if matches!(event, Event::Input(_) | Event::Mouse(_)) {
-            let total_height = terminal.size()?.height;
-            super::events::handle_event(&mut state, event, &cli, &db, &hidden_store, total_height);
+        tokio::select! {
+            Some(result) = icons.next_result() => {
+                icons.apply_result(result);
+                needs_redraw = true;
+            }
+            maybe_event = input.next() => {
+                let Some(event) = maybe_event else {
+                    break;
+                };
+                let should_handle = matches!(&event, Event::Input(_) | Event::Mouse(_));
+                needs_redraw =
+                    matches!(&event, Event::Input(_) | Event::Mouse(_) | Event::Render);
+                let terminal_area = terminal.size()?;
+                if matches!(&event, Event::Render) {
+                    crate::ui::launcher_result_layout(terminal_area.into(), &cli)
+                        .keep_visible(state.selected, &mut state.scroll_offset);
+                }
+                if should_handle {
+                    super::events::handle_event(
+                        &mut state,
+                        event,
+                        &cli,
+                        &db,
+                        &hidden_store,
+                        terminal_area.into(),
+                    );
+                }
+                icons.request_if_changed(&state, terminal_area.into(), &cli);
+            }
         }
 
         if state.should_exit {
@@ -161,6 +215,11 @@ pub async fn run(cli: Opts) -> Result<()> {
         }
 
         if state.should_launch {
+            if cli.persistent {
+                persistent.launch(&mut state, &cli, &db);
+                needs_redraw = true;
+                continue;
+            }
             if let Some(selected_idx) = state.selected
                 && let Some(app) = state.shown.get(selected_idx)
             {

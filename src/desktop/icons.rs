@@ -1,0 +1,1235 @@
+//! XDG icon-theme resolution with in-process and persistent path caches.
+
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::env;
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+mod fallback;
+mod index;
+mod listing;
+mod theme;
+
+use index::read_theme_metadata;
+use listing::DirectoryListing;
+use theme::detect_icon_theme;
+
+const ICON_EXTENSIONS: [&str; 4] = ["png", "svg", "svgz", "xpm"];
+const MAX_THEME_DEPTH: usize = 16;
+const PERSISTENT_CACHE_VERSION: u8 = 2;
+
+/// Resolves desktop-entry icon names through the active XDG icon theme.
+pub(crate) struct IconResolver {
+    theme: String,
+    size: u16,
+    icon_roots: Vec<PathBuf>,
+    pixmap_roots: Vec<PathBuf>,
+    cache: HashMap<(String, u16), Option<PathBuf>>,
+    metadata_cache: RefCell<HashMap<PathBuf, Option<Arc<index::ThemeMetadata>>>>,
+    directory_cache: RefCell<HashMap<PathBuf, Arc<Vec<PathBuf>>>>,
+    ranking_cache: RefCell<HashMap<(String, u16), ThemeRanking>>,
+    listing: DirectoryListing,
+    persistent_cache: Option<PersistentResolverCache>,
+}
+
+struct PersistentResolverCache {
+    cache: crate::core::cache::IconPathCache,
+    theme_fingerprint: u64,
+}
+
+impl IconResolver {
+    /// Build a resolver backed by the launcher's persistent path metadata cache.
+    pub(crate) fn from_environment_with_cache(
+        theme: Option<&str>,
+        size: u16,
+        db: Arc<redb::Database>,
+    ) -> Self {
+        Self::from_environment_with_database(theme, size, Some(db))
+    }
+
+    fn from_environment_with_database(
+        theme: Option<&str>,
+        size: u16,
+        db: Option<Arc<redb::Database>>,
+    ) -> Self {
+        let home = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
+        let config_home = env::var_os("XDG_CONFIG_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| home.as_ref().map(|path| path.join(".config")));
+        let data_home = env::var_os("XDG_DATA_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| home.as_ref().map(|path| path.join(".local/share")));
+
+        let mut icon_roots = Vec::new();
+        if let Some(data_home) = data_home {
+            push_unique(&mut icon_roots, data_home.join("icons"));
+        }
+        if let Some(home) = &home {
+            push_unique(&mut icon_roots, home.join(".icons"));
+        }
+
+        let mut pixmap_roots = Vec::new();
+        let data_dirs = env::var("XDG_DATA_DIRS").ok();
+        for data_dir in super::dirs::system_data_dirs(data_dirs.as_deref()) {
+            push_unique(&mut icon_roots, data_dir.join("icons"));
+            push_unique(&mut pixmap_roots, data_dir.join("pixmaps"));
+        }
+
+        let config_dirs = env::var("XDG_CONFIG_DIRS")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "/etc/xdg".to_string())
+            .split(':')
+            .filter(|entry| !entry.is_empty())
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+
+        let theme = theme
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| detect_icon_theme(config_home.as_deref(), home.as_deref(), &config_dirs))
+            .unwrap_or_else(|| "hicolor".to_string());
+
+        let mut resolver = Self {
+            theme,
+            size,
+            icon_roots,
+            pixmap_roots,
+            cache: HashMap::new(),
+            metadata_cache: RefCell::new(HashMap::new()),
+            directory_cache: RefCell::new(HashMap::new()),
+            ranking_cache: RefCell::new(HashMap::new()),
+            listing: DirectoryListing::default(),
+            persistent_cache: None,
+        };
+        if let Some(db) = db
+            && let Ok(cache) = crate::core::cache::IconPathCache::new(db)
+        {
+            let themes = resolver.theme_chain();
+            let fingerprint = icon_theme_fingerprint(
+                &resolver.icon_roots,
+                &resolver.pixmap_roots,
+                &themes,
+                &resolver,
+            );
+            let prefix = format!("{fingerprint:016x}:");
+            let _ = cache.retain_generation(&prefix);
+            resolver.persistent_cache = Some(PersistentResolverCache {
+                theme_fingerprint: fingerprint,
+                cache,
+            });
+        }
+        resolver
+    }
+
+    /// Resolve an absolute path or themed icon name to an existing image file.
+    #[cfg(test)]
+    pub(crate) fn resolve(&mut self, icon: &str) -> Option<PathBuf> {
+        self.resolve_at_size(icon, self.size)
+    }
+
+    /// Smallest source size requested by launcher configuration.
+    pub(crate) fn minimum_size(&self) -> u16 {
+        self.size
+    }
+
+    /// Resolve an icon for a specific output size without discarding other cached sizes.
+    pub(crate) fn resolve_at_size(&mut self, icon: &str, size: u16) -> Option<PathBuf> {
+        if let Some(path) = absolute_icon_path(icon) {
+            return Some(path);
+        }
+        let cache_key = (icon.to_string(), size);
+        if let Some(cached) = self.cache.get(&cache_key) {
+            return cached.clone();
+        }
+        if icon.contains(['/', '\\']) {
+            self.cache.insert(cache_key, None);
+            return None;
+        }
+
+        let persistent_key = self.persistent_key(icon, size);
+        if let (Some(persistent), Some(key)) = (&self.persistent_cache, &persistent_key)
+            && let Ok(crate::core::cache::IconPathLookup::Hit(path)) = persistent.cache.get(key)
+        {
+            self.cache.insert(cache_key, Some(path.clone()));
+            return Some(path);
+        }
+
+        let icon_name = strip_icon_extension(icon);
+        let themes = self.theme_chain();
+        let persistable = themes
+            .iter()
+            .find_map(|theme| self.find_declared_in_theme(theme, icon_name, size))
+            .or_else(|| self.find_unthemed(icon_name));
+        let resolved = persistable.clone().or_else(|| {
+            themes
+                .iter()
+                .find_map(|theme| self.find_fallback_in_theme(theme, icon_name, size))
+        });
+        self.cache.insert(cache_key, resolved.clone());
+        if let (Some(persistent), Some(key), Some(path)) =
+            (&self.persistent_cache, persistent_key, persistable.as_ref())
+        {
+            let _ = persistent.cache.set(&key, path.clone());
+        }
+        resolved
+    }
+
+    fn theme_chain(&self) -> Vec<String> {
+        let mut seen = HashSet::new();
+        let mut themes = Vec::new();
+        self.append_theme_subtree(&self.theme, &mut seen, &mut themes);
+        if seen.insert("hicolor".to_string()) {
+            // The required fallback sits outside the inherited-theme depth cap.
+            themes.push("hicolor".to_string());
+        }
+        themes
+    }
+
+    fn append_theme_subtree(
+        &self,
+        theme: &str,
+        seen: &mut HashSet<String>,
+        themes: &mut Vec<String>,
+    ) {
+        if themes.len() >= MAX_THEME_DEPTH || !seen.insert(theme.to_string()) {
+            return;
+        }
+        themes.push(theme.to_string());
+
+        if let Some(metadata) = self
+            .icon_roots
+            .iter()
+            .find_map(|root| self.theme_metadata(&root.join(theme)))
+        {
+            for inherited in &metadata.inherits {
+                self.append_theme_subtree(inherited, seen, themes);
+            }
+        }
+    }
+
+    fn find_declared_in_theme(&self, theme: &str, icon: &str, size: u16) -> Option<PathBuf> {
+        let ranked = self.ranked_directories(theme, size);
+        let mut best_fitting = ranked.first().map(|directory| directory.rank);
+        let mut best = None::<(u8, PathBuf)>;
+        let mut best_rank = None;
+        let mut file_name = String::new();
+        for (index, directory) in ranked.iter().enumerate() {
+            // Directories are ranked, so a worse-ranked one cannot hold a better icon.
+            if best_rank.is_some_and(|rank| rank != directory.rank) {
+                break;
+            }
+            // The best-fitting directories hold most icons. Once they do not hold this
+            // one, read the rest of the theme at once instead of one directory per probe.
+            if best_fitting.is_some_and(|rank| rank != directory.rank) {
+                self.listing
+                    .prefill(ranked[index..].iter().map(|entry| entry.path.as_path()));
+                best_fitting = None;
+            }
+            let Some((rank, path)) = self.named_icon(&directory.path, icon, &mut file_name) else {
+                continue;
+            };
+            if best.as_ref().is_none_or(|(current, _)| rank < *current) {
+                best = Some((rank, path));
+            }
+            best_rank = Some(directory.rank);
+        }
+        best.map(|(_, path)| path)
+    }
+
+    /// Declared directories of one theme, ordered by how well each fits a wanted size.
+    ///
+    /// The directory a themed icon belongs in is decided by size alone, so ranking the
+    /// directories before looking at any name lets a lookup stop at its first hit. A
+    /// theme declaring hundreds of directories otherwise charges every icon for all of
+    /// them, and the themes it inherits from repeat that.
+    fn ranked_directories(&self, theme: &str, size: u16) -> ThemeRanking {
+        let key = (theme.to_string(), size);
+        if let Some(ranked) = self.ranking_cache.borrow().get(&key) {
+            return Arc::clone(ranked);
+        }
+
+        let mut ranked = Vec::new();
+        for (root_rank, root) in self.icon_roots.iter().enumerate() {
+            let theme_root = root.join(theme);
+            if !theme_root.is_dir() {
+                continue;
+            }
+            let Some(metadata) = self.theme_metadata(&theme_root) else {
+                continue;
+            };
+            ranked.extend(metadata.directories.iter().map(|directory| {
+                let (distance, kind_rank) = directory.score(size);
+                RankedDirectory {
+                    path: theme_root.join(&directory.path),
+                    rank: (distance, kind_rank, root_rank),
+                }
+            }));
+        }
+        ranked.sort_by_key(|directory| directory.rank);
+        let ranking = Arc::new(ranked);
+        self.ranking_cache
+            .borrow_mut()
+            .insert(key, Arc::clone(&ranking));
+        ranking
+    }
+
+    /// The icon file `directory` holds for `icon`, with the rank of its extension.
+    fn named_icon(
+        &self,
+        directory: &Path,
+        icon: &str,
+        file_name: &mut String,
+    ) -> Option<(u8, PathBuf)> {
+        ICON_EXTENSIONS.iter().find_map(|extension| {
+            file_name.clear();
+            file_name.push_str(icon);
+            file_name.push('.');
+            file_name.push_str(extension);
+            self.listing
+                .holds(directory, file_name)
+                .then(|| (named_extension_rank(extension), directory.join(&file_name)))
+        })
+    }
+
+    fn find_fallback_in_theme(&self, theme: &str, icon: &str, size: u16) -> Option<PathBuf> {
+        let mut candidates = Vec::new();
+        for (root_rank, root) in self.icon_roots.iter().enumerate() {
+            let theme_root = root.join(theme);
+            if !theme_root.is_dir() {
+                continue;
+            }
+            // An undeclared directory is found by reading the theme, so read all of
+            // them at once rather than one at a time as the names are probed.
+            let directories = self.icon_directories(&theme_root);
+            self.listing
+                .prefill(directories.iter().map(PathBuf::as_path));
+            for path in fallback::matching_paths(&directories, icon, &self.listing) {
+                candidates.push(IconCandidate::from_fallback(path, size, root_rank));
+            }
+        }
+        fallback::best_in_traversal_order(candidates, &self.icon_roots, theme)
+    }
+
+    fn find_unthemed(&self, icon: &str) -> Option<PathBuf> {
+        for root in self.icon_roots.iter().chain(&self.pixmap_roots) {
+            for extension in ICON_EXTENSIONS {
+                let file_name = format!("{icon}.{extension}");
+                if self.listing.holds(root, &file_name) {
+                    return Some(root.join(file_name));
+                }
+            }
+        }
+        None
+    }
+
+    /// List a theme's searchable directories once, the way its metadata is parsed once.
+    ///
+    /// A theme declares its directories in `index.theme`, but locally installed icons
+    /// often land in undeclared ones, which still have to be searched. Listing those
+    /// directories and probing the wanted name in each replaces enumerating every icon
+    /// file in the theme, which large themes make expensive for every lookup.
+    fn icon_directories(&self, theme_root: &Path) -> Arc<Vec<PathBuf>> {
+        if let Some(directories) = self.directory_cache.borrow().get(theme_root) {
+            return Arc::clone(directories);
+        }
+
+        let directories = Arc::new(crate::desktop::traversal::directories(
+            theme_root,
+            crate::desktop::traversal::Hidden::Exclude,
+        ));
+        self.directory_cache
+            .borrow_mut()
+            .insert(theme_root.to_path_buf(), Arc::clone(&directories));
+        directories
+    }
+
+    fn theme_metadata(&self, theme_root: &Path) -> Option<Arc<index::ThemeMetadata>> {
+        if let Some(metadata) = self.metadata_cache.borrow().get(theme_root) {
+            return metadata.clone();
+        }
+
+        let metadata = read_theme_metadata(theme_root).map(Arc::new);
+        self.metadata_cache
+            .borrow_mut()
+            .insert(theme_root.to_path_buf(), metadata.clone());
+        metadata
+    }
+
+    fn persistent_key(&self, icon: &str, size: u16) -> Option<String> {
+        let persistent = self.persistent_cache.as_ref()?;
+        Some(format!(
+            "{:016x}:{}:{}:{}:{}",
+            persistent.theme_fingerprint,
+            self.theme.len(),
+            self.theme,
+            size,
+            icon,
+        ))
+    }
+}
+
+fn icon_theme_fingerprint(
+    icon_roots: &[PathBuf],
+    pixmap_roots: &[PathBuf],
+    themes: &[String],
+    resolver: &IconResolver,
+) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    PERSISTENT_CACHE_VERSION.hash(&mut hasher);
+    for root in icon_roots.iter().chain(pixmap_roots) {
+        hash_path_metadata(root, &mut hasher);
+    }
+    for root in icon_roots {
+        for theme_name in themes {
+            let theme_root = root.join(theme_name);
+            for path in [
+                theme_root.clone(),
+                theme_root.join("index.theme"),
+                theme_root.join("icon-theme.cache"),
+            ] {
+                hash_path_metadata(&path, &mut hasher);
+            }
+            if let Some(metadata) = resolver.theme_metadata(&theme_root) {
+                for directory in &metadata.directories {
+                    hash_path_metadata(&theme_root.join(&directory.path), &mut hasher);
+                }
+            }
+        }
+    }
+    hasher.finish()
+}
+
+fn hash_path_metadata(path: &Path, hasher: &mut impl Hasher) {
+    path.hash(hasher);
+    match std::fs::metadata(path) {
+        Ok(metadata) => {
+            true.hash(hasher);
+            metadata.len().hash(hasher);
+            metadata.modified().ok().hash(hasher);
+        }
+        Err(_) => false.hash(hasher),
+    }
+}
+
+/// Declared directories of one theme, ordered for one wanted size.
+type ThemeRanking = Arc<Vec<RankedDirectory>>;
+
+/// A declared theme directory with the rank it holds for one wanted size.
+struct RankedDirectory {
+    path: PathBuf,
+    rank: (u32, u8, usize),
+}
+
+/// An icon file found in a directory the theme does not declare a size for.
+#[derive(Clone)]
+struct IconCandidate {
+    path: PathBuf,
+    /// How far the size named by the path is from the wanted one.
+    distance: u32,
+    root_rank: usize,
+}
+
+impl IconCandidate {
+    fn from_fallback(path: PathBuf, requested_size: u16, root_rank: usize) -> Self {
+        let distance = path
+            .components()
+            .filter_map(|component| component.as_os_str().to_str())
+            .find_map(parse_directory_size)
+            .map_or(u32::MAX / 2, |size| {
+                u32::from(size.abs_diff(requested_size))
+            });
+        Self {
+            path,
+            distance,
+            root_rank,
+        }
+    }
+
+    fn score(&self) -> (u32, usize, u8) {
+        (self.distance, self.root_rank, extension_rank(&self.path))
+    }
+}
+
+fn extension_rank(path: &Path) -> u8 {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map_or(2, named_extension_rank)
+}
+
+fn named_extension_rank(extension: &str) -> u8 {
+    match extension {
+        "png" => 0,
+        "svg" | "svgz" => 1,
+        _ => 2,
+    }
+}
+
+fn parse_directory_size(component: &str) -> Option<u16> {
+    let leading = component.split('x').next()?;
+    leading.parse().ok()
+}
+
+fn strip_icon_extension(icon: &str) -> &str {
+    ICON_EXTENSIONS
+        .iter()
+        .find_map(|extension| icon.strip_suffix(&format!(".{extension}")))
+        .unwrap_or(icon)
+}
+
+fn absolute_icon_path(icon: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(icon);
+    (path.is_absolute() && path.is_file()).then_some(path)
+}
+
+fn push_unique(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.contains(&path) {
+        paths.push(path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IconResolver, PersistentResolverCache, icon_theme_fingerprint};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    pub(super) fn temp_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should follow the Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("fsel-icons-{unique}"));
+        fs::create_dir_all(&path).expect("temporary icon root should be created");
+        path
+    }
+
+    fn resolver_with_cache(root: PathBuf, db: Arc<redb::Database>) -> IconResolver {
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root],
+            pixmap_roots: Vec::new(),
+            cache: Default::default(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+        let themes = resolver.theme_chain();
+        let fingerprint = icon_theme_fingerprint(
+            &resolver.icon_roots,
+            &resolver.pixmap_roots,
+            &themes,
+            &resolver,
+        );
+        resolver.persistent_cache = Some(PersistentResolverCache {
+            cache: crate::core::cache::IconPathCache::new(db)
+                .expect("path cache should initialize"),
+            theme_fingerprint: fingerprint,
+        });
+        resolver
+    }
+
+    #[test]
+    fn persistent_misses_are_revalidated_on_the_next_launch() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("undeclared/apps"))
+            .expect("theme directory should be created");
+        fs::write(theme.join("index.theme"), "[Icon Theme]\n")
+            .expect("theme metadata should be written");
+        let db = Arc::new(
+            redb::Database::create(root.join("cache.redb"))
+                .expect("cache database should be created"),
+        );
+        assert_eq!(
+            resolver_with_cache(root.clone(), Arc::clone(&db)).resolve("editor"),
+            None
+        );
+        let icon = theme.join("undeclared/apps/editor.png");
+        fs::write(&icon, b"icon").expect("new icon should be written");
+
+        assert_eq!(
+            resolver_with_cache(root.clone(), db).resolve("editor"),
+            Some(icon)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fallback_theme_results_are_revalidated_on_the_next_launch() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("16x16/apps"))
+            .expect("small fallback directory should be created");
+        fs::create_dir_all(theme.join("64x64/apps"))
+            .expect("preferred fallback directory should be created");
+        fs::write(theme.join("index.theme"), "[Icon Theme]\n")
+            .expect("theme metadata should be written");
+        let old_icon = theme.join("16x16/apps/editor.png");
+        fs::write(&old_icon, b"small").expect("small fallback icon should be written");
+        let db = Arc::new(
+            redb::Database::create(root.join("cache.redb"))
+                .expect("cache database should be created"),
+        );
+
+        assert_eq!(
+            resolver_with_cache(root.clone(), Arc::clone(&db)).resolve("editor"),
+            Some(old_icon)
+        );
+
+        let preferred_icon = theme.join("64x64/apps/editor.png");
+        fs::write(&preferred_icon, b"preferred")
+            .expect("preferred fallback icon should be written");
+
+        assert_eq!(
+            resolver_with_cache(root.clone(), db).resolve("editor"),
+            Some(preferred_icon)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inherited_theme_metadata_changes_the_cache_generation() {
+        let root = temp_dir();
+        fs::create_dir_all(root.join("Selected")).expect("selected theme should be created");
+        fs::create_dir_all(root.join("Inherited")).expect("inherited theme should be created");
+        fs::write(
+            root.join("Selected/index.theme"),
+            "[Icon Theme]\nInherits=Inherited\n",
+        )
+        .expect("selected metadata should be written");
+        fs::write(root.join("Inherited/index.theme"), "[Icon Theme]\n")
+            .expect("inherited metadata should be written");
+        let first = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: Default::default(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+        let first_themes = first.theme_chain();
+        let first_fingerprint = icon_theme_fingerprint(
+            &first.icon_roots,
+            &first.pixmap_roots,
+            &first_themes,
+            &first,
+        );
+        fs::write(
+            root.join("Inherited/index.theme"),
+            "[Icon Theme]\nDirectories=64x64/apps\n",
+        )
+        .expect("inherited metadata should change");
+        let second = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: Default::default(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+        let second_themes = second.theme_chain();
+        let second_fingerprint = icon_theme_fingerprint(
+            &second.icon_roots,
+            &second.pixmap_roots,
+            &second_themes,
+            &second,
+        );
+
+        assert_ne!(first_fingerprint, second_fingerprint);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolves_inherited_theme_icons_at_the_requested_size() {
+        let root = temp_dir();
+        let selected_theme = root.join("Selected");
+        let inherited_theme = root.join("Inherited");
+        fs::create_dir_all(&selected_theme).expect("selected theme should be created");
+        fs::write(
+            selected_theme.join("index.theme"),
+            "[Icon Theme]\nInherits=Inherited\n",
+        )
+        .expect("selected theme metadata should be written");
+        fs::create_dir_all(inherited_theme.join("32x32/apps"))
+            .expect("32px directory should be created");
+        fs::create_dir_all(inherited_theme.join("128x128/apps"))
+            .expect("128px directory should be created");
+        fs::write(
+            inherited_theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=32x32/apps,128x128/apps\n\
+             [32x32/apps]\nSize=32\nType=Fixed\n\
+             [128x128/apps]\nSize=128\nType=Fixed\n",
+        )
+        .expect("inherited theme metadata should be written");
+        fs::write(inherited_theme.join("32x32/apps/editor.png"), b"small")
+            .expect("small icon should be written");
+        let expected = inherited_theme.join("128x128/apps/editor.png");
+        fs::write(&expected, b"large").expect("large icon should be written");
+
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 128,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn declared_inherited_icon_precedes_selected_theme_directory_scan() {
+        let root = temp_dir();
+        let selected_theme = root.join("Selected");
+        let inherited_theme = root.join("Inherited");
+        fs::create_dir_all(selected_theme.join("undeclared/apps"))
+            .expect("undeclared directory should be created");
+        fs::write(
+            selected_theme.join("index.theme"),
+            "[Icon Theme]\nInherits=Inherited\n",
+        )
+        .expect("selected theme metadata should be written");
+        fs::write(
+            selected_theme.join("undeclared/apps/editor.png"),
+            b"fallback",
+        )
+        .expect("fallback icon should be written");
+        fs::create_dir_all(inherited_theme.join("64x64/apps"))
+            .expect("inherited directory should be created");
+        fs::write(
+            inherited_theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n",
+        )
+        .expect("inherited theme metadata should be written");
+        let expected = inherited_theme.join("64x64/apps/editor.png");
+        fs::write(&expected, b"declared").expect("declared icon should be written");
+
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn exact_fixed_icon_outranks_scalable_svg() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("scalable/apps"))
+            .expect("scalable directory should be created");
+        fs::create_dir_all(theme.join("128x128/apps")).expect("fixed directory should be created");
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=scalable/apps,128x128/apps\n\
+             [scalable/apps]\nSize=48\nType=Scalable\nMinSize=16\nMaxSize=256\n\
+             [128x128/apps]\nSize=128\nType=Fixed\n",
+        )
+        .expect("theme metadata should be written");
+        fs::write(theme.join("scalable/apps/editor.svg"), b"scalable")
+            .expect("scalable icon should be written");
+        let expected = theme.join("128x128/apps/editor.png");
+        fs::write(&expected, b"fixed").expect("fixed icon should be written");
+
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 128,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn png_outranks_svg_at_the_same_theme_size() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("64x64/apps")).expect("fixed directory should be created");
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n",
+        )
+        .expect("theme metadata should be written");
+        fs::write(theme.join("64x64/apps/editor.svg"), b"svg").expect("SVG icon should be written");
+        let expected = theme.join("64x64/apps/editor.png");
+        fs::write(&expected, b"png").expect("PNG icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn png_outranks_svg_across_equally_ranked_directories() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        for directory in ["64x64/apps", "64x64/places"] {
+            fs::create_dir_all(theme.join(directory)).expect("fixed directory should be created");
+        }
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=64x64/apps,64x64/places\n\
+             [64x64/apps]\nSize=64\nType=Fixed\n[64x64/places]\nSize=64\nType=Fixed\n",
+        )
+        .expect("theme metadata should be written");
+        fs::write(theme.join("64x64/apps/editor.svg"), b"svg").expect("SVG icon should be written");
+        let expected = theme.join("64x64/places/editor.png");
+        fs::write(&expected, b"png").expect("PNG icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn higher_priority_root_outranks_extension_preference() {
+        let root = temp_dir();
+        let user_root = root.join("user");
+        let system_root = root.join("system");
+        for icon_root in [&user_root, &system_root] {
+            let theme = icon_root.join("Selected");
+            fs::create_dir_all(theme.join("128x128/apps"))
+                .expect("theme directory should be created");
+            fs::write(
+                theme.join("index.theme"),
+                "[Icon Theme]\nDirectories=128x128/apps\n[128x128/apps]\nSize=128\nType=Fixed\n",
+            )
+            .expect("theme metadata should be written");
+        }
+        let expected = user_root.join("Selected/128x128/apps/editor.svg");
+        fs::write(&expected, b"user SVG").expect("user icon should be written");
+        fs::write(
+            system_root.join("Selected/128x128/apps/editor.png"),
+            b"system PNG",
+        )
+        .expect("system icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 128,
+            icon_roots: vec![user_root, system_root],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolves_compressed_svg_theme_icons() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(theme.join("scalable/apps"))
+            .expect("scalable directory should be created");
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=scalable/apps\n[scalable/apps]\nSize=64\nType=Scalable\nMinSize=16\nMaxSize=256\n",
+        )
+        .expect("theme metadata should be written");
+        let expected = theme.join("scalable/apps/editor.svgz");
+        fs::write(&expected, b"compressed svg").expect("SVGZ icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn first_theme_metadata_controls_inheritance() {
+        let root = temp_dir();
+        let user_root = root.join("user");
+        let system_root = root.join("system");
+        fs::create_dir_all(user_root.join("Selected")).expect("user theme should be created");
+        fs::create_dir_all(system_root.join("Selected")).expect("system theme should be created");
+        fs::write(
+            user_root.join("Selected/index.theme"),
+            "[Icon Theme]\nInherits=UserParent\n",
+        )
+        .expect("user theme metadata should be written");
+        fs::write(
+            system_root.join("Selected/index.theme"),
+            "[Icon Theme]\nInherits=SystemParent\n",
+        )
+        .expect("system theme metadata should be written");
+        for parent in ["UserParent", "SystemParent"] {
+            let theme = root.join(parent).join("64x64/apps");
+            fs::create_dir_all(&theme).expect("parent theme should be created");
+            fs::write(
+                root.join(parent).join("index.theme"),
+                "[Icon Theme]\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n",
+            )
+            .expect("parent metadata should be written");
+            fs::write(theme.join("editor.png"), parent.as_bytes())
+                .expect("parent icon should be written");
+        }
+        let expected = root.join("UserParent/64x64/apps/editor.png");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![user_root, system_root, root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn chooses_best_theme_candidate_across_icon_roots() {
+        let root = temp_dir();
+        let user_root = root.join("user");
+        let system_root = root.join("system");
+        for (icon_root, size) in [(&user_root, 16), (&system_root, 128)] {
+            let theme = icon_root.join("Selected");
+            fs::create_dir_all(theme.join(format!("{size}x{size}/apps")))
+                .expect("theme directory should be created");
+            fs::write(
+                theme.join("index.theme"),
+                format!(
+                    "[Icon Theme]\nDirectories={size}x{size}/apps\n[{size}x{size}/apps]\nSize={size}\nType=Fixed\n"
+                ),
+            )
+            .expect("theme metadata should be written");
+            fs::write(
+                theme.join(format!("{size}x{size}/apps/editor.png")),
+                b"icon",
+            )
+            .expect("icon should be written");
+        }
+        let expected = system_root.join("Selected/128x128/apps/editor.png");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 128,
+            icon_roots: vec![user_root, system_root],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn inherited_themes_are_traversed_depth_first() {
+        let root = temp_dir();
+        for (theme, inherits) in [("Selected", "A,B"), ("A", "C"), ("B", ""), ("C", "")] {
+            let theme_root = root.join(theme);
+            fs::create_dir_all(theme_root.join("64x64/apps"))
+                .expect("theme directory should be created");
+            fs::write(
+                theme_root.join("index.theme"),
+                format!(
+                    "[Icon Theme]\nInherits={inherits}\nDirectories=64x64/apps\n[64x64/apps]\nSize=64\nType=Fixed\n"
+                ),
+            )
+            .expect("theme metadata should be written");
+        }
+        fs::write(root.join("B/64x64/apps/editor.png"), b"sibling")
+            .expect("sibling icon should be written");
+        let expected = root.join("C/64x64/apps/editor.png");
+        fs::write(&expected, b"descendant").expect("descendant icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn hicolor_is_appended_after_the_inheritance_depth_cap() {
+        let root = temp_dir();
+        for index in 0..super::MAX_THEME_DEPTH {
+            let theme = root.join(format!("Theme{index}"));
+            fs::create_dir_all(&theme).expect("theme should be created");
+            let inherits = if index + 1 < super::MAX_THEME_DEPTH {
+                format!("Theme{}", index + 1)
+            } else {
+                String::new()
+            };
+            fs::write(
+                theme.join("index.theme"),
+                format!("[Icon Theme]\nInherits={inherits}\n"),
+            )
+            .expect("theme metadata should be written");
+        }
+        let resolver = IconResolver {
+            theme: "Theme0".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        let chain = resolver.theme_chain();
+        assert_eq!(chain.len(), super::MAX_THEME_DEPTH + 1);
+        assert_eq!(chain.last().map(String::as_str), Some("hicolor"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn finds_unthemed_icons_in_icon_roots() {
+        let root = temp_dir();
+        let expected = root.join("editor.png");
+        fs::write(&expected, b"icon").expect("unthemed icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Missing".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn finds_xpm_icons_in_pixmap_roots() {
+        let root = temp_dir();
+        let expected = root.join("editor.xpm");
+        fs::write(&expected, b"XPM icon").expect("XPM icon should be written");
+        let mut resolver = IconResolver {
+            theme: "Missing".to_string(),
+            size: 64,
+            icon_roots: Vec::new(),
+            pixmap_roots: vec![root.clone()],
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("editor"), Some(expected));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_relative_icon_paths() {
+        let mut resolver = IconResolver {
+            theme: "hicolor".to_string(),
+            size: 64,
+            icon_roots: Vec::new(),
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve("../outside"), None);
+        assert_eq!(resolver.resolve("folder/icon"), None);
+        assert_eq!(resolver.resolve("folder\\icon"), None);
+    }
+
+    #[test]
+    fn absolute_paths_bypass_theme_lookup() {
+        let root = temp_dir();
+        let icon = root.join("custom.png");
+        fs::write(&icon, b"icon").expect("absolute icon should be written");
+        let mut resolver = IconResolver {
+            theme: "hicolor".to_string(),
+            size: 64,
+            icon_roots: Vec::new(),
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(resolver.resolve(icon.to_str().unwrap()), Some(icon.clone()));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn requested_output_sizes_keep_distinct_resolutions() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        for size in [32, 128] {
+            fs::create_dir_all(theme.join(format!("{size}x{size}/apps")))
+                .expect("theme directory should be created");
+            fs::write(
+                theme.join(format!("{size}x{size}/apps/editor.png")),
+                b"icon",
+            )
+            .expect("icon should be written");
+        }
+        fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nDirectories=32x32/apps,128x128/apps\n\
+             [32x32/apps]\nSize=32\nType=Fixed\n\
+             [128x128/apps]\nSize=128\nType=Fixed\n",
+        )
+        .expect("theme metadata should be written");
+        let mut resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 32,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        assert_eq!(
+            resolver.resolve_at_size("editor", 32),
+            Some(theme.join("32x32/apps/editor.png"))
+        );
+        assert_eq!(
+            resolver.resolve_at_size("editor", 128),
+            Some(theme.join("128x128/apps/editor.png"))
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn parsed_theme_metadata_is_reused() {
+        let root = temp_dir();
+        let theme = root.join("Selected");
+        fs::create_dir_all(&theme).expect("theme should be created");
+        fs::write(theme.join("index.theme"), "[Icon Theme]\n")
+            .expect("theme metadata should be written");
+        let resolver = IconResolver {
+            theme: "Selected".to_string(),
+            size: 64,
+            icon_roots: vec![root.clone()],
+            pixmap_roots: Vec::new(),
+            cache: std::collections::HashMap::new(),
+            metadata_cache: Default::default(),
+            directory_cache: Default::default(),
+            ranking_cache: Default::default(),
+            listing: Default::default(),
+            persistent_cache: None,
+        };
+
+        let first = resolver
+            .theme_metadata(&theme)
+            .expect("metadata should load");
+        fs::remove_file(theme.join("index.theme")).expect("metadata should be removable");
+        let second = resolver
+            .theme_metadata(&theme)
+            .expect("cached metadata should remain available");
+
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        let _ = fs::remove_dir_all(root);
+    }
+}

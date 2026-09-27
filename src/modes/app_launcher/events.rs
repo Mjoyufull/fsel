@@ -1,3 +1,5 @@
+//! Launcher keyboard and mouse event handling against rendered panel geometry.
+
 use crate::cli::Opts;
 use crate::core::hidden_entries::{HiddenEntryStore, NewHiddenEntry};
 use crate::core::ranking::current_unix_seconds;
@@ -11,11 +13,11 @@ pub(crate) fn handle_event(
     cli: &Opts,
     db: &std::sync::Arc<redb::Database>,
     hidden_store: &HiddenEntryStore,
-    total_height: u16,
+    terminal_area: ratatui::layout::Rect,
 ) {
     match event {
-        Event::Input(key) => handle_key_event(state, key, cli, db, hidden_store, total_height),
-        Event::Mouse(mouse_event) => handle_mouse_event(state, mouse_event, cli, total_height),
+        Event::Input(key) => handle_key_event(state, key, cli, db, hidden_store, terminal_area),
+        Event::Mouse(mouse_event) => handle_mouse_event(state, mouse_event, cli, terminal_area),
         Event::Tick | Event::Render => {}
     }
 }
@@ -26,9 +28,9 @@ fn handle_key_event(
     cli: &Opts,
     db: &std::sync::Arc<redb::Database>,
     hidden_store: &HiddenEntryStore,
-    total_height: u16,
+    terminal_area: ratatui::layout::Rect,
 ) {
-    let max_visible = max_visible_items(total_height, cli);
+    let max_visible = crate::ui::launcher_visible_rows(terminal_area, cli);
     state.clear_status_message();
 
     let msg = if cli.keybinds.matches_exit(key.code, key.modifiers) {
@@ -97,21 +99,69 @@ fn handle_key_event(
         state.should_exit = true;
     }
 
-    crate::core::state::update(state, msg, cli.hard_stop, max_visible);
+    if cli.app_grid_columns > 0 && matches!(msg, Message::MoveUp | Message::MoveDown) {
+        let layout = crate::ui::launcher_result_layout(terminal_area, cli);
+        if let Some(selected) = state.selected {
+            let vertical = cli.keybinds.matches_up(key.code, key.modifiers)
+                || cli.keybinds.matches_down(key.code, key.modifiers);
+            let backwards = matches!(msg, Message::MoveUp) ^ (cli.panels.rotation >= 180);
+            let next = grid_neighbor(
+                selected,
+                state.shown.len(),
+                if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+                    1
+                } else {
+                    layout.navigation_step(vertical)
+                },
+                backwards,
+                cli.hard_stop,
+            );
+            crate::core::state::update(
+                state,
+                Message::SelectIndex(next),
+                cli.hard_stop,
+                max_visible,
+            );
+        }
+        layout.keep_visible(state.selected, &mut state.scroll_offset);
+        refresh_info(state, cli);
+        return;
+    }
+    let oriented = if cli.panels.rotation >= 180 {
+        match msg {
+            Message::MoveUp => Message::MoveDown,
+            Message::MoveDown => Message::MoveUp,
+            other => other,
+        }
+    } else {
+        msg
+    };
+    crate::core::state::update(state, oriented, cli.hard_stop, max_visible);
+    crate::ui::launcher_result_layout(terminal_area, cli)
+        .keep_visible(state.selected, &mut state.scroll_offset);
     refresh_info(state, cli);
 }
 
-fn handle_mouse_event(state: &mut State, mouse_event: MouseEvent, cli: &Opts, total_height: u16) {
-    let metrics = list_metrics(total_height, cli);
+fn handle_mouse_event(
+    state: &mut State,
+    mouse_event: MouseEvent,
+    cli: &Opts,
+    terminal_area: ratatui::layout::Rect,
+) {
+    let metrics = list_metrics(terminal_area, cli);
 
     let msg = match mouse_event.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            if let Some(index) = metrics.app_index_for_row(mouse_event.row, state) {
+            if let Some(index) = metrics
+                .hit(mouse_event.column, mouse_event.row)
+                .map(|index| state.scroll_offset + index)
+                .filter(|index| *index < state.shown.len())
+            {
                 crate::core::state::update(
                     state,
                     Message::SelectIndex(index),
                     cli.hard_stop,
-                    metrics.max_visible,
+                    metrics.capacity(),
                 );
                 Message::Select
             } else {
@@ -119,27 +169,33 @@ fn handle_mouse_event(state: &mut State, mouse_event: MouseEvent, cli: &Opts, to
             }
         }
         MouseEventKind::Moved => metrics
-            .app_index_for_row(mouse_event.row, state)
+            .hit(mouse_event.column, mouse_event.row)
+            .map(|index| state.scroll_offset + index)
+            .filter(|index| *index < state.shown.len())
             .map(Message::SelectIndex)
             .unwrap_or(Message::Tick),
         MouseEventKind::ScrollDown => {
-            if metrics.contains_row(mouse_event.row)
+            if metrics.hit(mouse_event.column, mouse_event.row).is_some()
                 && !state.shown.is_empty()
-                && state.scroll_offset + metrics.max_visible < state.shown.len()
+                && state.scroll_offset + metrics.capacity() < state.shown.len()
             {
-                state.scroll_offset += 1;
-                metrics.snap_selection_to_mouse(state, mouse_event.row);
+                state.scroll_offset = state.scroll_offset.saturating_add(metrics.scroll_step());
+                if let Some(index) = metrics.hit(mouse_event.column, mouse_event.row) {
+                    state.selected = Some((state.scroll_offset + index).min(state.shown.len() - 1));
+                }
                 refresh_info(state, cli);
             }
             Message::Tick
         }
         MouseEventKind::ScrollUp => {
-            if metrics.contains_row(mouse_event.row)
+            if metrics.hit(mouse_event.column, mouse_event.row).is_some()
                 && !state.shown.is_empty()
                 && state.scroll_offset > 0
             {
-                state.scroll_offset -= 1;
-                metrics.snap_selection_to_mouse(state, mouse_event.row);
+                state.scroll_offset = state.scroll_offset.saturating_sub(metrics.scroll_step());
+                if let Some(index) = metrics.hit(mouse_event.column, mouse_event.row) {
+                    state.selected = Some((state.scroll_offset + index).min(state.shown.len() - 1));
+                }
                 refresh_info(state, cli);
             }
             Message::Tick
@@ -152,8 +208,38 @@ fn handle_mouse_event(state: &mut State, mouse_event: MouseEvent, cli: &Opts, to
             crate::core::debug_logger::log_event(&format!("State update via Mouse: {:?}", msg));
         }
 
-        crate::core::state::update(state, msg, cli.hard_stop, metrics.max_visible);
+        crate::core::state::update(state, msg, cli.hard_stop, metrics.capacity());
         refresh_info(state, cli);
+    }
+}
+
+fn grid_neighbor(
+    selected: usize,
+    len: usize,
+    step: usize,
+    backwards: bool,
+    hard_stop: bool,
+) -> usize {
+    if len == 0 {
+        return selected;
+    }
+    let next = if backwards {
+        selected.checked_sub(step)
+    } else {
+        selected.checked_add(step).filter(|index| *index < len)
+    };
+    if let Some(next) = next {
+        return next;
+    }
+    if hard_stop {
+        return selected;
+    }
+    let step = step.max(1);
+    let axis_start = selected % step;
+    if backwards {
+        axis_start + ((len - 1 - axis_start) / step) * step
+    } else {
+        axis_start
     }
 }
 
@@ -245,63 +331,21 @@ fn refresh_info(state: &mut State, cli: &Opts) {
     );
 }
 
-fn max_visible_items(total_height: u16, cli: &Opts) -> usize {
-    let title_height =
-        crate::ui::effective_title_height(total_height, cli.title_panel_height_percent);
-    let input_height = cli.input_panel_height;
-    let apps_panel_height = total_height.saturating_sub(title_height + input_height);
-    apps_panel_height.saturating_sub(2) as usize
+fn list_metrics(
+    terminal_area: ratatui::layout::Rect,
+    cli: &Opts,
+) -> crate::ui::result_layout::ResultLayout {
+    crate::ui::launcher_result_layout(terminal_area, cli)
 }
 
-fn list_metrics(total_height: u16, cli: &Opts) -> ListMetrics {
-    let title_height =
-        crate::ui::effective_title_height(total_height, cli.title_panel_height_percent);
-    let input_height = cli.input_panel_height;
-    let title_panel_position = cli
-        .title_panel_position
-        .unwrap_or(crate::ui::PanelPosition::Top);
-
-    let (apps_panel_start, apps_panel_height) = match title_panel_position {
-        crate::ui::PanelPosition::Top => (
-            title_height,
-            total_height.saturating_sub(title_height + input_height),
-        ),
-        crate::ui::PanelPosition::Middle | crate::ui::PanelPosition::Bottom => {
-            (0, total_height.saturating_sub(title_height + input_height))
-        }
-    };
-
-    ListMetrics {
-        list_content_start: apps_panel_start + 1,
-        max_visible: apps_panel_height.saturating_sub(2) as usize,
-    }
-}
-
-struct ListMetrics {
-    list_content_start: u16,
-    max_visible: usize,
-}
-
-impl ListMetrics {
-    fn contains_row(&self, row: u16) -> bool {
-        row >= self.list_content_start && row < self.list_content_start + self.max_visible as u16
-    }
-
-    fn app_index_for_row(&self, row: u16, state: &State) -> Option<usize> {
-        if !self.contains_row(row) {
-            return None;
-        }
-
-        let row_in_content = row - self.list_content_start;
-        let index = state.scroll_offset + row_in_content as usize;
-        (index < state.shown.len()).then_some(index)
-    }
-
-    fn snap_selection_to_mouse(&self, state: &mut State, row: u16) {
-        let row_in_content = row.saturating_sub(self.list_content_start);
-        let index = state.scroll_offset + row_in_content as usize;
-        if index < state.shown.len() {
-            state.selected = Some(index);
-        }
+#[cfg(test)]
+mod grid_tests {
+    #[test]
+    fn grid_navigation_steps_by_row_and_respects_hard_stop() {
+        assert_eq!(super::grid_neighbor(2, 11, 4, false, false), 6);
+        assert_eq!(super::grid_neighbor(2, 11, 4, true, true), 2);
+        assert_eq!(super::grid_neighbor(2, 11, 4, true, false), 10);
+        assert_eq!(super::grid_neighbor(9, 11, 4, false, false), 1);
+        assert_eq!(super::grid_neighbor(9, 11, 4, false, true), 9);
     }
 }

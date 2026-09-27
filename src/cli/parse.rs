@@ -1,3 +1,5 @@
+//! Merge defaults, file, environment, and explicit command arguments in order.
+
 mod helpers;
 mod overrides;
 
@@ -232,5 +234,89 @@ mod tests {
         assert!(
             matches!(error, CliError::Message(message) if message.contains("requires --cclip mode"))
         );
+    }
+
+    #[test]
+    fn preview_flag_enables_dmenu_mode_and_preserves_command() {
+        let command = parse_with_config(
+            &args(&["fsel", "--preview", "cat {}"]),
+            FselConfig::default(),
+        )
+        .unwrap();
+
+        let CliCommand::Run(opts) = command else {
+            panic!("expected run command");
+        };
+        assert!(opts.dmenu_mode);
+        assert_eq!(opts.dmenu_preview.as_deref(), Some("cat {}"));
+    }
+
+    #[test]
+    fn desktop_icon_options_parse_as_typed_values() {
+        let command = parse_with_config(
+            &args(&[
+                "fsel",
+                "--desktop-icons=no",
+                "--icon-position",
+                "left",
+                "--icon-preview-width",
+                "35",
+                "--icon-list-width",
+                "5",
+                "--icon-list-height",
+                "3",
+                "--icon-list-gap",
+                "2",
+                "--icon-list-vertical-align",
+                "-35",
+                "--icon-arrow-before",
+                "--icon-size",
+                "96",
+                "--icon-horizontal-align",
+                "25",
+                "--icon-vertical-align",
+                "75",
+                "--icon-theme",
+                "Papirus",
+            ]),
+            FselConfig::default(),
+        )
+        .unwrap();
+
+        let CliCommand::Run(opts) = command else {
+            panic!("expected run command");
+        };
+        assert_eq!(opts.desktop_icon_mode, crate::cli::DesktopIconMode::None);
+        assert_eq!(
+            opts.desktop_icon_position,
+            crate::ui::HorizontalPosition::Left
+        );
+        assert_eq!(opts.desktop_icon_preview_width_percent, 35);
+        assert_eq!(opts.desktop_icon_list_width, 5);
+        assert_eq!(opts.desktop_icon_list_height, 3);
+        assert_eq!(opts.desktop_icon_list_gap, 2);
+        assert_eq!(opts.desktop_icon_list_vertical_align_percent, -35);
+        assert!(opts.desktop_icon_arrow_before);
+        assert_eq!(opts.desktop_icon_size, 96);
+        assert_eq!(opts.desktop_icon_horizontal_align_percent, 25);
+        assert_eq!(opts.desktop_icon_vertical_align_percent, 75);
+        assert_eq!(opts.desktop_icon_theme.as_deref(), Some("Papirus"));
+    }
+
+    #[test]
+    fn launcher_visual_defaults_use_left_placement() {
+        let command = parse_with_config(&args(&["fsel"]), FselConfig::default()).unwrap();
+        let CliCommand::Run(opts) = command else {
+            panic!("expected run command");
+        };
+
+        assert_eq!(
+            opts.desktop_icon_position,
+            crate::ui::HorizontalPosition::Left
+        );
+        assert_eq!(opts.desktop_icon_horizontal_align_percent, 50);
+        assert_eq!(opts.desktop_icon_vertical_align_percent, 50);
+        assert_eq!(opts.desktop_icon_list_gap, 1);
+        assert_eq!(opts.desktop_icon_list_vertical_align_percent, 0);
     }
 }

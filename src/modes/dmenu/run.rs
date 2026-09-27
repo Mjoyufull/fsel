@@ -6,15 +6,17 @@ use eyre::{Result, WrapErr};
 
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::ListState;
+use scopeguard::defer;
+use std::cell::Cell;
 use std::io;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 
 use super::events::{LoopOutcome, handle_key_event, handle_mouse_event};
 use super::options::DmenuOptions;
+use super::panels::PreviewPanels;
 use super::render::draw_frame;
 
 /// Run dmenu mode
-pub fn run(cli: &Opts) -> Result<()> {
+pub async fn run(cli: &Opts) -> Result<()> {
     use ratatui::Terminal;
     use ratatui::backend::CrosstermBackend;
 
@@ -49,76 +51,135 @@ pub fn run(cli: &Opts) -> Result<()> {
         cli.dmenu_with_nth.as_ref(),
     );
 
-    let options = DmenuOptions::from_cli(cli);
+    let mut options = DmenuOptions::from_cli(cli);
+    let mut editor = super::movement::PanelEditor::new(cli.dmenu_panel_edit);
     crate::ui::terminal::setup_terminal(options.disable_mouse)?;
-
-    let run_result = catch_unwind(AssertUnwindSafe(|| -> Result<LoopOutcome> {
-        let backend = CrosstermBackend::new(io::stderr());
-        let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
-        terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
-        terminal.clear().wrap_err("Failed to clear terminal")?;
-
-        let input = options.input_config().init();
-
-        let mut ui = build_ui(cli, items, options.highlight_color);
-        let mut list_state = ListState::default();
-
-        loop {
-            sync_update_mode(options.term_is_foot, true);
-            terminal.draw(|frame| draw_frame(frame, &mut ui, &mut list_state, &options))?;
-            sync_update_mode(options.term_is_foot, false);
-
-            match input.next()? {
-                Event::Input(key) => {
-                    match handle_key_event(&mut ui, key, &options, terminal.size()?.height) {
-                        LoopOutcome::Continue => {}
-                        LoopOutcome::Exit => return Ok(LoopOutcome::Exit),
-                        LoopOutcome::Print(output) => {
-                            prepare_terminal_for_output(&mut terminal)?;
-                            return Ok(LoopOutcome::Print(output));
-                        }
-                    }
-                }
-                Event::Mouse(mouse_event) => {
-                    match handle_mouse_event(
-                        &mut ui,
-                        mouse_event,
-                        &options,
-                        terminal.size()?.height,
-                    ) {
-                        LoopOutcome::Continue => {}
-                        LoopOutcome::Exit => return Ok(LoopOutcome::Exit),
-                        LoopOutcome::Print(output) => {
-                            prepare_terminal_for_output(&mut terminal)?;
-                            return Ok(LoopOutcome::Print(output));
-                        }
-                    }
-                }
-                Event::Tick => {}
-                Event::Render => {}
-            }
-        }
-    }));
-
-    let shutdown_result = crate::ui::terminal::shutdown_terminal(options.disable_mouse);
-    match (run_result, shutdown_result) {
-        (Ok(Ok(LoopOutcome::Exit)), Ok(())) => Ok(()),
-        (Ok(Ok(LoopOutcome::Print(output))), Ok(())) => {
-            println!("{}", output);
-            Ok(())
-        }
-        (Ok(Ok(LoopOutcome::Continue)), Ok(())) => Ok(()),
-        (Ok(Err(error)), Ok(())) => Err(error),
-        (Ok(Err(error)), Err(shutdown_error)) => Err(error.wrap_err(format!(
-            "Failed to restore dmenu terminal state: {shutdown_error}"
-        ))),
-        (Ok(_), Err(error)) => Err(error.wrap_err("Failed to restore dmenu terminal state")),
-        (Err(payload), Ok(())) => resume_unwind(payload),
-        (Err(payload), Err(shutdown_error)) => {
-            eprintln!("Failed to restore dmenu terminal state after panic: {shutdown_error}");
-            resume_unwind(payload);
+    let terminal_active = Cell::new(true);
+    let disable_mouse = options.disable_mouse;
+    defer! {
+        if terminal_active.get() {
+            let _ = crate::ui::terminal::shutdown_terminal(disable_mouse);
         }
     }
+
+    let backend = CrosstermBackend::new(io::stderr());
+    let mut terminal = Terminal::new(backend).wrap_err("Failed to start crossterm terminal")?;
+    terminal.hide_cursor().wrap_err("Failed to hide cursor")?;
+    crate::ui::terminal::clear_fullscreen(&mut terminal).wrap_err("Failed to clear terminal")?;
+
+    let mut ui = build_ui(cli, items, options.highlight_color);
+    let mut list_state = ListState::default();
+    let mut probe = None;
+    let picker = if options.preview_command.is_some() || !options.custom_panels.is_empty() {
+        let mut initial_preview = PreviewPanels::new(
+            options.preview_command.clone(),
+            &options.custom_panels,
+            options.graphics_adapter.picker(),
+            !options.password_mode,
+        );
+        let mut render_result = Ok(());
+        terminal.draw(|frame| {
+            render_result = draw_frame(
+                frame,
+                &mut ui,
+                &mut list_state,
+                &options,
+                &mut initial_preview,
+            );
+        })?;
+        render_result?;
+        let result = crate::ui::graphics_probe::query_terminal(options.graphics_adapter.picker())
+            .wrap_err("Failed to preserve terminal input during graphics detection")?;
+        let picker = result.picker.clone();
+        probe = Some(result);
+        picker
+    } else {
+        options.graphics_adapter.picker()
+    };
+    options.graphics_adapter = crate::ui::GraphicsAdapter::detect(Some(&picker));
+    let mut input = options.input_config().init_async();
+    let mut preview = PreviewPanels::new(
+        options.preview_command.clone(),
+        &options.custom_panels,
+        picker,
+        !options.password_mode,
+    );
+    preview.request(&ui, &options);
+    let mut needs_redraw = true;
+
+    let outcome = loop {
+        if needs_redraw {
+            sync_update_mode(options.term_is_foot, true);
+            let frame_result = (|| -> Result<()> {
+                let mut render_result = Ok(());
+                terminal.draw(|frame| {
+                    render_result =
+                        draw_frame(frame, &mut ui, &mut list_state, &options, &mut preview);
+                    editor.render(frame, &options);
+                })?;
+                render_result
+            })();
+            sync_update_mode(options.term_is_foot, false);
+            frame_result?;
+            needs_redraw = false;
+        }
+
+        tokio::select! {
+            (index, Some(result)) = preview.next_result() => {
+                preview.apply_result(index, result);
+                needs_redraw = true;
+            }
+            maybe_event = input.next() => {
+                let Some(event) = maybe_event else {
+                    break LoopOutcome::Exit;
+                };
+                if editor.handle(&event, &mut options, terminal.size()?.into()) {
+                    needs_redraw = true;
+                    preview.request(&ui, &options);
+                    continue;
+                }
+                let event_outcome = match event {
+                    Event::Input(key) => {
+                        needs_redraw = true;
+                        handle_key_event(&mut ui, key, &options, terminal.size()?.into())
+                    }
+                    Event::Mouse(mouse_event) => {
+                        needs_redraw = true;
+                        handle_mouse_event(
+                            &mut ui,
+                            mouse_event,
+                            &options,
+                            terminal.size()?.into(),
+                        )
+                    }
+                    Event::Render => {
+                        needs_redraw = true;
+                        LoopOutcome::Continue
+                    }
+                    Event::Tick => LoopOutcome::Continue,
+                };
+
+                match event_outcome {
+                    LoopOutcome::Continue => preview.request(&ui, &options),
+                    LoopOutcome::Exit => break LoopOutcome::Exit,
+                    LoopOutcome::Print(output) => break LoopOutcome::Print(output),
+                }
+            }
+        }
+    };
+
+    input.shutdown().await;
+    drop(probe);
+    prepare_terminal_for_output(&mut terminal)?;
+    crate::ui::terminal::shutdown_terminal(options.disable_mouse)
+        .wrap_err("Failed to restore dmenu terminal state")?;
+    terminal_active.set(false);
+
+    if let LoopOutcome::Print(output) = outcome {
+        println!("{output}");
+    }
+    preview.shutdown().await;
+    Ok(())
 }
 
 fn build_ui<'a>(

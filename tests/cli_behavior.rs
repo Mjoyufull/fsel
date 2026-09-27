@@ -38,6 +38,26 @@ fn isolated_command(runtime_dir: &Path) -> Command {
 }
 
 #[test]
+fn persistent_rejects_incompatible_modes_before_terminal_setup() {
+    let directory = isolated_runtime_dir("persistent-validation");
+    for args in [
+        vec!["--persistent"],
+        vec!["--detach", "--persistent", "--tty"],
+        vec!["--detach", "--persistent", "--no-exec"],
+        vec!["--detach", "--persistent", "--dmenu"],
+        vec!["--detach", "--persistent", "--stdout"],
+        vec!["--detach", "--persistent", "-p", "Fixture"],
+        vec!["--detach", "--persistent", "--cclip"],
+        vec!["--detach", "--persistent", "--refresh-cache"],
+    ] {
+        let output = isolated_command(&directory).args(args).output().unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("--persistent requires --detach"));
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn version_flag_exits_successfully() {
     let output = Command::new(binary())
         .arg("--version")
@@ -53,6 +73,47 @@ fn version_flag_exits_successfully() {
         String::from_utf8_lossy(&output.stdout).trim(),
         env!("CARGO_PKG_VERSION")
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_lookup_preserves_root_alias_precedence_and_cached_winner() {
+    let runtime = isolated_runtime_dir("root-alias");
+    let first = runtime.join("first");
+    let second = runtime.join("second/applications");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    fs::create_dir_all(runtime.join("data")).unwrap();
+    std::os::unix::fs::symlink(&first, runtime.join("data/applications")).unwrap();
+    for (root, executable) in [(&first, "/bin/true"), (&second, "/bin/false")] {
+        fs::write(
+            root.join("fixture.desktop"),
+            format!(
+                "[Desktop Entry]\nType=Application\nName=FselTraversalFixture\nExec={executable}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(root.join(".ignore"), "*.desktop\n").unwrap();
+    }
+    for _ in 0..2 {
+        let output = isolated_command(&runtime)
+            .env("XDG_DATA_DIRS", runtime.join("second"))
+            .args([
+                "--no-exec",
+                "--auto-hide-duplicates",
+                "-p",
+                "FselTraversalFixture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "/bin/true");
+    }
+    fs::remove_dir_all(runtime).unwrap();
 }
 
 #[test]

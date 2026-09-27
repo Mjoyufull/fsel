@@ -15,6 +15,7 @@ pub mod select;
 mod session;
 mod state;
 mod tags;
+mod text_preview;
 
 // Re-export main entry point
 pub use run::run;
