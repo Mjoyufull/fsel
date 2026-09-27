@@ -91,6 +91,11 @@ title_panel_position = "top"
 # WARNING: DO NOT put color/UI options here - they belong at the root level!
 [app_launcher]
 
+# Grid columns: 0 keeps the normal list; 1-64 requests a grid that fits the available width
+grid_columns = 0
+# Rows per grid cell, including the label (2-16); ignored while the grid is disabled
+grid_row_height = 4
+
 # Filter apps based on OnlyShowIn/NotShowIn and $XDG_CURRENT_DESKTOP
 # Hides apps not meant for your desktop environment
 filter_desktop = true

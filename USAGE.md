@@ -686,7 +686,7 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 
 **`[app_launcher]` overrides (`FSEL_APP_LAUNCHER_*`):**
 
-`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `ICON_MODE`, `ICON_POSITION`, `ICON_DESCRIPTION_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_LIST_VERTICAL_ALIGN_PERCENT`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
+`FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `GRID_COLUMNS`, `GRID_ROW_HEIGHT`, `ICON_MODE`, `ICON_POSITION`, `ICON_DESCRIPTION_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_LIST_VERTICAL_ALIGN_PERCENT`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
 
 Keybinds are not configurable via environment variables; use `~/.config/fsel/keybinds.toml` or the `[keybinds]` section in `config.toml`. When both are present, the embedded `[keybinds]` section takes precedence.
 
@@ -721,7 +721,7 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - General: `terminal_launcher` (use `"tty"` for TTY mode, same as -t/--tty), `keybinds`
 
 **[app_launcher] Section (strict validation):**
-- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`, `icon_mode`, `icon_position`, `icon_description_position`, `icon_preview_width_percent`, `icon_list_width`, `icon_list_height`, `icon_list_gap`, `icon_list_vertical_align_percent`, `icon_arrow_before`, `icon_size`, `icon_horizontal_align_percent`, `icon_vertical_align_percent`, `icon_theme`
+- `filter_desktop`, `filter_actions`, `auto_hide_duplicates`, `list_executables_in_path`, `hide_before_typing`, `match_mode`, `ranking_mode`, `pinned_order`, `confirm_first_launch`, `prefix_depth`, `grid_columns`, `grid_row_height`, `icon_mode`, `icon_position`, `icon_description_position`, `icon_preview_width_percent`, `icon_list_width`, `icon_list_height`, `icon_list_gap`, `icon_list_vertical_align_percent`, `icon_arrow_before`, `icon_size`, `icon_horizontal_align_percent`, `icon_vertical_align_percent`, `icon_theme`
 
 **[dmenu] Section:**
 - Colors: `highlight_color`, `main_border_color`, `items_border_color`, `input_border_color`, `main_text_color`, `items_text_color`, `input_text_color`, `header_title_color`
@@ -738,7 +738,41 @@ This means you've placed a **color/UI option inside the [app_launcher] section**
 - Images: `image_preview`, `hide_inline_image_message`
 # Panel layouts
 
-## Pinned application colors
+## Application grid
+
+The launcher has an opt-in grid; ordinary lists, dmenu, and cclip retain their layouts.
+
+```sh
+fsel --no-exec --app-grid 4 --desktop-icons=both --grid-row-height 4
+fsel --no-exec --app-grid 4 --desktop-icons=list --info-position left --info-size 30
+```
+
+`--app-grid` requests up to 64 columns; zero disables the grid. Narrow panels reduce the column
+count to keep cells at least eight columns wide where possible. `--grid-row-height` sets cell
+height from 2–16 terminal rows (default 4). With list icons enabled, artwork occupies the upper
+rows and the label/selection marker occupies the last row. Without list icons, the grid shows
+text only. Names are clipped to their own cells; icons retain proportional sizing and the existing
+normalization/cache behavior. `--icon-list-width` controls artwork width; the ordinary list's
+height, gap, and arrow-before placement do not change grid geometry. Negative artwork alignment
+retains its documented opt-in overflow behavior.
+
+At rotation zero, Left/Right move one item and Up/Down move one grid row. Quarter turns use
+column-first ordering, and arrow movement follows the visible orientation. Tab/Shift+Tab move
+one logical item. Search, mouse selection, pins, pinned colors, and backgrounds work normally.
+Scrolling advances a complete grid row (or column after a quarter turn); resizing keeps the
+selected item visible. With `hard_stop`, moves beyond available items stop; otherwise they wrap.
+
+```toml
+[app_launcher]
+grid_columns = 4
+grid_row_height = 4
+icon_mode = "both"
+```
+
+Environment overrides are `FSEL_APP_LAUNCHER_GRID_COLUMNS` and
+`FSEL_APP_LAUNCHER_GRID_ROW_HEIGHT`. These launcher-specific settings do not change dmenu or cclip.
+
+## Pinned row styling
 
 Pinned launcher rows can use their own text and background colors, independently of the pin glyph.
 Put these optional settings at the root of the configuration, outside `[app_launcher]`:
