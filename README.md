@@ -441,7 +441,8 @@ hl.config({
 window-rule {
     match title="launcher"
     open-floating true
-    default-floating-size width=500 height=430
+    default-column-width { fixed 500; }
+    default-window-height { fixed 430; }
 }
 
 # Add inside binds { ... }
