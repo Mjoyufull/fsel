@@ -225,6 +225,8 @@ fn decode_content_for_view(mime_type: &str, bytes: Vec<u8>, raw_content: bool) -
     Some(content_for_view(mime_type, &content, raw_content))
 }
 
+// `try_update` replaces `fetch_update` but needs Rust 1.95; MSRV is 1.94.
+#[allow(deprecated)]
 fn acquire_content_permit(in_flight: &Arc<AtomicUsize>) -> Option<ContentPermit> {
     in_flight
         .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
