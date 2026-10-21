@@ -506,6 +506,8 @@ image and text fullscreen previews. Disabling inline images does not disable tex
 - `Alt+Delete` - Delete selected clipboard entry (selection stays at the same physical index; next item becomes selected)
 - `Esc` - Exit without copying
 - Arrow keys - Navigate
+- `Ctrl+U` / `Ctrl+D` - Move selection half a page up / down
+- `Ctrl+W` / `Ctrl+Backspace` - Delete the last word of the query or tag prompt
 - Type to filter
 
 **Note:** Tag creation and management requires cclip with tag support. Tags appear as `[tagname]` prefixes in the clipboard item list.
@@ -807,6 +809,8 @@ Note: Bare `FSEL_*` launcher keys set root defaults. `[app_launcher]` in `config
 **`[app_launcher]` overrides (`FSEL_APP_LAUNCHER_*`):**
 
 `FILTER_DESKTOP`, `FILTER_ACTIONS`, `LIST_EXECUTABLES_IN_PATH`, `HIDE_BEFORE_TYPING`, `LAUNCH_PREFIX`, `MATCH_MODE`, `RANKING_MODE`, `PINNED_ORDER`, `CONFIRM_FIRST_LAUNCH`, `PREFIX_DEPTH`, `GRID_COLUMNS`, `GRID_ROW_HEIGHT`, `ICON_MODE`, `ICON_POSITION`, `ICON_DESCRIPTION_POSITION`, `ICON_PREVIEW_WIDTH_PERCENT`, `ICON_LIST_WIDTH`, `ICON_LIST_HEIGHT`, `ICON_LIST_GAP`, `ICON_LIST_VERTICAL_ALIGN_PERCENT`, `ICON_ARROW_BEFORE`, `ICON_SIZE`, `ICON_HORIZONTAL_ALIGN_PERCENT`, `ICON_VERTICAL_ALIGN_PERCENT`, `ICON_THEME` (each prefixed with `FSEL_APP_LAUNCHER_`)
+
+In every mode, `Ctrl+W` or `Ctrl+Backspace` deletes the last word of the query (`delete_word`), and `Ctrl+U` / `Ctrl+D` move the selection half a page (`half_page_up` / `half_page_down`). Terminals usually send Ctrl+Backspace as Ctrl+H, so `delete_word` binds Ctrl+H as well.
 
 Keybinds are not configurable via environment variables; use `~/.config/fsel/keybinds.toml` or the `[keybinds]` section in `config.toml`. When both are present, the embedded `[keybinds]` section takes precedence.
 

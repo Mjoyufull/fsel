@@ -14,6 +14,9 @@ highlight_color = "LightBlue"
 # pin = [{ key = "space", modifiers = "ctrl" }]
 # hide = [{ key = "delete", modifiers = "alt" }]
 # unhide_last = [{ key = "u", modifiers = "alt" }]
+# delete_word = [{ key = "w", modifiers = "ctrl" }, { key = "h", modifiers = "ctrl" }]
+# half_page_up = [{ key = "u", modifiers = "ctrl" }]
+# half_page_down = [{ key = "d", modifiers = "ctrl" }]
 
 # Cursor character in search box
 cursor = "█"

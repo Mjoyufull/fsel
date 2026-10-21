@@ -17,6 +17,9 @@ enum KeyAction {
     Select,
     Input(char),
     Backspace,
+    DeleteWord,
+    HalfPageDown,
+    HalfPageUp,
     First,
     Last,
     Down,
@@ -40,6 +43,12 @@ fn key_action(keybinds: &Keybinds, key: KeyEvent) -> KeyAction {
         KeyAction::Exit
     } else if keybinds.matches_select(code, modifiers) {
         KeyAction::Select
+    } else if keybinds.matches_delete_word(code, modifiers) {
+        KeyAction::DeleteWord
+    } else if keybinds.matches_half_page_down(code, modifiers) {
+        KeyAction::HalfPageDown
+    } else if keybinds.matches_half_page_up(code, modifiers) {
+        KeyAction::HalfPageUp
     } else if keybinds.matches_backspace(code, modifiers) {
         KeyAction::Backspace
     } else if keybinds.matches_left(code, modifiers) {
@@ -131,6 +140,15 @@ pub(super) async fn handle_key_event(
         KeyAction::Backspace => {
             pop_char(ctx.ui);
         }
+        KeyAction::DeleteWord => {
+            delete_word(ctx.ui);
+        }
+        KeyAction::HalfPageDown => {
+            move_half_page(ctx, true)?;
+        }
+        KeyAction::HalfPageUp => {
+            move_half_page(ctx, false)?;
+        }
         KeyAction::First => {
             if matches!(ctx.ui.tag_mode, TagMode::Normal) {
                 move_to_first(ctx.ui);
@@ -171,6 +189,8 @@ fn oriented_action(action: KeyAction, rotation: u16, normal: bool) -> KeyAction 
     match (rotation >= 180, axis_action) {
         (true, KeyAction::Down) => KeyAction::Up,
         (true, KeyAction::Up) => KeyAction::Down,
+        (true, KeyAction::HalfPageDown) => KeyAction::HalfPageUp,
+        (true, KeyAction::HalfPageUp) => KeyAction::HalfPageDown,
         (_, other) => other,
     }
 }
@@ -201,6 +221,39 @@ fn pop_char(ui: &mut crate::ui::DmenuUI<'_>) {
             ui.filter();
         }
     }
+}
+
+fn delete_word(ui: &mut crate::ui::DmenuUI<'_>) {
+    match &mut ui.tag_mode {
+        TagMode::PromptingTagName { input, .. }
+        | TagMode::PromptingTagColor { input, .. }
+        | TagMode::PromptingTagEmoji { input, .. }
+        | TagMode::RemovingTag { input, .. } => crate::ui::delete_word(input),
+        TagMode::Normal => {
+            crate::ui::delete_word(&mut ui.query);
+            ui.filter();
+        }
+    }
+}
+
+fn move_half_page(ctx: &mut EventContext<'_, '_>, forward: bool) -> Result<()> {
+    if !matches!(ctx.ui.tag_mode, TagMode::Normal) {
+        return Ok(());
+    }
+
+    if let Some(selected) = ctx.ui.selected {
+        let max_visible = ctx.options.max_visible_items(ctx.terminal.size()?.into());
+        let step = crate::ui::half_page_step(max_visible, 1);
+        ctx.ui.selected = Some(crate::ui::half_page_target(
+            selected,
+            ctx.ui.shown.len(),
+            step,
+            forward,
+        ));
+        keep_selection_visible(ctx.ui, max_visible);
+    }
+
+    Ok(())
 }
 
 fn handle_down(ctx: &mut EventContext<'_, '_>) -> Result<()> {
@@ -342,6 +395,37 @@ up = [{ key = "k", modifiers = "alt" }]
                 KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL)
             ),
             KeyAction::Ignore
+        );
+    }
+
+    #[test]
+    fn default_word_and_half_page_keys_are_classified() {
+        let keybinds = Keybinds::default();
+
+        assert_eq!(
+            key_action(
+                &keybinds,
+                KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL)
+            ),
+            KeyAction::DeleteWord
+        );
+        assert_eq!(
+            key_action(
+                &keybinds,
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)
+            ),
+            KeyAction::HalfPageDown
+        );
+        assert_eq!(
+            key_action(
+                &keybinds,
+                KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)
+            ),
+            KeyAction::HalfPageUp
+        );
+        assert_eq!(
+            super::oriented_action(KeyAction::HalfPageDown, 180, true),
+            KeyAction::HalfPageUp
         );
     }
 }

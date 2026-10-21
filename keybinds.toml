@@ -16,6 +16,10 @@ left = ["left"]
 # Jump to last item in list
 right = ["right"]
 
+# Move selection half a page up / down (stops at the ends of the list)
+half_page_up = [{ key = "u", modifiers = "ctrl" }]
+half_page_down = [{ key = "d", modifiers = "ctrl" }]
+
 # ===== ACTIONS =====
 
 # Launch selected app or select item (also: Ctrl+Y)
@@ -35,6 +39,14 @@ unhide_last = [{ key = "u", modifiers = "alt" }]
 
 # Delete character from search query
 backspace = ["backspace"]
+
+# Delete the last word from the search query (or the tag prompt in cclip mode)
+# Note: most terminals send Ctrl+Backspace as Ctrl+H, so both are bound by default
+delete_word = [
+    { key = "w", modifiers = "ctrl" },
+    { key = "backspace", modifiers = "ctrl" },
+    { key = "h", modifiers = "ctrl" },
+]
 
 # ===== CCLIP MODE ONLY =====
 # These keybinds only work in clipboard history mode (fsel --cclip)

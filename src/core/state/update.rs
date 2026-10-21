@@ -6,6 +6,7 @@ pub fn update(state: &mut State, msg: Message, hard_stop: bool, max_visible: usi
         Message::SelectIndex(index) => select_index(state, index),
         Message::CharInput(character) => update_query(state, Some(character), "User typed"),
         Message::Backspace => update_query(state, None, "User pressed backspace"),
+        Message::DeleteWord => delete_word(state),
         Message::MoveUp => move_up(state, hard_stop, max_visible),
         Message::MoveDown => move_down(state, hard_stop, max_visible),
         Message::MoveFirst => move_first(state),
@@ -48,6 +49,21 @@ fn update_query(state: &mut State, character: Option<char>, reason: &str) {
             None => reason.to_string(),
         };
         crate::core::debug_logger::log_query_change(&old_query, &state.query, &message);
+    }
+
+    state.filter();
+}
+
+fn delete_word(state: &mut State) {
+    let old_query = state.query.clone();
+    crate::ui::delete_word(&mut state.query);
+
+    if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::core::debug_logger::log_query_change(
+            &old_query,
+            &state.query,
+            "User deleted a word",
+        );
     }
 
     state.filter();
