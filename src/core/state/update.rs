@@ -55,10 +55,12 @@ fn update_query(state: &mut State, character: Option<char>, reason: &str) {
 }
 
 fn delete_word(state: &mut State) {
-    let old_query = state.query.clone();
+    let old_query = crate::cli::DEBUG_ENABLED
+        .load(std::sync::atomic::Ordering::Relaxed)
+        .then(|| state.query.clone());
     crate::ui::delete_word(&mut state.query);
 
-    if crate::cli::DEBUG_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+    if let Some(old_query) = old_query {
         crate::core::debug_logger::log_query_change(
             &old_query,
             &state.query,

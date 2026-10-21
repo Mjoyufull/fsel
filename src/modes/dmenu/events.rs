@@ -279,12 +279,12 @@ fn move_half_page(
 
     let capacity = options.result_layout(terminal_area, ui).capacity();
     let step = crate::ui::half_page_step(capacity, 1);
-    let forward = forward != (options.panels.rotation >= 180);
+    let oriented_forward = forward != (options.panels.rotation >= 180);
     ui.selected = Some(crate::ui::half_page_target(
         selected,
         ui.shown.len(),
         step,
-        forward,
+        oriented_forward,
     ));
 
     options.result_layout(terminal_area, ui);

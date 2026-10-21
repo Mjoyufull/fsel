@@ -14,8 +14,8 @@ pub(crate) fn delete_word(text: &mut String) {
 
 /// Half of `capacity`, rounded down to whole rows of `row_len` items, never below one row.
 pub(crate) fn half_page_step(capacity: usize, row_len: usize) -> usize {
-    let row_len = row_len.max(1);
-    (capacity / row_len / 2).max(1) * row_len
+    let items_per_row = row_len.max(1);
+    (capacity / items_per_row / 2).max(1) * items_per_row
 }
 
 /// Index `step` items away from `selected`, clamped to the list instead of wrapping.

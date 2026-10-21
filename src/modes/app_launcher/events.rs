@@ -159,8 +159,8 @@ fn move_half_page(
     let layout = crate::ui::launcher_result_layout(terminal_area, cli);
     if let Some(selected) = state.selected {
         let step = crate::ui::half_page_step(layout.capacity(), layout.scroll_step());
-        let forward = forward != (cli.panels.rotation >= 180);
-        let next = crate::ui::half_page_target(selected, state.shown.len(), step, forward);
+        let oriented_forward = forward != (cli.panels.rotation >= 180);
+        let next = crate::ui::half_page_target(selected, state.shown.len(), step, oriented_forward);
         crate::core::state::update(
             state,
             Message::SelectIndex(next),
