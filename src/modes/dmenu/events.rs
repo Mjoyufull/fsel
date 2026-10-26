@@ -39,6 +39,17 @@ pub(super) fn handle_key_event(
         {
             return handle_submit(ui, options);
         }
+        (code, modifiers) if options.keybinds.matches_delete_word(code, modifiers) => {
+            crate::ui::delete_word(&mut ui.query);
+            ui.filter();
+            auto_select_if_single_match(ui, options);
+        }
+        (code, modifiers) if options.keybinds.matches_half_page_up(code, modifiers) => {
+            move_half_page(ui, options, terminal_area, false);
+        }
+        (code, modifiers) if options.keybinds.matches_half_page_down(code, modifiers) => {
+            move_half_page(ui, options, terminal_area, true);
+        }
         (code, modifiers)
             if matches_dmenu_binding(
                 &options.keybinds,
@@ -256,6 +267,29 @@ fn move_selection(
     options.result_layout(terminal_area, ui);
 }
 
+fn move_half_page(
+    ui: &mut DmenuUI,
+    options: &DmenuOptions,
+    terminal_area: ratatui::layout::Rect,
+    forward: bool,
+) {
+    let Some(selected) = ui.selected else {
+        return;
+    };
+
+    let capacity = options.result_layout(terminal_area, ui).capacity();
+    let step = crate::ui::half_page_step(capacity, 1);
+    let oriented_forward = forward != (options.panels.rotation >= 180);
+    ui.selected = Some(crate::ui::half_page_target(
+        selected,
+        ui.shown.len(),
+        step,
+        oriented_forward,
+    ));
+
+    options.result_layout(terminal_area, ui);
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -414,6 +448,31 @@ up = [{ key = "k", modifiers = "alt" }]
             ratatui::layout::Rect::new(0, 0, 80, 20),
         );
         assert_eq!(backspace_ui.query, "a");
+    }
+
+    #[test]
+    fn default_word_delete_and_half_page_keys() {
+        let options = DmenuOptions::from_cli(&Opts::default());
+        let items = (0..40)
+            .map(|index| Item::new_simple(index.to_string(), index.to_string(), index + 1))
+            .collect();
+        let mut ui = DmenuUI::new(items, false, false);
+        ui.filter();
+        ui.selected = Some(0);
+        let area = ratatui::layout::Rect::new(0, 0, 80, 24);
+        let half = options.result_layout(area, &mut ui).capacity() / 2;
+        let ctrl = |character| KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL);
+
+        handle_key_event(&mut ui, ctrl('d'), &options, area);
+        assert_eq!(ui.selected, Some(half));
+        handle_key_event(&mut ui, ctrl('u'), &options, area);
+        assert_eq!(ui.selected, Some(0));
+        handle_key_event(&mut ui, ctrl('u'), &options, area);
+        assert_eq!(ui.selected, Some(0));
+
+        ui.query = "foo bar".to_string();
+        handle_key_event(&mut ui, ctrl('w'), &options, area);
+        assert_eq!(ui.query, "foo ");
     }
 
     #[test]

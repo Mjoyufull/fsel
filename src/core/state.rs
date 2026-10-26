@@ -178,6 +178,8 @@ pub enum Message {
     CharInput(char),
     /// Backspace pressed.
     Backspace,
+    /// Delete the last word of the query.
+    DeleteWord,
     /// Move selection up.
     MoveUp,
     /// Move selection down.

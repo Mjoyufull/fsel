@@ -3,6 +3,7 @@
 mod app_list;
 mod app_ui;
 mod dmenu_ui;
+mod editing;
 mod graphics;
 pub(crate) mod graphics_probe;
 mod input;
@@ -19,6 +20,7 @@ pub(crate) use app_list::{launcher_list_icon_area, launcher_result_layout, launc
 pub use app_ui::{AppIcons, UI};
 pub(crate) use app_ui::{ListIconPlacement, launcher_preview_icon_area};
 pub use dmenu_ui::{DmenuUI, TagMode};
+pub(crate) use editing::{delete_word, half_page_step, half_page_target};
 pub use graphics::{DISPLAY_STATE, DisplayState, GraphicsAdapter, ImageManager};
 #[allow(unused_imports)]
 pub use input::{AsyncInput, Config as InputConfig, Event as InputEvent, Input};

@@ -25,6 +25,12 @@ pub struct Keybinds {
     pub unhide_last: Vec<KeyBind>,
     #[serde(default = "default_backspace")]
     pub backspace: Vec<KeyBind>,
+    #[serde(default = "default_delete_word")]
+    pub delete_word: Vec<KeyBind>,
+    #[serde(default = "default_half_page_up")]
+    pub half_page_up: Vec<KeyBind>,
+    #[serde(default = "default_half_page_down")]
+    pub half_page_down: Vec<KeyBind>,
     #[serde(default = "default_image_preview")]
     pub image_preview: Vec<KeyBind>,
     #[serde(default = "default_tag")]
@@ -46,6 +52,9 @@ impl Default for Keybinds {
             hide: default_hide(),
             unhide_last: default_unhide_last(),
             backspace: default_backspace(),
+            delete_word: default_delete_word(),
+            half_page_up: default_half_page_up(),
+            half_page_down: default_half_page_down(),
             image_preview: default_image_preview(),
             tag: default_tag(),
             cclip_delete: default_cclip_delete(),
@@ -220,6 +229,38 @@ fn default_backspace() -> Vec<KeyBind> {
     vec![KeyBind::Simple("backspace".to_string())]
 }
 
+fn default_delete_word() -> Vec<KeyBind> {
+    // Most terminals send Ctrl+Backspace as ^H, which crossterm reports as Ctrl+H
+    vec![
+        KeyBind::WithMod {
+            key: "w".to_string(),
+            modifiers: "ctrl".to_string(),
+        },
+        KeyBind::WithMod {
+            key: "backspace".to_string(),
+            modifiers: "ctrl".to_string(),
+        },
+        KeyBind::WithMod {
+            key: "h".to_string(),
+            modifiers: "ctrl".to_string(),
+        },
+    ]
+}
+
+fn default_half_page_up() -> Vec<KeyBind> {
+    vec![KeyBind::WithMod {
+        key: "u".to_string(),
+        modifiers: "ctrl".to_string(),
+    }]
+}
+
+fn default_half_page_down() -> Vec<KeyBind> {
+    vec![KeyBind::WithMod {
+        key: "d".to_string(),
+        modifiers: "ctrl".to_string(),
+    }]
+}
+
 fn default_image_preview() -> Vec<KeyBind> {
     // Note: Ctrl+I is the same as Tab in terminals, so we use Alt+I instead
     vec![KeyBind::WithMod {
@@ -293,6 +334,18 @@ impl Keybinds {
         self.backspace.iter().any(|kb| kb.matches(code, mods))
     }
 
+    pub fn matches_delete_word(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        self.delete_word.iter().any(|kb| kb.matches(code, mods))
+    }
+
+    pub fn matches_half_page_up(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        self.half_page_up.iter().any(|kb| kb.matches(code, mods))
+    }
+
+    pub fn matches_half_page_down(&self, code: KeyCode, mods: KeyModifiers) -> bool {
+        self.half_page_down.iter().any(|kb| kb.matches(code, mods))
+    }
+
     pub fn matches_image_preview(&self, code: KeyCode, mods: KeyModifiers) -> bool {
         self.image_preview.iter().any(|kb| kb.matches(code, mods))
     }
@@ -353,6 +406,18 @@ mod tests {
         assert!(keybinds.matches_hide(KeyCode::Delete, KeyModifiers::ALT));
         assert!(keybinds.matches_unhide_last(KeyCode::Char('u'), KeyModifiers::ALT));
         assert!(!keybinds.matches_hide(KeyCode::Delete, KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn default_word_and_half_page_bindings() {
+        let keybinds = Keybinds::default();
+
+        assert!(keybinds.matches_delete_word(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        assert!(keybinds.matches_delete_word(KeyCode::Char('h'), KeyModifiers::CONTROL));
+        assert!(keybinds.matches_delete_word(KeyCode::Backspace, KeyModifiers::CONTROL));
+        assert!(!keybinds.matches_delete_word(KeyCode::Backspace, KeyModifiers::NONE));
+        assert!(keybinds.matches_half_page_up(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        assert!(keybinds.matches_half_page_down(KeyCode::Char('d'), KeyModifiers::CONTROL));
     }
 
     #[test]

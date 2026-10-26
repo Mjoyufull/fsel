@@ -45,8 +45,16 @@ fn handle_key_event(
         Message::MoveUp
     } else if cli.keybinds.matches_right(key.code, key.modifiers) {
         Message::MoveDown
+    } else if cli.keybinds.matches_delete_word(key.code, key.modifiers) {
+        Message::DeleteWord
     } else if cli.keybinds.matches_backspace(key.code, key.modifiers) {
         Message::Backspace
+    } else if cli.keybinds.matches_half_page_up(key.code, key.modifiers)
+        || cli.keybinds.matches_half_page_down(key.code, key.modifiers)
+    {
+        let forward = cli.keybinds.matches_half_page_down(key.code, key.modifiers);
+        move_half_page(state, cli, terminal_area, forward);
+        return;
     } else if cli.keybinds.matches_pin(key.code, key.modifiers) {
         toggle_selected_pin(state, db);
         refresh_info(state, cli);
@@ -139,6 +147,28 @@ fn handle_key_event(
     crate::core::state::update(state, oriented, cli.hard_stop, max_visible);
     crate::ui::launcher_result_layout(terminal_area, cli)
         .keep_visible(state.selected, &mut state.scroll_offset);
+    refresh_info(state, cli);
+}
+
+fn move_half_page(
+    state: &mut State,
+    cli: &Opts,
+    terminal_area: ratatui::layout::Rect,
+    forward: bool,
+) {
+    let layout = crate::ui::launcher_result_layout(terminal_area, cli);
+    if let Some(selected) = state.selected {
+        let step = crate::ui::half_page_step(layout.capacity(), layout.scroll_step());
+        let oriented_forward = forward != (cli.panels.rotation >= 180);
+        let next = crate::ui::half_page_target(selected, state.shown.len(), step, oriented_forward);
+        crate::core::state::update(
+            state,
+            Message::SelectIndex(next),
+            cli.hard_stop,
+            layout.capacity(),
+        );
+    }
+    layout.keep_visible(state.selected, &mut state.scroll_offset);
     refresh_info(state, cli);
 }
 
