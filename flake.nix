@@ -7,17 +7,27 @@
     naersk.url = "github:nix-community/naersk";
   };
 
-  outputs = { self, nixpkgs, flake-utils, naersk }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      naersk,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = import nixpkgs { inherit system; };
-        naersk' = pkgs.callPackage naersk {};
+        naersk' = pkgs.callPackage naersk { };
 
-        buildInputs = with pkgs; [
-          pkg-config
-        ] ++ lib.optionals stdenv.isDarwin [
-          darwin.apple_sdk.frameworks.Security
-        ];
+        buildInputs =
+          with pkgs;
+          [
+            pkg-config
+          ]
+          ++ lib.optionals stdenv.isDarwin [
+            darwin.apple_sdk.frameworks.Security
+          ];
 
       in
       {
