@@ -1,3 +1,15 @@
+[Unreleased]
+
+Changed
+
+- Refresh direct and transitive dependencies, including `redb` 4.4.0,
+  `ratatui-image` 11.1.0, `resvg` 0.49.0, and `html-escape` 0.3.0.
+- Remove the unused `which` dependency.
+
+Fixed
+
+- Update Tokio to 1.54.1, addressing RUSTSEC-2026-0386 (I/O safety in `AsyncFd` constructors).
+
 [4.0.0-nyamabeetle]
 
 Breaking changes
