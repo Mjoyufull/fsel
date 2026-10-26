@@ -1,5 +1,9 @@
 [Unreleased]
 
+Breaking changes
+
+- Raise the minimum supported stable Rust version from 1.94 to 1.99.1.
+
 Changed
 
 - Refresh direct and transitive dependencies, including `redb` 4.4.0,
