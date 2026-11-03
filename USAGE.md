@@ -320,6 +320,10 @@ git branch | fsel --dmenu
 find . -print0 | fsel --dmenu0
 ```
 
+Both newline- and null-separated input accept non-UTF-8 bytes. Invalid UTF-8 sequences
+are replaced with `�` for display, matching, and text output; they are not preserved
+byte-for-byte. Valid text, including IDs from `cliphist list`, is unchanged.
+
 ### Preview Commands
 
 `--preview` accepts a shell command and implies `--dmenu`. Its core fzf-style placeholders are
