@@ -1,3 +1,22 @@
+[Unreleased]
+
+Breaking changes
+
+- Raise the minimum supported stable Rust version from 1.94 to 1.99.1.
+- Remove the Intel macOS (`x86_64-darwin`) flake output because current nixpkgs
+  no longer supports it. Apple Silicon macOS and both Linux outputs remain available.
+
+Changed
+
+- Refresh direct and transitive dependencies, including `redb` 4.4.0,
+  `ratatui-image` 11.1.0, `resvg` 0.49.0, and `html-escape` 0.3.0.
+- Refresh Nix inputs and use the locked Fenix stable toolchain for builds and the dev shell.
+- Remove the unused `which` dependency.
+
+Fixed
+
+- Update Tokio to 1.54.1, addressing RUSTSEC-2026-0386 (I/O safety in `AsyncFd` constructors).
+
 [4.0.0-nyamabeetle]
 
 Breaking changes

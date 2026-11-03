@@ -33,7 +33,8 @@ Use GitHub issues and pull requests:
 
 ## Setup
 
-fsel currently targets stable Rust `1.94+`.
+fsel currently targets stable Rust `1.99.1+`.
+Nix builds and `nix develop` use the stable Fenix toolchain pinned in `flake.lock`.
 
 ```sh
 git clone https://github.com/YOUR_USERNAME/fsel.git

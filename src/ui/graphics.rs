@@ -984,10 +984,8 @@ fn svg_options(load_system_fonts: bool) -> resvg::usvg::Options<'static> {
                     return None;
                 }
                 let pixels = u64::from(width).checked_mul(u64::from(height))?;
-                // `try_update` replaces `fetch_update` but needs Rust 1.95; MSRV is 1.94.
-                #[allow(deprecated)]
                 remaining_raster_pixels
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |remaining| {
                         remaining.checked_sub(pixels)
                     })
                     .ok()?;

@@ -4,20 +4,40 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    naersk.url = "github:nix-community/naersk";
+    naersk = {
+      url = "github:nix-community/naersk";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.fenix.follows = "fenix";
+    };
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, naersk }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      naersk,
+      fenix,
+    }:
+    # Nixpkgs 26.11 no longer supports x86_64-darwin.
+    flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (
+      system:
       let
-        pkgs = import nixpkgs { inherit system; };
-        naersk' = pkgs.callPackage naersk {};
-
-        buildInputs = with pkgs; [
-          pkg-config
-        ] ++ lib.optionals stdenv.isDarwin [
-          darwin.apple_sdk.frameworks.Security
+        pkgs = nixpkgs.legacyPackages.${system};
+        rustToolchain = fenix.packages.${system}.stable.withComponents [
+          "cargo"
+          "clippy"
+          "rustc"
+          "rustfmt"
         ];
+        naersk' = pkgs.callPackage naersk {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
 
       in
       {
@@ -28,7 +48,6 @@
             src = ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config ];
-            inherit buildInputs;
 
             # install man page
             postInstall = ''
@@ -47,18 +66,19 @@
         };
 
         apps = {
-          default = flake-utils.lib.mkApp {
-            drv = self.packages.${system}.default;
+          default = {
+            type = "app";
+            program = pkgs.lib.getExe self.packages.${system}.default;
+            meta.description = self.packages.${system}.default.meta.description;
           };
         };
 
+        formatter = pkgs.nixfmt;
+
         devShells = {
           default = pkgs.mkShell {
-            inherit buildInputs;
-            nativeBuildInputs = with pkgs; [
-              rustc
-              cargo
-              pkg-config
+            inputsFrom = [ self.packages.${system}.default ];
+            packages = with pkgs; [
               cargo-watch
               rust-analyzer
             ];
