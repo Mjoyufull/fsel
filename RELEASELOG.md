@@ -1,21 +1,93 @@
-[Unreleased]
+[4.1.0-nyamabeetle]
 
 Breaking changes
 
-- Raise the minimum supported stable Rust version from 1.94 to 1.99.1.
-- Remove the Intel macOS (`x86_64-darwin`) flake output because current nixpkgs
-  no longer supports it. Apple Silicon macOS and both Linux outputs remain available.
+- Source-build requirements (from pr #119)
+  - Building fsel now requires Rust 1.99.1+ stable, up from 1.94.
+- Nix platform outputs (from pr #119)
+  - Removed the Intel macOS (`x86_64-darwin`) flake output because current nixpkgs no longer supports it.
+  - Linux x86_64, Linux aarch64, and Apple Silicon macOS outputs remain available.
+
+Added
+
+- Word deletion across interactive modes (from pr #116)
+  - Ctrl+W, Ctrl+Backspace, and Ctrl+H remove the last whitespace-delimited word from the search query.
+  - In cclip tag prompts, word deletion edits the active prompt instead of the search query.
+  - The action is configurable through `delete_word`; Ctrl+H also covers terminals that encode Ctrl+Backspace that way.
+- Half-page navigation (from pr #116)
+  - Ctrl+U / Ctrl+D move selection half a page up / down in launcher, dmenu, and cclip modes.
+  - Movement stops at list boundaries instead of wrapping.
+  - Launcher grids move in whole-row increments, with launcher and dmenu movement respecting rotated layouts.
+  - Bindings are configurable through `half_page_up` and `half_page_down`.
 
 Changed
 
-- Refresh direct and transitive dependencies, including `redb` 4.4.0,
-  `ratatui-image` 11.1.0, `resvg` 0.49.0, and `html-escape` 0.3.0.
-- Refresh Nix inputs and use the locked Fenix stable toolchain for builds and the dev shell.
-- Remove the unused `which` dependency.
+- Dependency refresh (from pr #119)
+  - Updated dependencies including redb 4.4.0, ratatui-image 11.1.0, resvg 0.49.0, html-escape 0.3.0, and Tokio 1.54.1.
+  - Removed the unused `which` dependency.
+- Nix builds and development shells (from pr #119)
+  - Use the stable Fenix toolchain pinned in flake.lock for both naersk builds and development shells.
+  - Refreshed Nix inputs, shared package build inputs with the development shell, and added a nixfmt formatter output.
 
 Fixed
 
-- Update Tokio to 1.54.1, addressing RUSTSEC-2026-0386 (I/O safety in `AsyncFd` constructors).
+- Non-UTF-8 dmenu input (from pr #120, addresses #117)
+  - Newline-separated and NUL-separated input no longer fails solely because it contains invalid UTF-8.
+  - Invalid sequences become `�` for display, matching, and text output; invalid bytes are not preserved byte-for-byte.
+  - Valid text and cliphist IDs remain unchanged.
+- FreeBSD compilation compatibility (from pr #114, addresses #112)
+  - Corrected the termios and window-size pointers passed to `libc::openpty` in terminal graphics-probe replay for the FreeBSD bindings.
+- Niri window-rule example (from pr #111)
+  - Replaced the invalid `default-floating-size` entry with `default-column-width` and `default-window-height`.
+- Tokio I/O-safety advisory (from pr #119)
+  - Updated Tokio from 1.53.1 to 1.54.1, addressing RUSTSEC-2026-0386 concerning AsyncFd constructors.
+- Rustix extended-attribute advisory
+  - Updated rustix from 1.1.5 to 1.1.6, addressing RUSTSEC-2026-0486 concerning zero-length buffers in extended-attribute functions.
+  - The affected `fs` feature is not enabled by fsel's current dependency graph; the update removes the affected version from the lockfile.
+
+Technical details
+
+- Shared query-editing and paging helpers handle Unicode character boundaries, whitespace-delimited word deletion, whole-row grid movement, and saturating selection offsets.
+- Cclip half-page movement applies during normal selection, not while editing tag prompts.
+- Dmenu reads byte-separated records with `BufRead::read_until` before applying `String::from_utf8_lossy`.
+- Newline input retains CRLF handling; NUL-separated input continues skipping empty records. Underlying I/O errors still propagate.
+- Replaced deprecated atomic `fetch_update` calls with `try_update` following the minimum Rust version increase.
+- Added regression coverage for word deletion, default bindings, paging boundaries, rotation, invalid UTF-8, line endings, cliphist ID extraction, and read-error propagation.
+
+Documentation
+
+- USAGE.md, fsel.1, config.toml, and keybinds.toml: documented word deletion and half-page navigation.
+- USAGE.md: documented non-UTF-8 handling in dmenu mode.
+- README.md: corrected the Niri example and updated build requirements.
+- CONTRIBUTING.md: documented the Rust requirement and pinned Nix toolchain.
+- Release version references and the man-page date updated for 4.1.0-nyamabeetle.
+
+Notes
+
+- SemVer: MINOR (4.0.0 -> 4.1.0) for the new interactive editing and navigation actions.
+- Source-build and Nix platform compatibility changes are listed above; existing configuration remains supported.
+- Rationale: faster query editing and navigation, usable cliphist input even with invalid UTF-8, and fixes for FreeBSD builds and the Niri example.
+- The FreeBSD fix addresses a reported compilation failure, not a claim of comprehensive testing across every BSD platform.
+
+Contributors
+
+- @coko7 — word deletion, half-page navigation, tests, and documentation (pr #116).
+- @Mjoyufull — dependency, Rust, and Nix updates; non-UTF-8 dmenu fix (pr #119, pr #120).
+- @Marbowls — co-maintainer; FreeBSD compatibility fix (pr #114).
+- @bitterhalt — Niri window-rule correction (pr #111).
+- Issue reports: @Doom-Git (#112, including confirmation of the fix) and @silverwind63 (#117).
+
+Compatibility
+
+- Language/runtime: Rust 1.99.1+ stable; edition remains 2024.
+- Platforms: GNU/Linux and *BSD; FreeBSD compilation compatibility improved.
+- Nix outputs: x86_64-linux, aarch64-linux, and aarch64-darwin.
+- Configuration: new keybind actions have defaults; no configuration migration introduced.
+- Database: no application-level table schema changes introduced by this release.
+- Breaking: source builds require the newer Rust toolchain, and the Intel macOS Nix output is no longer provided.
+- Dmenu text output is lossy for invalid UTF-8; it is not a raw-byte round trip.
+
+---
 
 [4.0.0-nyamabeetle]
 

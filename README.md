@@ -58,7 +58,7 @@ Get up and running in 30 seconds:
 nix run github:Mjoyufull/fsel
 
 # Or install from Cargo
-cargo install fsel@4.0.0-nyamabeetle
+cargo install fsel@4.1.0-nyamabeetle
 
 # Launch fsel
 fsel
@@ -105,11 +105,11 @@ All layouts are opt-in; see [panel and grid options](./USAGE.md#panel-layouts).
 
 * Build and install via Cargo:
     ```sh
-    $ cargo install fsel@4.0.0-nyamabeetle
+    $ cargo install fsel@4.1.0-nyamabeetle
     ```
 * To update later:
     ```sh
-    $ cargo install fsel@4.0.0-nyamabeetle --force
+    $ cargo install fsel@4.1.0-nyamabeetle --force
     ```
 * Or install latest version (check [releases](https://github.com/Mjoyufull/fsel/releases)):
     ```sh

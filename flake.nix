@@ -1,5 +1,5 @@
 {
-  description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - 4.0.0-nyamabeetle";
+  description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - 4.1.0-nyamabeetle";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -44,7 +44,7 @@
         packages = {
           default = naersk'.buildPackage {
             pname = "fsel";
-            version = "4.0.0-nyamabeetle";
+            version = "4.1.0-nyamabeetle";
             src = ./.;
 
             nativeBuildInputs = with pkgs; [ pkg-config ];
@@ -55,7 +55,7 @@
             '';
 
             meta = with pkgs.lib; {
-              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - 4.0.0-nyamabeetle";
+              description = "Fast TUI app launcher and fuzzy finder for GNU/Linux and *BSD - 4.1.0-nyamabeetle";
               homepage = "https://github.com/Mjoyufull/fsel";
               license = licenses.bsd2;
               maintainers = [ ];
